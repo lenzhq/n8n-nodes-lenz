@@ -6,6 +6,7 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+// eslint-disable-next-line @n8n/community-nodes/no-restricted-imports -- bundled via esbuild postbuild step (scripts/bundle-deps.mjs), zero runtime dependency in the compiled dist output
 import {
 	Lenz as LenzClient,
 	LenzError,
