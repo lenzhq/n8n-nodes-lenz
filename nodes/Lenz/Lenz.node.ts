@@ -204,6 +204,8 @@ export class Lenz implements INodeType {
 								{ message: err.message, description: err.toString() },
 								{
 									itemIndex,
+									message: err.message,
+									description: err.toString(),
 									httpCode: err.statusCode ? String(err.statusCode) : undefined,
 								},
 							);
@@ -291,6 +293,8 @@ export class Lenz implements INodeType {
 						{ message: error.message, description: error.toString() },
 						{
 							itemIndex,
+							message: error.message,
+							description: error.toString(),
 							httpCode: error.statusCode ? String(error.statusCode) : undefined,
 						},
 					);

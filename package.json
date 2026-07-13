@@ -23,7 +23,8 @@
         "lint:fix": "n8n-node lint --fix",
         "release": "n8n-node release",
         "prepublishOnly": "n8n-node prerelease",
-        "postbuild": "node scripts/bundle-deps.mjs"
+        "postbuild": "node scripts/bundle-deps.mjs",
+        "test": "jest"
     },
     "files": [
         "dist"
@@ -43,11 +44,14 @@
     },
     "devDependencies": {
         "@n8n/node-cli": "*",
+        "@types/jest": "^30.0.0",
         "esbuild": "^0.28.1",
         "eslint": "9.32.0",
+        "jest": "^30.4.2",
         "lenz-io": "^2.3.0",
         "prettier": "3.6.2",
         "release-it": "^19.0.4",
+        "ts-jest": "^29.4.11",
         "typescript": "5.9.2"
     },
     "peerDependencies": {
