@@ -11,6 +11,7 @@ This is an n8n community node. It lets you use **Lenz** in your n8n workflows.
 [Credentials](#credentials)
 [Compatibility](#compatibility)
 [Usage](#usage)
+[Example workflow](#example-workflow)
 [Resources](#resources)
 [Version history](#version-history)
 
@@ -50,6 +51,24 @@ Built against `n8n-workflow` (n8n API version 1) and tested against n8n v2.29.x.
 
 New to n8n? See the [Try it out](https://docs.n8n.io/try-it-out/) documentation to get started with the basics first.
 
+## Example workflow
+
+A simple "fact-check gate" pattern — verify an LLM's output before acting on it:
+
+```
+[LLM node]  ──▶  [Lenz node]  ──▶  [IF node]  ──┬─▶ (true)  continue normally
+ generates          Operation:        checks         └─▶ (false) route to human review
+ an answer          Verify (Deep)     {{ $json.passed }}
+                     Claim: {{ $json.text }}
+```
+
+1. Add an **LLM node** (or any node producing text) upstream.
+2. Add the **Lenz node**, set Operation to **Verify (Deep)**, and set the Claim field to an expression referencing the upstream output, e.g. `{{ $json.text }}`.
+3. Add an **IF node** after Lenz with the condition `{{ $json.passed }}` **is true**.
+4. Wire the true branch to continue the workflow normally, and the false branch to whatever your "needs review" path is (Slack alert, email, a manual-approval step, etc.).
+
+For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~5-10s instead of ~90s.
+
 ## Resources
 
 * [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
@@ -59,3 +78,5 @@ New to n8n? See the [Try it out](https://docs.n8n.io/try-it-out/) documentation 
 ## Version history
 
 * **0.1.0** — Initial release. Verify (Deep), Assess (Fast), Extract Claims, Ask Follow-Up, and Check Usage operations; API-key credential with live test endpoint.
+* **0.1.1 - 0.1.3** — Publishing pipeline fixes (GitHub Actions provenance, npm trusted publishing).
+* **0.1.4** — Bundled `lenz-io` at build time (zero runtime dependencies, required for n8n Cloud verification); added a Jest test suite; fixed an error-message bug in the `NodeApiError` wrapping; replaced the placeholder icon with the real Lenz brand mark.
