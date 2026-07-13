@@ -13,6 +13,14 @@
 // exports (e.g. the LenzWebhooks signature-verification code and its
 // Buffer/node:buffer usage, which this node never imports) at the
 // named-export level.
+//
+// `inject`/`define` below replace lenz-io's remaining uses of n8n Cloud's
+// restricted globals (setTimeout/clearTimeout/process/console/globalThis)
+// with equivalents that resolve as local bindings instead of ambient
+// globals -- see scripts/globals-shim.mjs for the setTimeout/clearTimeout/
+// console/process replacements. globalThis's only use
+// (`globalThis.fetch.bind(globalThis)`, the default fetch implementation)
+// collapses onto bare `fetch`, which is a real, unrestricted Node global.
 import { build } from 'esbuild';
 
 await build({
@@ -24,6 +32,14 @@ await build({
 	format: 'cjs',
 	target: 'node18',
 	treeShaking: true,
+	inject: ['scripts/globals-shim.mjs'],
+	define: {
+		// The only use is `globalThis.fetch.bind(globalThis)` as a default
+		// when no fetch override is supplied. `fetch` itself is a real,
+		// unrestricted Node global, so both occurrences collapse onto it.
+		'globalThis.fetch': 'fetch',
+		globalThis: 'fetch',
+	},
 	external: ['n8n-workflow'],
 });
 
