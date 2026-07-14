@@ -113,7 +113,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['ask'] },
 				},
-				description: 'The verification_id from a completed Verify (Deep) result (not a task_id)',
+				description: 'The verification_id from a successful Verify (Deep) result. A timed-out or needs-clarification result returns a task_id instead, which won\'t work here.',
 			},
 			{
 				displayName: 'Question',
