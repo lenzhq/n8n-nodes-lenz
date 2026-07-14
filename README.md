@@ -69,6 +69,23 @@ A simple "fact-check gate" pattern — verify an LLM's output before acting on i
 
 For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~5-10s instead of ~90s.
 
+### Follow-up questions on a completed verification
+
+Ask a grounded question about the evidence behind a Verify (Deep) result, by chaining two Lenz nodes:
+
+```
+[Lenz node]  ──▶  [Lenz node]
+ Operation:          Operation:
+ Verify (Deep)       Ask Follow-Up
+                     Verification ID: {{ $json.verification_id }}
+                     Question: "What are the main sources supporting this verdict?"
+```
+
+1. Add a **Lenz node**, set Operation to **Verify (Deep)**, and run it.
+2. Add a second **Lenz node** after it, with Operation set to **Ask Follow-Up**.
+3. Set the Verification ID field to an expression referencing the first node's output: `{{ $json.verification_id }}`.
+4. Keep the Question field as a fixed string (e.g. `"What are the main sources supporting this verdict?"`) — it works for whatever claim was just verified, since only the Verification ID needs to change per run.
+
 ## Resources
 
 * [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
