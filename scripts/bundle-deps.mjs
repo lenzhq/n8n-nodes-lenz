@@ -1,17 +1,45 @@
 // Inlines lenz-io (and its dependency tree) into the compiled node output so
 // the published package has zero runtime dependencies, as required for n8n
-// Cloud verification. tsc still does the type-checking and declaration
-// output; this just re-bundles the one file that imports an external SDK.
+// Cloud verification. tsc still runs first (via `n8n-node build`) for
+// type-checking and .d.ts declaration output; this step then re-bundles
+// Lenz.node.js from TypeScript SOURCE, overwriting tsc's compiled output.
+//
+// Bundling from source (real `import { Lenz } from 'lenz-io'` syntax)
+// instead of from tsc's already-compiled dist file matters: tsc downlevels
+// our import to `require("lenz-io")`, and esbuild resolves a require() call
+// through lenz-io's CJS entry point, wrapping it in a CJS-interop shim that
+// can't tree-shake individual named exports. Bundling the original ESM
+// import lets esbuild resolve lenz-io's ESM build and tree-shake unused
+// exports (e.g. the LenzWebhooks signature-verification code and its
+// Buffer/node:buffer usage, which this node never imports) at the
+// named-export level.
+//
+// `inject`/`define` below replace lenz-io's remaining uses of n8n Cloud's
+// restricted globals (setTimeout/clearTimeout/process/console/globalThis)
+// with equivalents that resolve as local bindings instead of ambient
+// globals -- see scripts/globals-shim.mjs for the setTimeout/clearTimeout/
+// console/process replacements. globalThis's only use
+// (`globalThis.fetch.bind(globalThis)`, the default fetch implementation)
+// collapses onto bare `fetch`, which is a real, unrestricted Node global.
 import { build } from 'esbuild';
 
 await build({
-	entryPoints: ['dist/nodes/Lenz/Lenz.node.js'],
+	entryPoints: ['nodes/Lenz/Lenz.node.ts'],
 	outfile: 'dist/nodes/Lenz/Lenz.node.js',
 	allowOverwrite: true,
 	bundle: true,
 	platform: 'node',
 	format: 'cjs',
 	target: 'node18',
+	treeShaking: true,
+	inject: ['scripts/globals-shim.mjs'],
+	define: {
+		// The only use is `globalThis.fetch.bind(globalThis)` as a default
+		// when no fetch override is supplied. `fetch` itself is a real,
+		// unrestricted Node global, so both occurrences collapse onto it.
+		'globalThis.fetch': 'fetch',
+		globalThis: 'fetch',
+	},
 	external: ['n8n-workflow'],
 });
 
