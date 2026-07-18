@@ -1,6 +1,6 @@
 {
     "name": "n8n-nodes-lenz",
-    "version": "0.1.7",
+    "version": "0.1.8",
     "description": "Fact-check claims and catch AI hallucinations with Lenz - verified, sourced verdicts inside your n8n workflows.",
     "license": "MIT",
     "homepage": "https://lenz.io",
@@ -23,7 +23,6 @@
         "lint:fix": "n8n-node lint --fix",
         "release": "n8n-node release",
         "prepublishOnly": "n8n-node prerelease",
-        "postbuild": "node scripts/bundle-deps.mjs",
         "test": "jest"
     },
     "files": [
@@ -45,10 +44,8 @@
     "devDependencies": {
         "@n8n/node-cli": "*",
         "@types/jest": "^30.0.0",
-        "esbuild": "^0.28.1",
         "eslint": "9.32.0",
         "jest": "^30.4.2",
-        "lenz-io": "^2.3.0",
         "prettier": "3.6.2",
         "release-it": "^19.0.4",
         "ts-jest": "^29.4.11",
