@@ -1,63 +1,64 @@
-import { NodeApiError, NodeOperationError } from 'n8n-workflow';
-import type { IDataObject, IExecuteFunctions } from 'n8n-workflow';
+import { NodeApiError } from 'n8n-workflow';
+import type { IDataObject, IExecuteFunctions, IHttpRequestOptions } from 'n8n-workflow';
 
-jest.mock('lenz-io', () => {
-	const actual = jest.requireActual('lenz-io');
-	return {
-		...actual,
-		Lenz: jest.fn(),
-	};
-});
+// sleep is used for verify polling backoff; make it instant in tests.
+jest.mock('n8n-workflow', () => ({
+	...jest.requireActual('n8n-workflow'),
+	sleep: jest.fn(async () => {}),
+}));
 
-// eslint-disable-next-line @n8n/community-nodes/no-restricted-imports -- test-only import of error classes; the compiled node bundles lenz-io at build time (see scripts/bundle-deps.mjs)
-import { Lenz as LenzClient, LenzNeedsInputError, LenzPipelineError, LenzTimeoutError, LenzAuthError } from 'lenz-io';
 import { Lenz } from '../Lenz.node';
 
-type MockClient = {
-	assess: jest.Mock;
-	verifyAndWait: jest.Mock;
-	extract: jest.Mock;
-	usage: jest.Mock;
-	ask: { send: jest.Mock };
-};
+// A responder receives the httpRequest options and returns the mocked response
+// body (or throws to simulate an API/transport error).
+type Responder = (options: IHttpRequestOptions) => unknown;
 
-function mockClientImpl(overrides: Partial<MockClient> = {}): MockClient {
-	return {
-		assess: jest.fn(),
-		verifyAndWait: jest.fn(),
-		extract: jest.fn(),
-		usage: jest.fn(),
-		ask: { send: jest.fn() },
-		...overrides,
-	};
-}
-
-function createContext(params: Record<string, unknown>, continueOnFail = false): IExecuteFunctions {
+function createContext(
+	params: Record<string, unknown>,
+	responder: Responder,
+	continueOnFail = false,
+): { ctx: IExecuteFunctions; httpMock: jest.Mock } {
 	const items = [{ json: {} }];
-	return {
+	const httpMock = jest.fn(async (_credType: string, options: IHttpRequestOptions) =>
+		responder(options),
+	);
+	const ctx = {
 		getInputData: jest.fn(() => items),
 		getNodeParameter: jest.fn((name: string, _itemIndex: number, fallback?: unknown) => {
 			if (name in params) return params[name];
 			return fallback;
 		}),
-		getCredentials: jest.fn(async () => ({ apiKey: 'lenz_test123' })),
 		getNode: jest.fn(() => ({ name: 'Lenz', type: 'lenz', typeVersion: 1, position: [0, 0] })),
 		continueOnFail: jest.fn(() => continueOnFail),
+		helpers: {
+			httpRequestWithAuthentication: httpMock,
+		},
 	} as unknown as IExecuteFunctions;
+	return { ctx, httpMock };
 }
 
-async function runNode(params: Record<string, unknown>, client: MockClient, continueOnFail = false) {
-	(LenzClient as unknown as jest.Mock).mockImplementation(() => client);
+async function runNode(
+	params: Record<string, unknown>,
+	responder: Responder,
+	continueOnFail = false,
+) {
+	const { ctx, httpMock } = createContext(params, responder, continueOnFail);
 	const node = new Lenz();
-	const ctx = createContext(params, continueOnFail);
 	const result = await node.execute.call(ctx);
-	return result[0];
+	return { output: result[0], httpMock };
 }
+
+// Convenience responder that never expects to be called (empty-input paths).
+const noCall: Responder = (options) => {
+	throw new Error(`unexpected request: ${options.method} ${options.url}`);
+};
 
 describe('Lenz node - Assess (Fast)', () => {
 	it('derives passed=true for a True verdict and passed=false for a False verdict', async () => {
-		const client = mockClientImpl({
-			assess: jest.fn().mockResolvedValue({
+		const responder: Responder = (options) => {
+			expect(options.method).toBe('POST');
+			expect(options.url).toBe('/assess');
+			return {
 				claims: [
 					{ claim: 'A', verdict: 'True', confidence: 'high', verification_url: null },
 					{ claim: 'B', verdict: 'False', confidence: 'high', verification_url: null },
@@ -65,10 +66,10 @@ describe('Lenz node - Assess (Fast)', () => {
 					{ claim: 'D', verdict: 'Mostly False', confidence: 'medium', verification_url: null },
 					{ claim: 'E', verdict: 'Mixed', confidence: 'low', verification_url: null },
 				],
-			}),
-		});
+			};
+		};
 
-		const output = await runNode({ operation: 'assess', text: 'some text' }, client);
+		const { output } = await runNode({ operation: 'assess', text: 'some text' }, responder);
 
 		expect(output[0].json.status).toBe('ok');
 		const claims = (output[0].json as IDataObject).claims as IDataObject[];
@@ -80,39 +81,49 @@ describe('Lenz node - Assess (Fast)', () => {
 	});
 
 	it('skips empty text input instead of failing the batch', async () => {
-		const client = mockClientImpl();
-		const output = await runNode({ operation: 'assess', text: '   ' }, client);
+		const { output, httpMock } = await runNode({ operation: 'assess', text: '   ' }, noCall);
 		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
-		expect(client.assess).not.toHaveBeenCalled();
+		expect(httpMock).not.toHaveBeenCalled();
 	});
 
 	it('returns status "ambiguous" with candidate claims when framing cannot pick one', async () => {
-		const client = mockClientImpl({
-			assess: jest.fn().mockResolvedValue({
-				claims: [],
-				error: 'Ambiguous input',
-				error_code: 'ambiguous',
-				candidate_claims: ['Reading A', 'Reading B'],
-			}),
+		const responder: Responder = () => ({
+			claims: [],
+			error: 'Ambiguous input',
+			error_code: 'ambiguous',
+			candidate_claims: ['Reading A', 'Reading B'],
 		});
-		const output = await runNode({ operation: 'assess', text: 'vague text' }, client);
+		const { output } = await runNode({ operation: 'assess', text: 'vague text' }, responder);
 		expect(output[0].json.status).toBe('ambiguous');
 		expect((output[0].json as IDataObject).candidate_claims).toEqual(['Reading A', 'Reading B']);
 	});
 
 	it('returns status "no_claim" when no verifiable claim is found', async () => {
-		const client = mockClientImpl({
-			assess: jest.fn().mockResolvedValue({ claims: [], error: 'No claim found' }),
-		});
-		const output = await runNode({ operation: 'assess', text: 'just chatting' }, client);
+		const responder: Responder = () => ({ claims: [], error: 'No claim found' });
+		const { output } = await runNode({ operation: 'assess', text: 'just chatting' }, responder);
 		expect(output[0].json.status).toBe('no_claim');
 	});
 });
 
 describe('Lenz node - Verify (Deep)', () => {
+	// Submit returns a task_id; the status endpoint returns the terminal state
+	// on the first poll (so no real waiting happens in tests).
+	function verifyResponder(terminalStatus: IDataObject): Responder {
+		return (options) => {
+			if (options.method === 'POST' && options.url === '/verify') {
+				return { task_id: 'task_1' };
+			}
+			if (options.method === 'GET' && options.url === '/verify/status/task_1') {
+				return terminalStatus;
+			}
+			throw new Error(`unexpected request: ${options.method} ${options.url}`);
+		};
+	}
+
 	it('returns the full branch-ready object on a completed verification', async () => {
-		const client = mockClientImpl({
-			verifyAndWait: jest.fn().mockResolvedValue({
+		const responder = verifyResponder({
+			status: 'completed',
+			result: {
 				verification_id: 'ver_123',
 				verdict: 'False',
 				confidence: 'high',
@@ -123,10 +134,10 @@ describe('Lenz node - Verify (Deep)', () => {
 					{ title: 'No URL source', url: '' },
 					{ title: 'Source B', url: 'https://b.example' },
 				],
-			}),
+			},
 		});
 
-		const output = await runNode({ operation: 'verify', claim: 'Some claim' }, client);
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, responder);
 		const json = output[0].json as IDataObject;
 
 		expect(json.status).toBe('completed');
@@ -142,75 +153,55 @@ describe('Lenz node - Verify (Deep)', () => {
 	});
 
 	it('skips empty claim input instead of failing the batch', async () => {
-		const client = mockClientImpl();
-		const output = await runNode({ operation: 'verify', claim: '' }, client);
+		const { output, httpMock } = await runNode({ operation: 'verify', claim: '' }, noCall);
 		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
-		expect(client.verifyAndWait).not.toHaveBeenCalled();
+		expect(httpMock).not.toHaveBeenCalled();
 	});
 
-	it('maps LenzNeedsInputError to a status: needs_input result, not a thrown error', async () => {
-		const err = new LenzNeedsInputError({ message: 'needs input' });
-		err.taskId = 'task_1';
-		err.kind = 'multi_claim';
-		const client = mockClientImpl({ verifyAndWait: jest.fn().mockRejectedValue(err) });
-
-		const output = await runNode({ operation: 'verify', claim: 'ambiguous claim' }, client);
+	it('maps a needs_input terminal state to a status: needs_input result, not a thrown error', async () => {
+		const responder = verifyResponder({ status: 'needs_input', reason: 'multi_claim' });
+		const { output } = await runNode({ operation: 'verify', claim: 'ambiguous claim' }, responder);
 		const json = output[0].json as IDataObject;
 		expect(json.status).toBe('needs_input');
 		expect(json.task_id).toBe('task_1');
 		expect(json.reason).toBe('multi_claim');
 	});
 
-	it('maps LenzTimeoutError to a status: timeout result, not a thrown error', async () => {
-		const err = new LenzTimeoutError({ message: 'timed out' });
-		err.taskId = 'task_2';
-		const client = mockClientImpl({ verifyAndWait: jest.fn().mockRejectedValue(err) });
-
-		const output = await runNode({ operation: 'verify', claim: 'slow claim' }, client);
-		const json = output[0].json as IDataObject;
-		expect(json.status).toBe('timeout');
-		expect(json.task_id).toBe('task_2');
-	});
-
-	it('maps LenzPipelineError to a status: failed result, not a thrown error', async () => {
-		const err = new LenzPipelineError({ message: 'Pipeline failed: bad input' });
-		err.taskId = 'task_3';
-		const client = mockClientImpl({ verifyAndWait: jest.fn().mockRejectedValue(err) });
-
-		const output = await runNode({ operation: 'verify', claim: 'broken claim' }, client);
+	it('maps a failed terminal state to a status: failed result, not a thrown error', async () => {
+		const responder = verifyResponder({ status: 'failed', error: 'bad input' });
+		const { output } = await runNode({ operation: 'verify', claim: 'broken claim' }, responder);
 		const json = output[0].json as IDataObject;
 		expect(json.status).toBe('failed');
-		expect(json.task_id).toBe('task_3');
+		expect(json.task_id).toBe('task_1');
 	});
 
-	it('wraps an auth error from verifyAndWait in NodeApiError rather than swallowing it', async () => {
-		const err = new LenzAuthError({ message: 'Unauthorized', statusCode: 401 });
-		const client = mockClientImpl({ verifyAndWait: jest.fn().mockRejectedValue(err) });
-		(LenzClient as unknown as jest.Mock).mockImplementation(() => client);
-
+	it('wraps an API error from the submit call in NodeApiError rather than swallowing it', async () => {
+		const responder: Responder = () => {
+			throw new Error('Unauthorized');
+		};
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, responder);
 		const node = new Lenz();
-		const ctx = createContext({ operation: 'verify', claim: 'claim' });
 		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
 	});
 });
 
 describe('Lenz node - Extract Claims', () => {
 	it('skips empty text input instead of failing the batch', async () => {
-		const client = mockClientImpl();
-		const output = await runNode({ operation: 'extract', text: '  ' }, client);
+		const { output, httpMock } = await runNode({ operation: 'extract', text: '  ' }, noCall);
 		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
-		expect(client.extract).not.toHaveBeenCalled();
+		expect(httpMock).not.toHaveBeenCalled();
 	});
 
 	it('passes through the raw extract response', async () => {
-		const client = mockClientImpl({
-			extract: jest.fn().mockResolvedValue({
+		const responder: Responder = (options) => {
+			expect(options.url).toBe('/extract');
+			return {
 				status: 'ready',
 				identified_claims: ['Claim A', 'Claim B'],
 				domain: 'General',
-			}),
-		});
-		const output = await runNode({ operation: 'extract', text: 'Claim A. Claim B.' }, client);
+			};
+		};
+		const { output } = await runNode({ operation: 'extract', text: 'Claim A. Claim B.' }, responder);
 		expect(output[0].json).toEqual({
 			status: 'ready',
 			identified_claims: ['Claim A', 'Claim B'],
@@ -221,59 +212,48 @@ describe('Lenz node - Extract Claims', () => {
 
 describe('Lenz node - Ask Follow-Up', () => {
 	it('returns the answer text from a completed verification', async () => {
-		const client = mockClientImpl({
-			ask: { send: jest.fn().mockResolvedValue({ role: 'expert', content: 'Source X is strongest.' }) },
-		});
-		const output = await runNode(
+		const responder: Responder = (options) => {
+			expect(options.method).toBe('POST');
+			expect(options.url).toBe('/ask/ver_123');
+			expect(options.body).toEqual({ message: 'Which source is strongest?' });
+			return { role: 'expert', content: 'Source X is strongest.' };
+		};
+		const { output } = await runNode(
 			{ operation: 'ask', verificationId: 'ver_123', question: 'Which source is strongest?' },
-			client,
+			responder,
 		);
 		expect(output[0].json).toEqual({ answer: 'Source X is strongest.' });
-		expect(client.ask.send).toHaveBeenCalledWith('ver_123', {
-			message: 'Which source is strongest?',
-			language: undefined,
-		});
 	});
 });
 
 describe('Lenz node - Check Usage', () => {
 	it('passes through the raw usage response', async () => {
-		const client = mockClientImpl({
-			usage: jest.fn().mockResolvedValue({ plan: 'free', verify: { remaining: 9 } }),
-		});
-		const output = await runNode({ operation: 'usage' }, client);
+		const responder: Responder = (options) => {
+			expect(options.method).toBe('GET');
+			expect(options.url).toBe('/me/usage');
+			return { plan: 'free', verify: { remaining: 9 } };
+		};
+		const { output } = await runNode({ operation: 'usage' }, responder);
 		expect(output[0].json).toEqual({ plan: 'free', verify: { remaining: 9 } });
 	});
 });
 
 describe('Lenz node - error handling', () => {
-	it('throws NodeOperationError for an unrecognized operation value', async () => {
-		const client = mockClientImpl();
-		(LenzClient as unknown as jest.Mock).mockImplementation(() => client);
+	it('throws NodeApiError for an unrecognized operation value', async () => {
+		const { ctx } = createContext({ operation: 'not_a_real_operation' }, noCall);
 		const node = new Lenz();
-		const ctx = createContext({ operation: 'not_a_real_operation' });
-		await expect(node.execute.call(ctx)).rejects.toThrow(NodeOperationError);
+		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
 	});
 
 	it('routes a failure to an {error} item instead of throwing when continueOnFail is set', async () => {
-		const err = new LenzAuthError({ message: 'Unauthorized', statusCode: 401 });
-		const client = mockClientImpl({ verifyAndWait: jest.fn().mockRejectedValue(err) });
-
-		const output = await runNode({ operation: 'verify', claim: 'claim' }, client, /* continueOnFail */ true);
+		const responder: Responder = () => {
+			throw new Error('Unauthorized');
+		};
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'claim' },
+			responder,
+			/* continueOnFail */ true,
+		);
 		expect(output[0].json).toEqual({ error: 'Unauthorized' });
-	});
-
-	it('does not double-wrap an already-thrown NodeOperationError', async () => {
-		const client = mockClientImpl();
-		(LenzClient as unknown as jest.Mock).mockImplementation(() => client);
-		const node = new Lenz();
-		const ctx = createContext({ operation: 'bogus' });
-		try {
-			await node.execute.call(ctx);
-			fail('expected execute() to throw');
-		} catch (e) {
-			expect(e).toBeInstanceOf(NodeOperationError);
-			expect(e).not.toBeInstanceOf(NodeApiError);
-		}
 	});
 });

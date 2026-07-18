@@ -90,7 +90,7 @@ Ask a grounded question about the evidence behind a Verify (Deep) result, by cha
 
 * [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
 * [Lenz API documentation](https://lenz.io/developers)
-* [lenz-io Node SDK](https://github.com/lenzhq/lenz-io-node) (this node is a thin wrapper around it)
+* [lenz-io Node SDK](https://github.com/lenzhq/lenz-io-node) (a standalone SDK for the same Lenz API, if you're building outside n8n)
 
 ## Version history
 
@@ -100,3 +100,4 @@ Ask a grounded question about the evidence behind a Verify (Deep) result, by cha
 * **0.1.5** — Corrected the maintainer email in `package.json` to match the npm account.
 * **0.1.6** — Fixed every violation found by n8n's official `@n8n/scan-community-package` compliance scanner: test files no longer ship in the package; the bundled `lenz-io` SDK is properly tree-shaken (dropping unused webhook-signature-verification code); replaced remaining restricted-global usage (`setTimeout`, `process`, `console`, `globalThis`) with scanner-safe equivalents; and stopped emitting unused `.d.ts` declaration files. Also fixed a dormant bug in the npm publish workflow.
 * **0.1.7** — Clarified the Verification ID field description and added an Ask Follow-Up wiring example to the README.
+* **0.1.8** — Rewrote the node to call the Lenz REST API directly via n8n's `httpRequestWithAuthentication` helper, removing the `lenz-io` SDK dependency entirely (zero runtime dependencies, no build-time bundling). This resolves the source-level restricted-import violations required for n8n Cloud verification.

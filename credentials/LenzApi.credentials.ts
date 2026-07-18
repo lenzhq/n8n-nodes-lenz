@@ -1,4 +1,9 @@
-import type { ICredentialTestRequest, ICredentialType, INodeProperties } from 'n8n-workflow';
+import type {
+	IAuthenticateGeneric,
+	ICredentialTestRequest,
+	ICredentialType,
+	INodeProperties,
+} from 'n8n-workflow';
 
 export class LenzApi implements ICredentialType {
 	name = 'lenzApi';
@@ -21,14 +26,20 @@ export class LenzApi implements ICredentialType {
 		},
 	];
 
+	authenticate: IAuthenticateGeneric = {
+		type: 'generic',
+		properties: {
+			headers: {
+				Authorization: '=Bearer {{$credentials.apiKey}}',
+			},
+		},
+	};
+
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: 'https://lenz.io/api/v1',
 			url: '/me/usage',
 			method: 'GET',
-			headers: {
-				Authorization: '=Bearer {{$credentials.apiKey}}',
-			},
 		},
 	};
 }
