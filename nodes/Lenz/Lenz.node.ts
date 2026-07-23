@@ -11,6 +11,11 @@ import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8
 
 const BASE_URL = 'https://lenz.io/api/v1';
 
+// Identifies requests coming from this node so the Lenz backend can attribute
+// API usage to the n8n integration (via the User-Agent header). Keep the
+// version in sync with package.json on each release.
+const USER_AGENT = 'n8n-nodes-lenz/0.1.9';
+
 // Verify (Deep) is async server-side: submit returns a task_id, then we poll
 // the status endpoint until it reaches a terminal state. Backoff mirrors the
 // Lenz API's recommended 2s/4s/8s cadence, capped by the overall deadline.
@@ -159,6 +164,7 @@ export class Lenz implements INodeType {
 				baseURL: BASE_URL,
 				url: path,
 				json: true,
+				headers: { 'User-Agent': USER_AGENT },
 			};
 			if (body !== undefined) {
 				options.body = body;

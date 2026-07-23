@@ -238,6 +238,18 @@ describe('Lenz node - Check Usage', () => {
 	});
 });
 
+describe('Lenz node - client identification', () => {
+	it('sends a User-Agent identifying the n8n node on every request', async () => {
+		let seen: unknown;
+		const responder: Responder = (options) => {
+			seen = options.headers?.['User-Agent'];
+			return { plan: 'free' };
+		};
+		await runNode({ operation: 'usage' }, responder);
+		expect(seen).toMatch(/^n8n-nodes-lenz\//);
+	});
+});
+
 describe('Lenz node - error handling', () => {
 	it('throws NodeApiError for an unrecognized operation value', async () => {
 		const { ctx } = createContext({ operation: 'not_a_real_operation' }, noCall);
