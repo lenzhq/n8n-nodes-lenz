@@ -21,15 +21,51 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 
 ## Operations
 
+Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 stay on node version 1, which shows the original flat operation list — existing workflows are unaffected.)
+
+### Claim — check something
+
 | Operation | What it does |
 |---|---|
-| **Verify (Deep)** *(default)* | Full 8-model pipeline (research → debate → adjudication), ~90 seconds. Returns a verdict, confidence, `lenz_score` (1-10), sourced citations, and an executive summary. Reserve for high-stakes claims that need a thorough, cited answer. |
+| **Verify (Deep)** *(default)* | Full 8-model pipeline (research → debate → adjudication), ~90 seconds. Returns a verdict, confidence, `lenz_score` (1-10), `key_finding`, sourced citations, and an executive summary. Reserve for high-stakes claims that need a thorough, cited answer. |
 | **Assess (Fast)** | A quick 3-model panel verdict, ~5-10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. |
 | **Extract Claims** | Free — pulls the verifiable factual claims out of a block of text without checking them. Useful as a first step before running Assess or Verify on each claim individually. |
-| **Ask Follow-Up** | Asks a question grounded in the full research behind a completed **Verify (Deep)** result. Requires the `verification_id` that Verify returns — not usable standalone. |
-| **Check Usage** | Returns remaining quota per capability (`assess` / `verify` / `ask`), current plan, and when quota resets. |
+
+### Verification — manage submitted and stored work
+
+| Operation | What it does |
+|---|---|
+| **Get Status** | Polls a submitted verification by `task_id`. Pairs with Verify's **Wait for Completion** toggle and with webhook delivery. |
+| **Select Claims** | Resolves a paused verification (see [Ambiguous and multi-claim input](#ambiguous-and-multi-claim-input)). |
+| **Submit Batch** | Submits up to 20 claims at once without waiting. Returns one item per spawned task. |
+| **Get** | Retrieves a stored verification report by `verification_id`. |
+| **Get Many** | Lists the verifications stored against this API key, with **Return All** / **Limit**. |
+| **List Related** | Public verifications semantically related to a given one — useful for "see also" surfaces. |
+| **Delete** | Permanently deletes one of your stored verifications. |
+
+### Ask — follow-up questions
+
+| Operation | What it does |
+|---|---|
+| **Send** | Asks a question grounded in the full research behind a completed **Verify (Deep)** result. Requires the `verification_id` that Verify returns — not usable standalone. |
+| **Get History** | Returns the stored conversation for a verification plus remaining ask quota. |
+| **Reset History** | Deletes the stored conversation for a verification. |
+
+### Account
+
+| Operation | What it does |
+|---|---|
+| **Get Usage** | Returns remaining quota per capability (`assess` / `verify` / `ask` / `extract`), current plan, and when quota resets. |
 
 Every claim-checking operation returns a branch-ready `passed` boolean (derived from the verdict) alongside the raw verdict/confidence/citations, so you can wire an **IF** node directly off the result — e.g. route failed claims to human review.
+
+Verify and Get also expose an **Include Audit Trail** toggle, which adds the adjudication reasoning, debate transcript, per-panelist assessments, and panel agreement under `audit`. It's off by default because it's a lot of data per item.
+
+### Retry safety
+
+Billable calls (Verify, Assess, Extract, Submit Batch, Select Claims) send an `Idempotency-Key` derived from the execution ID, node name, and item index. If n8n retries the node — via **Retry On Fail**, or after a dropped response — Lenz replays the original response instead of charging you a second time. A fresh run of the workflow is a new execution, so it bills normally.
+
+Note that **Assess bills per claim found in the text**, not per request: a paragraph containing five claims spends five assess units.
 
 ## Credentials
 
@@ -86,6 +122,29 @@ Ask a grounded question about the evidence behind a Verify (Deep) result, by cha
 3. Set the Verification ID field to an expression referencing the first node's output: `{{ $json.verification_id }}`.
 4. Keep the Question field as a fixed string (e.g. `"What are the main sources supporting this verdict?"`) — it works for whatever claim was just verified, since only the Verification ID needs to change per run.
 
+### Ambiguous and multi-claim input
+
+Verify pauses rather than guessing when the text isn't a single unambiguous claim. The result comes back with `status: "needs_input"` and a `reason`:
+
+| `reason` | What the node returns | How to continue |
+|---|---|---|
+| `multi_claim` | `claims` — the distinct claims found in your text | Feed the ones you want into **Select Claims** with the same `task_id` |
+| `clarification_required` | `candidates` — the possible readings of one ambiguous claim | Feed the intended reading into **Select Claims** with the same `task_id` |
+| `duplicate_found` | `similar_claims` — existing verifications that already cover this | Reuse one of those `verification_id`s, or rephrase to force a fresh check |
+
+**Select Claims** spawns one independent verification per selected claim and returns one item each, so you can poll them with **Get Status** or collect them via webhook:
+
+```
+[Lenz node]  ──▶  [IF node]  ──▶  [Lenz node]  ──▶  [Lenz node]
+ Verify (Deep)     status ==        Select Claims     Get Status
+                   needs_input      Task ID:          Task ID:
+                                    {{ $json.task_id }}  {{ $json.task_id }}
+                                    Selected Claims:
+                                    {{ $json.claims[0].text }}
+```
+
+A paused task expires **10 minutes** after it pauses, and Select Claims only accepts text that was actually offered — so copy the claim text verbatim rather than retyping it.
+
 ## Resources
 
 * [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
@@ -102,3 +161,4 @@ Ask a grounded question about the evidence behind a Verify (Deep) result, by cha
 * **0.1.7** — Clarified the Verification ID field description and added an Ask Follow-Up wiring example to the README.
 * **0.1.8** — Rewrote the node to call the Lenz REST API directly via n8n's `httpRequestWithAuthentication` helper, removing the `lenz-io` SDK dependency entirely (zero runtime dependencies, no build-time bundling). This resolves the source-level restricted-import violations required for n8n Cloud verification.
 * **0.1.9** — Send a `User-Agent: n8n-nodes-lenz/<version>` header on every API request so Lenz can attribute API usage to the n8n integration.
+* **0.1.10** — Brought the node up to the full Lenz Public API v1 surface. Added operations for batch verification, claim selection, status polling, stored-verification management (get / list / delete / related), and ask history (get / reset). Verify now accepts `source_url`, `webhook_url`, and `visibility`, can skip waiting via **Wait for Completion**, and surfaces the fields the API had been returning but the node discarded — `key_finding`, `domain`, `entities`, `presumed_intent`, `warnings`, `language`, timestamps, full source detail (`snippet` / `source_name` / `date`), and an opt-in `audit` trail. A `needs_input` result now returns the offered claims and a reason-specific next step instead of dead-ending. Billable POSTs send an `Idempotency-Key` so an n8n retry cannot double-charge quota, and every request pins `X-Lenz-API-Version`. Operations are now organised under a **Resource** picker in node version 1.1; nodes already saved on version 1 keep their original flat operation list and behaviour.
