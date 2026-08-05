@@ -128,6 +128,7 @@ describe('Lenz node - Verify (Deep)', () => {
 				verdict: 'False',
 				confidence: 'high',
 				lenz_score: 2,
+				key_finding: 'No official record supports the claim.',
 				executive_summary: 'This claim is false.',
 				sources: [
 					{ title: 'Source A', url: 'https://a.example' },
@@ -144,12 +145,32 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.passed).toBe(false);
 		expect(json.verdict).toBe('False');
 		expect(json.lenz_score).toBe(2);
+		expect(json.key_finding).toBe('No official record supports the claim.');
 		expect(json.verification_id).toBe('ver_123');
 		// url-less sources are filtered out
 		expect(json.citations).toEqual([
 			{ title: 'Source A', url: 'https://a.example' },
 			{ title: 'Source B', url: 'https://b.example' },
 		]);
+	});
+
+	it('defaults key_finding to "" on claims that pre-date the field', async () => {
+		const responder = verifyResponder({
+			status: 'completed',
+			result: {
+				verification_id: 'ver_124',
+				verdict: 'True',
+				confidence: 'high',
+				lenz_score: 9,
+				executive_summary: 'This claim is true.',
+				sources: [],
+			},
+		});
+
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, responder);
+		const json = output[0].json as IDataObject;
+
+		expect(json.key_finding).toBe('');
 	});
 
 	it('skips empty claim input instead of failing the batch', async () => {

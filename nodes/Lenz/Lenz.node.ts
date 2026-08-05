@@ -230,6 +230,10 @@ export class Lenz implements INodeType {
 							verdict: result.verdict ?? null,
 							confidence: result.confidence ?? null,
 							lenz_score: result.lenz_score ?? null,
+							// One declarative sentence stating the finding — the short form to
+							// route into a Slack/email node when the summary is too long. ''
+							// on claims that pre-date the field.
+							key_finding: result.key_finding ?? '',
 							executive_summary: result.executive_summary ?? '',
 							citations: sources
 								.filter((s) => s.url)
