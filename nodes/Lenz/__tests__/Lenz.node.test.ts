@@ -206,6 +206,22 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.presumed_intent).toBe('informative');
 	});
 
+	it('defaults key_finding to "" on claims that pre-date the field', async () => {
+		const responder = verifyResponder({
+			status: 'completed',
+			result: {
+				verification_id: 'ver_124',
+				verdict: 'True',
+				confidence: 'high',
+				lenz_score: 9,
+				executive_summary: 'This claim is true.',
+				sources: [],
+			},
+		});
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, responder);
+		expect((output[0].json as IDataObject).key_finding).toBe('');
+	});
+
 	it('omits the audit trail by default and includes it when asked', async () => {
 		const withoutAudit = await runNode(
 			{ operation: 'verify', claim: 'Some claim' },
