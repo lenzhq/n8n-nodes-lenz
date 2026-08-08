@@ -322,6 +322,18 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.task_id).toBe('task_1');
 	});
 
+	it('fails clearly when submit returns no task_id instead of polling a bad URL', async () => {
+		const { ctx, calls } = createContext({ operation: 'verify', claim: 'Some claim' }, (options) => {
+			if (options.url === '/verify') {
+				return { status: 'queued' }; // no task_id
+			}
+			throw new Error(`should not poll: ${options.url}`);
+		});
+		const node = new Lenz();
+		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
+		expect(calls).toHaveLength(1); // submit only, no status poll
+	});
+
 	it('wraps an API error from the submit call in NodeApiError rather than swallowing it', async () => {
 		const responder: Responder = () => {
 			throw new Error('Unauthorized');
@@ -671,24 +683,46 @@ describe('Lenz node - client identification', () => {
 });
 
 describe('Lenz node - idempotency', () => {
+	const assessResponder: Responder = () => ({
+		claims: [{ claim: 'A', verdict: 'True', confidence: 'high' }],
+	});
+
 	it('sends an Idempotency-Key on billable POSTs so a retry cannot double-charge', async () => {
-		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, () => ({
-			claims: [{ claim: 'A', verdict: 'True', confidence: 'high' }],
-		}));
-		expect(calls[0].headers?.['Idempotency-Key']).toBe('n8n:exec-1:Lenz:assess:0');
+		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, assessResponder);
+		expect(calls[0].headers?.['Idempotency-Key']).toMatch(/^n8n:exec-1:Lenz:assess:0:[0-9a-z]+$/);
+	});
+
+	it('repeats the same key for identical input so a retry replays instead of re-charging', async () => {
+		const first = await runNode({ operation: 'assess', text: 'some text' }, assessResponder);
+		const second = await runNode({ operation: 'assess', text: 'some text' }, assessResponder);
+		expect(first.calls[0].headers?.['Idempotency-Key']).toBe(
+			second.calls[0].headers?.['Idempotency-Key'],
+		);
 	});
 
 	it('scopes the key per item so separate claims are charged separately', async () => {
 		const { calls } = await runNode(
 			{ operation: 'assess', text: 'some text' },
-			() => ({ claims: [{ claim: 'A', verdict: 'True', confidence: 'high' }] }),
+			assessResponder,
 			false,
 			2,
 		);
-		expect(calls.map((c) => c.headers?.['Idempotency-Key'])).toEqual([
-			'n8n:exec-1:Lenz:assess:0',
-			'n8n:exec-1:Lenz:assess:1',
-		]);
+		const keys = calls.map((c) => c.headers?.['Idempotency-Key']);
+		expect(keys[0]).toMatch(/:assess:0:/);
+		expect(keys[1]).toMatch(/:assess:1:/);
+		expect(keys[0]).not.toBe(keys[1]);
+	});
+
+	it('varies the key with the request body, so a re-run of the node cannot collide', async () => {
+		// "Loop Over Items" and AI Agent tool calls re-execute the node inside the
+		// same execution, restarting itemIndex at 0. Keyed on position alone both
+		// runs would send one key with two different bodies, which the API rejects
+		// with 422 (or 409 while the first is still in flight).
+		const runA = await runNode({ operation: 'assess', text: 'first batch' }, assessResponder);
+		const runB = await runNode({ operation: 'assess', text: 'second batch' }, assessResponder);
+		expect(runA.calls[0].headers?.['Idempotency-Key']).not.toBe(
+			runB.calls[0].headers?.['Idempotency-Key'],
+		);
 	});
 
 	it('does not send an Idempotency-Key on reads', async () => {
@@ -703,8 +737,22 @@ describe('Lenz node - idempotency', () => {
 			}
 			return { status: 'completed', result: { verdict: 'True', sources: [] } };
 		});
-		expect(calls[0].headers?.['Idempotency-Key']).toBe('n8n:exec-1:Lenz:verify:0');
+		expect(calls[0].headers?.['Idempotency-Key']).toMatch(/^n8n:exec-1:Lenz:verify:0:[0-9a-z]+$/);
 		expect(calls[1].headers?.['Idempotency-Key']).toBeUndefined();
+	});
+
+	it('gives two different claims different keys within one execution', async () => {
+		const responder: Responder = (options) => {
+			if (options.url === '/verify') {
+				return { task_id: 'task_1' };
+			}
+			return { status: 'completed', result: { verdict: 'True', sources: [] } };
+		};
+		const a = await runNode({ operation: 'verify', claim: 'Claim A' }, responder);
+		const b = await runNode({ operation: 'verify', claim: 'Claim B' }, responder);
+		expect(a.calls[0].headers?.['Idempotency-Key']).not.toBe(
+			b.calls[0].headers?.['Idempotency-Key'],
+		);
 	});
 });
 
