@@ -727,3 +727,85 @@ describe('Lenz node - error handling', () => {
 		expect(output[0].json).toEqual({ error: 'Unauthorized' });
 	});
 });
+
+describe('Lenz node - quota (HTTP 402)', () => {
+	// Shape of a rejected request as the n8n http helper surfaces it. The
+	// status may arrive on any of several fields depending on transport, so
+	// each variant is exercised separately.
+	function quotaError(extra: Record<string, unknown>) {
+		return Object.assign(new Error('Request failed with status code 402'), {
+			body: {
+				detail: 'No remaining claim checks.',
+				code: 'no_credits',
+				upgrade_url: 'https://lenz.io/plans',
+				remaining: 0,
+				resets_at: '2026-09-01T00:00:00+00:00',
+			},
+			...extra,
+		});
+	}
+
+	async function expectQuotaError(extra: Record<string, unknown>) {
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
+			throw quotaError(extra);
+		});
+		const node = new Lenz();
+		const err = await node.execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(err).toBeInstanceOf(NodeApiError);
+		return err as NodeApiError;
+	}
+
+	it('derives httpCode from the original error rather than nulling it', async () => {
+		// The pre-0.2.0 handler re-wrapped every failure as
+		// `new NodeApiError(node, { message })`. A bare {message} carries no
+		// status, so httpCode was ALWAYS null and the node was structurally
+		// blind to 402 vs 403 vs 429 no matter what the server sent.
+		const err = await expectQuotaError({ statusCode: 402 });
+		expect(err.httpCode).toBe('402');
+	});
+
+	it('names the billing condition instead of a generic API failure', async () => {
+		const err = await expectQuotaError({ statusCode: 402 });
+		expect(err.message).toContain('No remaining claim checks.');
+		expect(err.description).toContain('lenz.io/plans');
+		// Must not tell the user to retry — a 402 never clears on retry.
+		expect(err.description).toContain('Retrying will not help');
+	});
+
+	it('surfaces the reset time when the server states one', async () => {
+		const err = await expectQuotaError({ statusCode: 402 });
+		expect(err.description).toContain('2026-09-01');
+	});
+
+	it('recognises the status wherever the transport puts it', async () => {
+		for (const shape of [
+			{ statusCode: 402 },
+			{ status: 402 },
+			{ httpCode: '402' },
+			{ response: { status: 402 } },
+		]) {
+			const err = await expectQuotaError(shape);
+			expect(err.message).toContain('No remaining claim checks.');
+		}
+	});
+
+	it('leaves a non-402 failure on the generic path', async () => {
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
+			throw Object.assign(new Error('Forbidden'), {
+				statusCode: 403,
+				body: { detail: 'This report is private.', code: 'private_claim' },
+			});
+		});
+		const node = new Lenz();
+		const err = (await node.execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		)) as NodeApiError;
+		expect(err).toBeInstanceOf(NodeApiError);
+		expect(err.httpCode).toBe('403');
+		expect(err.description ?? '').not.toContain('lenz.io/plans');
+	});
+});

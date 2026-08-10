@@ -6,6 +6,7 @@ import type {
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	JsonObject,
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
 
@@ -14,7 +15,7 @@ const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.1.10';
+const USER_AGENT = 'n8n-nodes-lenz/0.2.0';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -36,6 +37,73 @@ const MAX_PAGE_SIZE = 100;
 
 function isPassingVerdict(verdict?: string): boolean {
 	return verdict === 'True' || verdict === 'Mostly True';
+}
+
+// Where a caller tops up. Kept as a constant so the plans page can move
+// without hunting through message strings.
+const PLANS_URL = 'https://lenz.io/plans';
+
+/**
+ * Pull the HTTP status off whatever shape the request helper threw.
+ *
+ * n8n's http helper does not guarantee one field: depending on the transport
+ * the status lands on `statusCode`, `status`, or nested under `response`.
+ */
+function statusCodeOf(error: unknown): number | undefined {
+	const e = error as IDataObject | undefined;
+	if (!e || typeof e !== 'object') return undefined;
+	const candidates = [
+		e.httpCode,
+		e.statusCode,
+		e.status,
+		(e.response as IDataObject | undefined)?.status,
+		(e.response as IDataObject | undefined)?.statusCode,
+	];
+	for (const c of candidates) {
+		const n = Number(c);
+		if (Number.isFinite(n) && n > 0) return n;
+	}
+	return undefined;
+}
+
+/** The JSON body the API returned, wherever the helper stashed it. */
+function responseBodyOf(error: unknown): IDataObject {
+	const e = error as IDataObject | undefined;
+	if (!e || typeof e !== 'object') return {};
+	const candidates = [
+		e.body,
+		(e.response as IDataObject | undefined)?.body,
+		(e.response as IDataObject | undefined)?.data,
+		e.error,
+	];
+	for (const c of candidates) {
+		if (c && typeof c === 'object' && !Array.isArray(c)) return c as IDataObject;
+	}
+	return {};
+}
+
+/**
+ * Build the user-facing text for an out-of-credits rejection, or undefined if
+ * this error isn't one.
+ *
+ * Keyed on HTTP 402, which the Lenz API sends for exactly this condition. The
+ * body's `code` and `remaining` refine the wording but are not required — a
+ * 402 alone is unambiguous.
+ */
+function quotaMessageFor(error: unknown): { message: string; description: string } | undefined {
+	if (statusCodeOf(error) !== 402) return undefined;
+
+	const body = responseBodyOf(error);
+	const detail = typeof body.detail === 'string' ? body.detail : 'No remaining Lenz credits.';
+	const upgradeUrl = typeof body.upgrade_url === 'string' ? body.upgrade_url : PLANS_URL;
+
+	let description = `Retrying will not help — this clears when you top up or the monthly quota resets. See ${upgradeUrl}`;
+	const resetsAt = typeof body.resets_at === 'string' ? body.resets_at : '';
+	if (resetsAt) {
+		description += ` (quota resets ${resetsAt}).`;
+	}
+
+	return { message: `Lenz: ${detail}`, description };
 }
 
 // Sources without a URL can't be cited, so they're dropped. The rest are passed
@@ -209,7 +277,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text (free)',
+						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per API key per day (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -356,7 +424,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text (free)',
+						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per API key per day (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -1062,11 +1130,29 @@ export class Lenz implements INodeType {
 					continue;
 				}
 
-				throw new NodeApiError(
-					this.getNode(),
-					{ message: (error as Error).message },
-					{ itemIndex },
-				);
+				// Out of credits (HTTP 402) is a billing state, not a broken
+				// request. Name it explicitly so the user is told to top up
+				// rather than left reading a generic API failure.
+				const quota = quotaMessageFor(error);
+				if (quota) {
+					throw new NodeApiError(this.getNode(), error as JsonObject, {
+						itemIndex,
+						message: quota.message,
+						description: quota.description,
+						httpCode: '402',
+					});
+				}
+
+				// Pass the ORIGINAL error object through. NodeApiError derives
+				// httpCode by searching the object it is handed, so the old
+				// `{ message: ... }` wrapper — which carries no status — made
+				// httpCode permanently null and left the node structurally
+				// blind to 402 vs 403 vs 429. n8n's own status table (which
+				// already contains '402': 'Payment required') was dead code.
+				throw new NodeApiError(this.getNode(), error as JsonObject, {
+					itemIndex,
+					message: (error as Error).message,
+				});
 			}
 		}
 
