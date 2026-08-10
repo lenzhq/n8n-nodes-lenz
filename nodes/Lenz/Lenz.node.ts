@@ -106,6 +106,20 @@ function quotaMessageFor(error: unknown): { message: string; description: string
 	return { message: `Lenz: ${detail}`, description };
 }
 
+// Stable fingerprint of a request body, mixed into the Idempotency-Key so the
+// key follows the *input* and not just the item's position. FNV-1a: a verified
+// node can't reach `crypto`, and this only has to tell two bodies apart within
+// a single execution — it isn't a security boundary.
+function bodyFingerprint(body?: IDataObject): string {
+	const json = body === undefined ? '' : JSON.stringify(body);
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < json.length; i++) {
+		hash ^= json.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash.toString(36);
+}
+
 // Sources without a URL can't be cited, so they're dropped. The rest are passed
 // through in full — snippet and source_name are what make a citation quotable
 // rather than merely linkable.
@@ -695,16 +709,31 @@ export class Lenz implements INodeType {
 		const returnData: INodeExecutionData[] = [];
 
 		// Idempotency-Key scope. Lenz replays a cached response for a re-used key
-		// for 24h, so the key must be stable across retries of one logical call
-		// but distinct between genuinely separate calls. Execution ID + node name
-		// + item index gives exactly that: n8n's "Retry On Fail" re-runs the node
-		// inside the same execution (same key, so the server replays instead of
-		// charging twice), while a fresh run of the workflow gets a new execution
-		// ID and therefore a fresh charge.
+		// for 24h, and rejects a re-used key carrying a *different* body with 422,
+		// so the key has to be stable across retries of one logical call and
+		// distinct between genuinely separate calls.
+		//
+		// Execution ID + node name + item index + a fingerprint of the body gives
+		// that. n8n's "Retry On Fail" re-runs the node inside the same execution
+		// with identical input, so the key repeats and the server replays instead
+		// of charging twice. A fresh workflow run gets a new execution ID, so it
+		// charges normally.
+		//
+		// The body fingerprint is what makes repeated runs safe: "Loop Over Items"
+		// and AI Agent tool calls both execute this node several times within one
+		// execution, each time restarting itemIndex at 0. Keyed on position alone,
+		// the second run would reuse the first run's key with different text and
+		// the API would reject it (422, or 409 while the first is still in flight).
 		const executionId = this.getExecutionId();
 		const nodeName = this.getNode().name;
-		const idempotencyKey = (operation: string, itemIndex: number): string =>
-			executionId ? `n8n:${executionId}:${nodeName}:${operation}:${itemIndex}` : '';
+		const buildIdempotencyKey = (
+			operation: string,
+			itemIndex: number,
+			body?: IDataObject,
+		): string =>
+			executionId
+				? `n8n:${executionId}:${nodeName}:${operation}:${itemIndex}:${bodyFingerprint(body)}`
+				: '';
 
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
 		// n8n. No third-party SDK — this is the required shape for a verified
@@ -713,14 +742,21 @@ export class Lenz implements INodeType {
 			method: IHttpRequestMethods,
 			path: string,
 			body?: IDataObject,
-			extra?: { idempotencyKey?: string; qs?: IDataObject },
+			extra?: { idempotent?: { operation: string; itemIndex: number }; qs?: IDataObject },
 		): Promise<IDataObject> => {
 			const headers: IDataObject = {
 				'User-Agent': USER_AGENT,
 				'X-Lenz-API-Version': API_VERSION,
 			};
-			if (extra?.idempotencyKey) {
-				headers['Idempotency-Key'] = extra.idempotencyKey;
+			if (extra?.idempotent) {
+				const key = buildIdempotencyKey(
+					extra.idempotent.operation,
+					extra.idempotent.itemIndex,
+					body,
+				);
+				if (key) {
+					headers['Idempotency-Key'] = key;
+				}
 			}
 			const options: IHttpRequestOptions = {
 				method,
@@ -785,9 +821,19 @@ export class Lenz implements INodeType {
 						submitBody.visibility = visibility;
 					}
 					const accepted = await lenzRequest('POST', '/verify', submitBody, {
-						idempotencyKey: idempotencyKey(operation, itemIndex),
+						idempotent: { operation, itemIndex },
 					});
 					const taskId = (accepted.task_id as string) ?? '';
+					if (!taskId) {
+						// Without a task_id there is nothing to poll — fail loudly here
+						// rather than letting the status URL collapse to /verify/status/
+						// and surface as a confusing 404.
+						throw new NodeOperationError(
+							this.getNode(),
+							'Lenz accepted the claim but returned no task_id, so the verification cannot be polled',
+							{ itemIndex },
+						);
+					}
 
 					if (!waitForCompletion) {
 						responseData = {
@@ -886,7 +932,7 @@ export class Lenz implements INodeType {
 					}
 
 					const accepted = await lenzRequest('POST', '/verify/batch', body, {
-						idempotencyKey: idempotencyKey(operation, itemIndex),
+						idempotent: { operation, itemIndex },
 					});
 					const batchId = (accepted.batch_id as string) ?? '';
 					const partial = accepted.partial === true;
@@ -927,7 +973,7 @@ export class Lenz implements INodeType {
 						'POST',
 						`/verify/${taskId}/select`,
 						{ texts: selected },
-						{ idempotencyKey: idempotencyKey(operation, itemIndex) },
+						{ idempotent: { operation, itemIndex } },
 					);
 					const batchId = (accepted.batch_id as string) ?? '';
 					const partial = accepted.partial === true;
@@ -959,7 +1005,7 @@ export class Lenz implements INodeType {
 						body.language = language;
 					}
 					const result = await lenzRequest('POST', '/assess', body, {
-						idempotencyKey: idempotencyKey(operation, itemIndex),
+						idempotent: { operation, itemIndex },
 					});
 					const claims = (result.claims ?? []) as IDataObject[];
 					if (!claims.length) {
@@ -996,7 +1042,7 @@ export class Lenz implements INodeType {
 						body.language = language;
 					}
 					responseData = await lenzRequest('POST', '/extract', body, {
-						idempotencyKey: idempotencyKey(operation, itemIndex),
+						idempotent: { operation, itemIndex },
 					});
 				} else if (operation === 'ask') {
 					const verificationId = this.getNodeParameter('verificationId', itemIndex) as string;

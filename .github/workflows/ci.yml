@@ -7,8 +7,10 @@ on:
       - main
 
 # Cancel in-progress runs for the same branch/PR to avoid wasting CI minutes.
+# The ref has to be in the group key — without it every branch and PR shares one
+# group, so a push to any branch cancels the CI of every other open PR.
 concurrency:
-  group: ci-$
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,3 +34,6 @@ jobs:
 
       - name: Run build
         run: 'npm run build'
+
+      - name: Run tests
+        run: 'npm test'
