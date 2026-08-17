@@ -9,7 +9,7 @@ export class LenzApi implements ICredentialType {
 	name = 'lenzApi';
 	displayName = 'Lenz API';
 	icon = { light: 'file:../nodes/Lenz/lenz.svg', dark: 'file:../nodes/Lenz/lenz.dark.svg' } as const;
-	documentationUrl = 'https://lenz.io/api-integration';
+	documentationUrl = 'https://lenz.io/api-credentials';
 
 	properties: INodeProperties[] = [
 		{
@@ -22,7 +22,7 @@ export class LenzApi implements ICredentialType {
 			default: '',
 			required: true,
 			description:
-				'Your Lenz API key (starts with "lenz_"). Get one at lenz.io/api-integration.',
+				'Your Lenz API key (starts with "lenz_"). Get one at lenz.io/api-credentials.',
 		},
 	];
 

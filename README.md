@@ -73,7 +73,7 @@ Note that **Assess bills per claim found in the text**, not per request: a parag
 
 You'll need a free Lenz API key:
 
-1. Sign up at [lenz.io/api-integration](https://lenz.io/api-integration) to get a key (starts with `lenz_`).
+1. Sign up at [lenz.io/api-credentials](https://lenz.io/api-credentials) to get a key (starts with `lenz_`).
 2. In n8n, add new credentials of type **Lenz API**, paste the key, and click **Test** to confirm it's valid.
 
 ## Compatibility
