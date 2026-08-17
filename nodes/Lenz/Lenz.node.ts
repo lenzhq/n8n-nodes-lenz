@@ -291,7 +291,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per API key per day (resets 00:00 UTC).',
+						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -438,7 +438,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per API key per day (resets 00:00 UTC).',
+						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
