@@ -78,7 +78,7 @@ You'll need a free Lenz API key:
 
 ## Compatibility
 
-Built against `n8n-workflow` (n8n API version 1) and tested against n8n v2.29.x. No known version incompatibilities.
+Built against `n8n-workflow` (n8n API version 1) and tested against n8n v2.30.4. No known version incompatibilities.
 
 ## Usage
 
