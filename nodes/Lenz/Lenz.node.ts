@@ -15,7 +15,7 @@ const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.2.0';
+const USER_AGENT = 'n8n-nodes-lenz/0.2.1';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -104,6 +104,40 @@ function quotaMessageFor(error: unknown): { message: string; description: string
 	}
 
 	return { message: `Lenz: ${detail}`, description };
+}
+
+/**
+ * Build the user-facing text for a capacity / provider-outage 503, or
+ * undefined if this error isn't one.
+ *
+ * The Lenz API answers 503 with body `code: 'capacity'` (admission control —
+ * the pipeline is at its concurrency ceiling or a model pool is down) or
+ * `code: 'upstream_unavailable'` (every model/search provider behind a sync
+ * endpoint is down). Both are transient by contract and state a wait in
+ * `retry_after` (seconds). A verified community node must not sleep or loop,
+ * so the actionable advice is n8n's own Retry On Fail with at least that wait.
+ */
+function capacityMessageFor(error: unknown): { message: string; description: string } | undefined {
+	if (statusCodeOf(error) !== 503) return undefined;
+
+	const body = responseBodyOf(error);
+	const code = typeof body.code === 'string' ? body.code : '';
+	if (code !== 'capacity' && code !== 'upstream_unavailable') return undefined;
+
+	const retryAfter = Number(body.retry_after);
+	const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 90;
+	const what =
+		code === 'capacity'
+			? 'Lenz is at capacity right now'
+			: "Lenz's model providers are temporarily unavailable";
+
+	return {
+		message: `Lenz: ${what} — retry in ~${wait}s.`,
+		description:
+			`Transient (HTTP 503, code: ${code}). Nothing was charged. ` +
+			`Enable this node's "Retry On Fail" with a wait of at least ${wait} seconds (Settings tab), ` +
+			'or re-run the workflow after the stated wait.',
+	};
 }
 
 // Stable fingerprint of a request body, mixed into the Idempotency-Key so the
@@ -204,9 +238,16 @@ function mapVerifyStatus(status: IDataObject, taskId: string, includeAudit: bool
 
 	if (state === 'failed') {
 		const detail = status.error ?? status.failure_detail ?? status.failure_reason ?? 'unknown';
+		// failure_class is a closed set (upstream_unavailable | insufficient_evidence
+		// | invalid_input | cancelled | internal); retryable is true only for
+		// upstream_unavailable. Both are absent on rows written before 2026-08 —
+		// explicit fields (not just the prose message) so an IF node can branch.
 		return {
 			status: 'failed',
 			task_id: taskId,
+			failure_reason: status.failure_reason ?? '',
+			failure_class: status.failure_class ?? '',
+			retryable: status.retryable ?? null,
 			message: 'Verification failed: ' + String(detail),
 		};
 	}
@@ -1186,6 +1227,19 @@ export class Lenz implements INodeType {
 						message: quota.message,
 						description: quota.description,
 						httpCode: '402',
+					});
+				}
+
+				// At capacity / providers down (HTTP 503 with a typed code) is
+				// transient by contract: say so, name the stated wait, and point
+				// at Retry On Fail instead of leaving a generic 503.
+				const capacity = capacityMessageFor(error);
+				if (capacity) {
+					throw new NodeApiError(this.getNode(), error as JsonObject, {
+						itemIndex,
+						message: capacity.message,
+						description: capacity.description,
+						httpCode: '503',
 					});
 				}
 

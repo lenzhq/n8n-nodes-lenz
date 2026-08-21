@@ -331,11 +331,32 @@ describe('Lenz node - Verify (Deep)', () => {
 	});
 
 	it('maps a failed terminal state to a status: failed result, not a thrown error', async () => {
-		const responder = verifyResponder({ status: 'failed', error: 'bad input' });
+		const responder = verifyResponder({
+			status: 'failed',
+			error: 'Pipeline stopped at: research_empty',
+			failure_reason: 'research_empty',
+			failure_class: 'upstream_unavailable',
+			retryable: true,
+		});
 		const { output } = await runNode({ operation: 'verify', claim: 'broken claim' }, responder);
 		const json = output[0].json as IDataObject;
 		expect(json.status).toBe('failed');
 		expect(json.task_id).toBe('task_1');
+		// Explicit fields, not just prose — a downstream IF node branches on these.
+		expect(json.failure_reason).toBe('research_empty');
+		expect(json.failure_class).toBe('upstream_unavailable');
+		expect(json.retryable).toBe(true);
+		expect(json.message).toContain('research_empty');
+	});
+
+	it('tolerates a legacy failed body without the 2026-08 failure fields', async () => {
+		const responder = verifyResponder({ status: 'failed', error: 'bad input' });
+		const { output } = await runNode({ operation: 'verify', claim: 'broken claim' }, responder);
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('failed');
+		expect(json.failure_reason).toBe('');
+		expect(json.failure_class).toBe('');
+		expect(json.retryable).toBeNull();
 	});
 
 	it('fails clearly when submit returns no task_id instead of polling a bad URL', async () => {
@@ -789,6 +810,69 @@ describe('Lenz node - error handling', () => {
 			/* continueOnFail */ true,
 		);
 		expect(output[0].json).toEqual({ error: 'Unauthorized' });
+	});
+});
+
+describe('Lenz node - capacity (HTTP 503)', () => {
+	// Admission control / provider outage: the API refuses the submit with a
+	// typed body code and a stated wait. Transient by contract — the node must
+	// say so and point at Retry On Fail rather than emit a generic 503.
+	function capacityError(body: Record<string, unknown>) {
+		return Object.assign(new Error('Request failed with status code 503'), {
+			statusCode: 503,
+			body,
+		});
+	}
+
+	async function expectCapacityError(body: Record<string, unknown>) {
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
+			throw capacityError(body);
+		});
+		const node = new Lenz();
+		const err = await node.execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(err).toBeInstanceOf(NodeApiError);
+		return err as NodeApiError;
+	}
+
+	it('names the wait and points at Retry On Fail for code: capacity', async () => {
+		const err = await expectCapacityError({
+			detail: 'Lenz is at capacity right now.',
+			code: 'capacity',
+			retry_after: 100,
+		});
+		expect(err.message).toContain('at capacity');
+		expect(err.message).toContain('100s');
+		expect(err.description).toContain('Retry On Fail');
+		expect(err.description).toContain('100 seconds');
+		expect(err.description).toContain('Nothing was charged');
+		expect(err.httpCode).toBe('503');
+	});
+
+	it('handles code: upstream_unavailable with a default wait when none is stated', async () => {
+		const err = await expectCapacityError({
+			detail: 'Providers down.',
+			code: 'upstream_unavailable',
+		});
+		expect(err.message).toContain('providers');
+		expect(err.message).toContain('90s');
+		expect(err.description).toContain('Retry On Fail');
+	});
+
+	it('leaves a plain 503 without a typed code on the generic path', async () => {
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
+			throw Object.assign(new Error('Request failed with status code 503'), { statusCode: 503 });
+		});
+		const node = new Lenz();
+		const err = (await node.execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		)) as NodeApiError;
+		expect(err).toBeInstanceOf(NodeApiError);
+		expect(err.message).not.toContain('Retry On Fail');
+		expect(String(err.description ?? '')).not.toContain('Retry On Fail');
 	});
 });
 

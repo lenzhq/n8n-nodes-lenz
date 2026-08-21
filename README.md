@@ -147,6 +147,20 @@ Verify pauses rather than guessing when the text isn't a single unambiguous clai
 
 A paused task expires **10 minutes** after it pauses, and Select Claims only accepts text that was actually offered — so copy the claim text verbatim rather than retyping it.
 
+### When a verification fails
+
+A verification that stops before reaching a verdict comes back with `status: "failed"` and three fields a downstream **IF** node can branch on:
+
+| Field | What it says |
+|---|---|
+| `failure_reason` | *Where* the pipeline stopped (e.g. `research_empty`, `framing_failed`) |
+| `failure_class` | *Why*, from a closed set: `upstream_unavailable`, `insufficient_evidence`, `invalid_input`, `cancelled`, `internal` |
+| `retryable` | `true` only for `upstream_unavailable` — resubmitting the same claim later can succeed. For every other class, retrying the same input will not help. |
+
+Both `failure_class` and `retryable` are empty/`null` on verifications older than 2026-08.
+
+Separately, a *submit* can be refused outright with **HTTP 503** and a typed body code — `capacity` (Lenz is at its concurrency ceiling) or `upstream_unavailable` (model providers down). The node reports these as transient, names the stated wait, and the right response is enabling the node's built-in **Retry On Fail** (Settings tab) with a wait of at least the stated `retry_after`. Nothing is charged for a refused submit.
+
 ## Resources
 
 * [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
@@ -168,6 +182,8 @@ A paused task expires **10 minutes** after it pauses, and Select Claims only acc
 * **0.2.0** — Out-of-credits is now reported as a billing problem instead of a generic API failure. The node re-wrapped every error as `new NodeApiError(node, { message })`, and because a bare `{message}` carries no status, `httpCode` was always `null` — so the node was structurally blind to the difference between 402, 403 and 429 regardless of what the API returned. The original error is now passed through, and an HTTP 402 gets an explicit branch naming the condition, linking to [lenz.io/plans](https://lenz.io/plans), and stating that retrying will not help. Also documents the `/extract` daily cap (1000 calls per key per day, resetting 00:00 UTC), which the operation description had only ever called "free".
 
   Also fixes an `Idempotency-Key` collision introduced in 0.1.10. The key was derived from the item index alone, so a node that ran more than once inside a single execution — **Loop Over Items**, or an **AI Agent** calling Lenz as a tool — reused the first run's key with different input, and the API rejected it (`422`, or `409` while the first call was still in flight). The key now includes a fingerprint of the request body, which keeps retry protection intact while letting repeated runs through. Verify also fails with a clear message if a submit returns no `task_id`, rather than polling an invalid status URL.
+
+* **0.2.1** — A failed verification now returns `failure_reason`, `failure_class` (closed set: `upstream_unavailable` / `insufficient_evidence` / `invalid_input` / `cancelled` / `internal`) and `retryable` as explicit output fields, so an IF node can branch on *why* it failed instead of parsing the prose message. Capacity refusals (HTTP 503 with `code: capacity` or `upstream_unavailable`, sent when Lenz is shedding load or every model provider is down) are reported as transient with the stated wait and a pointer at the node's **Retry On Fail** setting, instead of a generic 503.
 
 ## Maintainer
 
