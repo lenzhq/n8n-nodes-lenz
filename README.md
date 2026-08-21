@@ -159,7 +159,9 @@ A verification that stops before reaching a verdict comes back with `status: "fa
 
 Both `failure_class` and `retryable` are empty/`null` on verifications older than 2026-08.
 
-Separately, a *submit* can be refused outright with **HTTP 503** and a typed body code — `capacity` (Lenz is at its concurrency ceiling) or `upstream_unavailable` (model providers down). The node reports these as transient, names the stated wait, and the right response is enabling the node's built-in **Retry On Fail** (Settings tab) with a wait of at least the stated `retry_after`. Nothing is charged for a refused submit.
+Separately, a *submit* can be refused outright with **HTTP 503** and a typed body code — `capacity` (Lenz is at its concurrency ceiling) or `upstream_unavailable` (model providers down). The node reports these as transient and names the stated wait (typically 90-120s, jittered so callers return spread out). Nothing is charged for a refused submit.
+
+The wait is longer than **Retry On Fail** can cover: that setting allows 2-5 tries spaced a few seconds apart, so it would spend every try inside the window and fail anyway — while re-sending the submit each time, which is the pile-on the jitter exists to prevent. Handle it in the workflow instead: set the node's **On Error** to *Continue (using error output)*, feed that output into a **Wait** node set to the stated seconds, and loop it back into the Lenz node. Re-running the workflow later works just as well.
 
 ## Resources
 
@@ -183,7 +185,7 @@ Separately, a *submit* can be refused outright with **HTTP 503** and a typed bod
 
   Also fixes an `Idempotency-Key` collision introduced in 0.1.10. The key was derived from the item index alone, so a node that ran more than once inside a single execution — **Loop Over Items**, or an **AI Agent** calling Lenz as a tool — reused the first run's key with different input, and the API rejected it (`422`, or `409` while the first call was still in flight). The key now includes a fingerprint of the request body, which keeps retry protection intact while letting repeated runs through. Verify also fails with a clear message if a submit returns no `task_id`, rather than polling an invalid status URL.
 
-* **0.2.1** — A failed verification now returns `failure_reason`, `failure_class` (closed set: `upstream_unavailable` / `insufficient_evidence` / `invalid_input` / `cancelled` / `internal`) and `retryable` as explicit output fields, so an IF node can branch on *why* it failed instead of parsing the prose message. Capacity refusals (HTTP 503 with `code: capacity` or `upstream_unavailable`, sent when Lenz is shedding load or every model provider is down) are reported as transient with the stated wait and a pointer at the node's **Retry On Fail** setting, instead of a generic 503.
+* **0.2.1** — A failed verification now returns `failure_reason`, `failure_class` (closed set: `upstream_unavailable` / `insufficient_evidence` / `invalid_input` / `cancelled` / `internal`) and `retryable` as explicit output fields, so an IF node can branch on *why* it failed instead of parsing the prose message. Capacity refusals (HTTP 503 with `code: capacity` or `upstream_unavailable`, sent when Lenz is shedding load or every model provider is down) are reported as transient with the stated wait and the Wait-node pattern that clears it, instead of a generic 503.
 
 ## Maintainer
 

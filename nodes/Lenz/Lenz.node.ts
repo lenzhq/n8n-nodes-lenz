@@ -114,8 +114,16 @@ function quotaMessageFor(error: unknown): { message: string; description: string
  * the pipeline is at its concurrency ceiling or a model pool is down) or
  * `code: 'upstream_unavailable'` (every model/search provider behind a sync
  * endpoint is down). Both are transient by contract and state a wait in
- * `retry_after` (seconds). A verified community node must not sleep or loop,
- * so the actionable advice is n8n's own Retry On Fail with at least that wait.
+ * `retry_after` (seconds), jittered server-side so callers come back spread
+ * out rather than in a thundering herd.
+ *
+ * A verified community node must not sleep or loop, so the advice has to be
+ * something the workflow does. It is deliberately NOT "Retry On Fail": that
+ * setting allows 2-5 tries with a short wait between them, so it would burn
+ * every try well inside the stated window and fail anyway — while re-sending
+ * the submit several times, which is exactly the herd the jitter exists to
+ * prevent. The pattern that actually works is the node's error output into a
+ * Wait node set to the stated seconds, then back into this node.
  */
 function capacityMessageFor(error: unknown): { message: string; description: string } | undefined {
 	if (statusCodeOf(error) !== 503) return undefined;
@@ -135,8 +143,9 @@ function capacityMessageFor(error: unknown): { message: string; description: str
 		message: `Lenz: ${what} — retry in ~${wait}s.`,
 		description:
 			`Transient (HTTP 503, code: ${code}). Nothing was charged. ` +
-			`Enable this node's "Retry On Fail" with a wait of at least ${wait} seconds (Settings tab), ` +
-			'or re-run the workflow after the stated wait.',
+			`Wait ~${wait}s before submitting again: send this node's error output into a Wait node ` +
+			`set to ${wait} seconds and loop it back, or re-run the workflow after the wait. ` +
+			'"Retry On Fail" is not enough on its own — its tries are spaced too closely to clear the wait.',
 	};
 }
 

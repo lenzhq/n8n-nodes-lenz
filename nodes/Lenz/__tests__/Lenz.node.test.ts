@@ -816,7 +816,10 @@ describe('Lenz node - error handling', () => {
 describe('Lenz node - capacity (HTTP 503)', () => {
 	// Admission control / provider outage: the API refuses the submit with a
 	// typed body code and a stated wait. Transient by contract — the node must
-	// say so and point at Retry On Fail rather than emit a generic 503.
+	// say so, name the wait, and point at the Wait-node pattern. Explicitly NOT
+	// Retry On Fail: 2-5 tries spaced a few seconds apart cannot clear a 90-120s
+	// wait, and re-sending the submit that fast is the pile-on the server's
+	// jitter exists to prevent.
 	function capacityError(body: Record<string, unknown>) {
 		return Object.assign(new Error('Request failed with status code 503'), {
 			statusCode: 503,
@@ -837,7 +840,7 @@ describe('Lenz node - capacity (HTTP 503)', () => {
 		return err as NodeApiError;
 	}
 
-	it('names the wait and points at Retry On Fail for code: capacity', async () => {
+	it('names the wait and points at the Wait-node pattern for code: capacity', async () => {
 		const err = await expectCapacityError({
 			detail: 'Lenz is at capacity right now.',
 			code: 'capacity',
@@ -845,10 +848,26 @@ describe('Lenz node - capacity (HTTP 503)', () => {
 		});
 		expect(err.message).toContain('at capacity');
 		expect(err.message).toContain('100s');
-		expect(err.description).toContain('Retry On Fail');
+		expect(err.description).toContain('Wait node');
 		expect(err.description).toContain('100 seconds');
 		expect(err.description).toContain('Nothing was charged');
 		expect(err.httpCode).toBe('503');
+	});
+
+	it('does not prescribe Retry On Fail as the remedy', async () => {
+		// Max Tries is 2-5 with a short gap between them, so it would burn every
+		// try inside the stated wait and fail anyway — while re-submitting each
+		// time. If the text mentions it at all, it must be to rule it out.
+		const err = await expectCapacityError({
+			detail: 'Lenz is at capacity right now.',
+			code: 'capacity',
+			retry_after: 100,
+		});
+		const description = String(err.description ?? '');
+		if (description.includes('Retry On Fail')) {
+			expect(description).toMatch(/not enough|isn't enough|too closely/i);
+		}
+		expect(err.message).not.toContain('Retry On Fail');
 	});
 
 	it('handles code: upstream_unavailable with a default wait when none is stated', async () => {
@@ -858,7 +877,8 @@ describe('Lenz node - capacity (HTTP 503)', () => {
 		});
 		expect(err.message).toContain('providers');
 		expect(err.message).toContain('90s');
-		expect(err.description).toContain('Retry On Fail');
+		expect(err.description).toContain('Wait node');
+		expect(err.description).toContain('90 seconds');
 	});
 
 	it('leaves a plain 503 without a typed code on the generic path', async () => {
@@ -871,8 +891,9 @@ describe('Lenz node - capacity (HTTP 503)', () => {
 			(e: unknown) => e,
 		)) as NodeApiError;
 		expect(err).toBeInstanceOf(NodeApiError);
-		expect(err.message).not.toContain('Retry On Fail');
-		expect(String(err.description ?? '')).not.toContain('Retry On Fail');
+		expect(err.message).not.toContain('Wait node');
+		expect(String(err.description ?? '')).not.toContain('Wait node');
+		expect(String(err.description ?? '')).not.toContain('Nothing was charged');
 	});
 });
 
