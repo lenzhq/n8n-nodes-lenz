@@ -157,11 +157,22 @@ A verification that stops before reaching a verdict comes back with `status: "fa
 | `failure_class` | *Why*, from a closed set: `upstream_unavailable`, `insufficient_evidence`, `invalid_input`, `cancelled`, `internal` |
 | `retryable` | `true` only for `upstream_unavailable` — resubmitting the same claim later can succeed. For every other class, retrying the same input will not help. |
 
-Both `failure_class` and `retryable` are empty/`null` on verifications older than 2026-08.
+Both `failure_class` and `retryable` are empty/`null` on verifications older than 2026-08. **Get** reports a stored verification that failed the same way, rather than as a completed one with no verdict.
 
 Separately, a *submit* can be refused outright with **HTTP 503** and a typed body code — `capacity` (Lenz is at its concurrency ceiling) or `upstream_unavailable` (model providers down). The node reports these as transient and names the stated wait (typically 90-120s, jittered so callers return spread out). Nothing is charged for a refused submit.
 
 The wait is longer than **Retry On Fail** can cover: that setting allows 2-5 tries spaced a few seconds apart, so it would spend every try inside the window and fail anyway — while re-sending the submit each time, which is the pile-on the jitter exists to prevent. Handle it in the workflow instead: set the node's **On Error** to *Continue (using error output)*, feed that output into a **Wait** node set to the stated seconds, and loop it back into the Lenz node. Re-running the workflow later works just as well.
+
+So the Wait node has a number to read, the error output carries the refusal as fields rather than only as prose:
+
+| Field | What it says |
+|---|---|
+| `retry_after` | Seconds to wait before submitting again — point the Wait node's duration at `{{ $json.retry_after }}` |
+| `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `no_credits` |
+| `status_code` | The HTTP status, e.g. `503` |
+| `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing or capacity refusal |
+
+`error` keeps the raw message it always carried, so existing workflows reading it are unaffected.
 
 ## Resources
 
@@ -186,6 +197,8 @@ The wait is longer than **Retry On Fail** can cover: that setting allows 2-5 tri
   Also fixes an `Idempotency-Key` collision introduced in 0.1.10. The key was derived from the item index alone, so a node that ran more than once inside a single execution — **Loop Over Items**, or an **AI Agent** calling Lenz as a tool — reused the first run's key with different input, and the API rejected it (`422`, or `409` while the first call was still in flight). The key now includes a fingerprint of the request body, which keeps retry protection intact while letting repeated runs through. Verify also fails with a clear message if a submit returns no `task_id`, rather than polling an invalid status URL.
 
 * **0.2.1** — A failed verification now returns `failure_reason`, `failure_class` (closed set: `upstream_unavailable` / `insufficient_evidence` / `invalid_input` / `cancelled` / `internal`) and `retryable` as explicit output fields, so an IF node can branch on *why* it failed instead of parsing the prose message. Capacity refusals (HTTP 503 with `code: capacity` or `upstream_unavailable`, sent when Lenz is shedding load or every model provider is down) are reported as transient with the stated wait and the Wait-node pattern that clears it, instead of a generic 503.
+
+  Also repairs the error path both of those rely on. The node read the API's error body from `.body` / `.response.data`, but `httpRequestWithAuthentication` never rethrows the transport error — it wraps it in a `NodeApiError`, which moves the parsed body to `context.data`. Nothing matched, so the typed branches never ran. Attaching the wording then failed a second time: `new NodeApiError(node, error, { message })` returns the caught error untouched when that error is already a `NodeApiError`, discarding the message, description and status. The node now reads the body from where n8n puts it and sets the wording on the caught error, so the text actually reaches the user — this is also what makes 0.2.0's out-of-credits message work, which had never appeared in practice. The error tests now build their fixtures the way n8n does, since the previous hand-built shape could not exercise either path. On top of that, the error output carries `retry_after`, `code` and `status_code` so the documented Wait-node recovery has a value to read, and **Get** no longer reports a stored verification that failed as `completed` with a null verdict.
 
 ## Maintainer
 
