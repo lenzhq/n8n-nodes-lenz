@@ -3,6 +3,7 @@ import type {
 	IExecuteFunctions,
 	IHttpRequestMethods,
 	IHttpRequestOptions,
+	INode,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
@@ -15,7 +16,7 @@ const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.2.0';
+const USER_AGENT = 'n8n-nodes-lenz/0.2.1';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -66,14 +67,26 @@ function statusCodeOf(error: unknown): number | undefined {
 	return undefined;
 }
 
-/** The JSON body the API returned, wherever the helper stashed it. */
+/**
+ * The JSON body the API returned, wherever the helper stashed it.
+ *
+ * `context.data` comes first because it is the one that actually fires in
+ * production: `httpRequestWithAuthentication` never rethrows the transport
+ * error, it wraps it in a NodeApiError, and that constructor lifts the parsed
+ * body onto `context.data`. The raw-transport shapes below it are kept for
+ * direct `helpers.httpRequest` calls and for older n8n builds.
+ */
 function responseBodyOf(error: unknown): IDataObject {
 	const e = error as IDataObject | undefined;
 	if (!e || typeof e !== 'object') return {};
 	const candidates = [
+		(e.context as IDataObject | undefined)?.data,
 		e.body,
 		(e.response as IDataObject | undefined)?.body,
 		(e.response as IDataObject | undefined)?.data,
+		(e.errorResponse as IDataObject | undefined)?.body,
+		((e.errorResponse as IDataObject | undefined)?.response as IDataObject | undefined)?.data,
+		((e.cause as IDataObject | undefined)?.response as IDataObject | undefined)?.data,
 		e.error,
 	];
 	for (const c of candidates) {
@@ -104,6 +117,92 @@ function quotaMessageFor(error: unknown): { message: string; description: string
 	}
 
 	return { message: `Lenz: ${detail}`, description };
+}
+
+/**
+ * Build the user-facing text for a capacity / provider-outage 503, or
+ * undefined if this error isn't one.
+ *
+ * The Lenz API answers 503 with body `code: 'capacity'` (admission control —
+ * the pipeline is at its concurrency ceiling or a model pool is down) or
+ * `code: 'upstream_unavailable'` (every model/search provider behind a sync
+ * endpoint is down). Both are transient by contract and state a wait in
+ * `retry_after` (seconds), jittered server-side so callers come back spread
+ * out rather than in a thundering herd.
+ *
+ * A verified community node must not sleep or loop, so the advice has to be
+ * something the workflow does. It is deliberately NOT "Retry On Fail": that
+ * setting allows 2-5 tries with a short wait between them, so it would burn
+ * every try well inside the stated window and fail anyway — while re-sending
+ * the submit several times, which is exactly the herd the jitter exists to
+ * prevent. The pattern that actually works is the node's error output into a
+ * Wait node set to the stated seconds, then back into this node.
+ */
+function capacityMessageFor(error: unknown): { message: string; description: string } | undefined {
+	if (statusCodeOf(error) !== 503) return undefined;
+
+	const body = responseBodyOf(error);
+	const code = typeof body.code === 'string' ? body.code : '';
+	if (code !== 'capacity' && code !== 'upstream_unavailable') return undefined;
+
+	const retryAfter = Number(body.retry_after);
+	const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 90;
+	const what =
+		code === 'capacity'
+			? 'Lenz is at capacity right now'
+			: "Lenz's model providers are temporarily unavailable";
+
+	return {
+		message: `Lenz: ${what} — retry in ~${wait}s.`,
+		description:
+			`Transient (HTTP 503, code: ${code}). Nothing was charged. ` +
+			`Wait ~${wait}s before submitting again: send this node's error output into a Wait node ` +
+			`set to ${wait} seconds and loop it back, or re-run the workflow after the wait. ` +
+			'"Retry On Fail" is not enough on its own — its tries are spaced too closely to clear the wait.',
+	};
+}
+
+/**
+ * Attach our wording to the error n8n is about to show, and hand back the
+ * error to throw.
+ *
+ * The obvious `new NodeApiError(node, error, { message })` does NOT work here.
+ * That constructor opens with `if (errorResponse instanceof NodeApiError)
+ * return errorResponse` — and the error we catch is always already a
+ * NodeApiError, because `httpRequestWithAuthentication` wraps every failure
+ * before it reaches us. So the options object is silently discarded and n8n
+ * falls back to its stock status text. For 503 that stock text reads "consider
+ * setting this node to retry automatically", which is the opposite of the
+ * advice below.
+ *
+ * Mutating the existing error is what actually reaches the user. Only the
+ * non-NodeApiError case (a thrown plain object, or a direct `helpers.httpRequest`
+ * call) needs a real constructor call.
+ */
+function describeApiError(
+	node: INode,
+	error: unknown,
+	itemIndex: number,
+	text: { message: string; description?: string },
+	httpCode?: string,
+): NodeApiError {
+	if (error instanceof NodeApiError) {
+		error.message = text.message;
+		if (text.description !== undefined) {
+			error.description = text.description;
+		}
+		if (httpCode !== undefined) {
+			error.httpCode = httpCode;
+		}
+		error.context = { ...(error.context ?? {}), itemIndex };
+		return error;
+	}
+	return new NodeApiError(node, error as JsonObject, {
+		itemIndex,
+		message: text.message,
+		description: text.description,
+		httpCode,
+	});
 }
 
 // Stable fingerprint of a request body, mixed into the Idempotency-Key so the
@@ -180,6 +279,27 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 	return mapped;
 }
 
+/**
+ * The explanatory half of a failed verification.
+ *
+ * failure_class is a closed set (upstream_unavailable | insufficient_evidence
+ * | invalid_input | cancelled | internal); retryable is true only for
+ * upstream_unavailable. Both are absent on rows written before 2026-08 —
+ * explicit fields (not just the prose message) so an IF node can branch.
+ *
+ * Shared so a failure reads the same whether it arrives from the poll loop,
+ * from Get Status, or from a stored record fetched by Get.
+ */
+function failureFields(record: IDataObject): IDataObject {
+	const detail = record.error ?? record.failure_detail ?? record.failure_reason ?? 'unknown';
+	return {
+		failure_reason: record.failure_reason ?? '',
+		failure_class: record.failure_class ?? '',
+		retryable: record.retryable ?? null,
+		message: 'Verification failed: ' + String(detail),
+	};
+}
+
 // Shared by the inline Verify (Deep) poll loop and the standalone Get Verify
 // Status operation, so both surface an identical shape.
 function mapVerifyStatus(status: IDataObject, taskId: string, includeAudit: boolean): IDataObject {
@@ -203,12 +323,7 @@ function mapVerifyStatus(status: IDataObject, taskId: string, includeAudit: bool
 	}
 
 	if (state === 'failed') {
-		const detail = status.error ?? status.failure_detail ?? status.failure_reason ?? 'unknown';
-		return {
-			status: 'failed',
-			task_id: taskId,
-			message: 'Verification failed: ' + String(detail),
-		};
+		return { status: 'failed', task_id: taskId, ...failureFields(status) };
 	}
 
 	return {
@@ -1087,7 +1202,17 @@ export class Lenz implements INodeType {
 					}
 					const includeAudit = this.getNodeParameter('includeAudit', itemIndex, false) as boolean;
 					const detail = await lenzRequest('GET', `/verifications/${verificationId}`);
-					responseData = mapCompletedVerification(detail, includeAudit);
+					// A stored record can be a failure too — reporting that as
+					// `completed` with a null verdict hides why it stopped, and
+					// drops the fields an IF node is supposed to branch on.
+					responseData =
+						detail.status === 'failed'
+							? {
+									status: 'failed',
+									verification_id: detail.verification_id ?? verificationId,
+									...failureFields(detail),
+								}
+							: mapCompletedVerification(detail, includeAudit);
 				} else if (operation === 'deleteVerification') {
 					const verificationId = (this.getNodeParameter('verificationId', itemIndex) as string).trim();
 					if (!verificationId) {
@@ -1169,8 +1294,32 @@ export class Lenz implements INodeType {
 				});
 			} catch (error) {
 				if (this.continueOnFail()) {
+					// This is the branch the capacity recovery pattern runs on:
+					// "On Error -> Continue (using error output)" into a Wait node
+					// set to the stated seconds. A bare message string gives that
+					// Wait node nothing to read, so the typed fields travel with
+					// it. `error` keeps its original value — existing workflows
+					// reading it are unaffected.
+					const json: IDataObject = { error: (error as Error).message };
+					const status = statusCodeOf(error);
+					if (status !== undefined) {
+						json.status_code = status;
+					}
+					const body = responseBodyOf(error);
+					if (typeof body.code === 'string' && body.code) {
+						json.code = body.code;
+					}
+					const retryAfter = Number(body.retry_after);
+					if (Number.isFinite(retryAfter) && retryAfter > 0) {
+						json.retry_after = Math.ceil(retryAfter);
+					}
+					const typed = quotaMessageFor(error) ?? capacityMessageFor(error);
+					if (typed) {
+						json.error_message = typed.message;
+						json.error_description = typed.description;
+					}
 					returnData.push({
-						json: { error: (error as Error).message },
+						json,
 						pairedItem: { item: itemIndex },
 					});
 					continue;
@@ -1181,12 +1330,16 @@ export class Lenz implements INodeType {
 				// rather than left reading a generic API failure.
 				const quota = quotaMessageFor(error);
 				if (quota) {
-					throw new NodeApiError(this.getNode(), error as JsonObject, {
-						itemIndex,
-						message: quota.message,
-						description: quota.description,
-						httpCode: '402',
-					});
+					throw describeApiError(this.getNode(), error, itemIndex, quota, '402');
+				}
+
+				// At capacity / providers down (HTTP 503 with a typed code) is
+				// transient by contract: say so and name the stated wait, rather
+				// than leaving n8n's stock 503 text — which recommends the
+				// automatic retry that cannot clear a 90-120s window.
+				const capacity = capacityMessageFor(error);
+				if (capacity) {
+					throw describeApiError(this.getNode(), error, itemIndex, capacity, '503');
 				}
 
 				// Pass the ORIGINAL error object through. NodeApiError derives
@@ -1195,8 +1348,7 @@ export class Lenz implements INodeType {
 				// httpCode permanently null and left the node structurally
 				// blind to 402 vs 403 vs 429. n8n's own status table (which
 				// already contains '402': 'Payment required') was dead code.
-				throw new NodeApiError(this.getNode(), error as JsonObject, {
-					itemIndex,
+				throw describeApiError(this.getNode(), error, itemIndex, {
 					message: (error as Error).message,
 				});
 			}

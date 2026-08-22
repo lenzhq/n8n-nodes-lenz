@@ -13,6 +13,37 @@ import { Lenz } from '../Lenz.node';
 // body (or throws to simulate an API/transport error).
 type Responder = (options: IHttpRequestOptions) => unknown;
 
+/**
+ * A failure in the shape the node actually receives at runtime.
+ *
+ * `httpRequestWithAuthentication` never rethrows the transport error — it
+ * catches it and throws `new NodeApiError(node, error)`. That matters twice
+ * over, and a hand-rolled `Object.assign(new Error(), { statusCode, body })`
+ * fixture gets both wrong:
+ *
+ *  1. the parsed body is no longer at `.body`; NodeApiError lifts it onto
+ *     `context.data`, so any handler reading `.body` finds nothing; and
+ *  2. NodeApiError's constructor starts with `if (errorResponse instanceof
+ *     NodeApiError) return errorResponse`, so re-wrapping the caught error to
+ *     attach a custom message silently discards that message.
+ *
+ * Both bugs are invisible to a plain-Error fixture and both are live in
+ * production, so every error test goes through this.
+ */
+function apiError(statusCode: number, body?: Record<string, unknown>, message?: string) {
+	const transport = Object.assign(
+		new Error(message ?? `Request failed with status code ${statusCode}`),
+		{
+			statusCode,
+			response: { status: statusCode, ...(body === undefined ? {} : { data: body }) },
+		},
+	);
+	return new NodeApiError(
+		{ name: 'Lenz', type: 'lenz', typeVersion: 1, position: [0, 0] } as never,
+		transport as never,
+	);
+}
+
 function createContext(
 	params: Record<string, unknown>,
 	responder: Responder,
@@ -331,11 +362,32 @@ describe('Lenz node - Verify (Deep)', () => {
 	});
 
 	it('maps a failed terminal state to a status: failed result, not a thrown error', async () => {
-		const responder = verifyResponder({ status: 'failed', error: 'bad input' });
+		const responder = verifyResponder({
+			status: 'failed',
+			error: 'Pipeline stopped at: research_empty',
+			failure_reason: 'research_empty',
+			failure_class: 'upstream_unavailable',
+			retryable: true,
+		});
 		const { output } = await runNode({ operation: 'verify', claim: 'broken claim' }, responder);
 		const json = output[0].json as IDataObject;
 		expect(json.status).toBe('failed');
 		expect(json.task_id).toBe('task_1');
+		// Explicit fields, not just prose — a downstream IF node branches on these.
+		expect(json.failure_reason).toBe('research_empty');
+		expect(json.failure_class).toBe('upstream_unavailable');
+		expect(json.retryable).toBe(true);
+		expect(json.message).toContain('research_empty');
+	});
+
+	it('tolerates a legacy failed body without the 2026-08 failure fields', async () => {
+		const responder = verifyResponder({ status: 'failed', error: 'bad input' });
+		const { output } = await runNode({ operation: 'verify', claim: 'broken claim' }, responder);
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('failed');
+		expect(json.failure_reason).toBe('');
+		expect(json.failure_class).toBe('');
+		expect(json.retryable).toBeNull();
 	});
 
 	it('fails clearly when submit returns no task_id instead of polling a bad URL', async () => {
@@ -594,6 +646,31 @@ describe('Lenz node - stored verifications', () => {
 		expect(json.audit).toBeUndefined();
 	});
 
+	it('reports a stored failure as failed rather than completed', async () => {
+		// Get used to run every record through the completed mapper, which
+		// hardcodes status: 'completed' — so a failed record came back claiming
+		// success with a null verdict, and without the fields an IF node needs.
+		const responder: Responder = () => ({
+			verification_id: 'ver_9',
+			status: 'failed',
+			error: 'Pipeline stopped at: research_empty',
+			failure_reason: 'research_empty',
+			failure_class: 'upstream_unavailable',
+			retryable: true,
+		});
+		const { output } = await runNode(
+			{ operation: 'getVerification', verificationId: 'ver_9' },
+			responder,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('failed');
+		expect(json.verification_id).toBe('ver_9');
+		expect(json.failure_reason).toBe('research_empty');
+		expect(json.failure_class).toBe('upstream_unavailable');
+		expect(json.retryable).toBe(true);
+		expect(json.passed).toBeUndefined();
+	});
+
 	it('deletes an owned verification', async () => {
 		const responder: Responder = (options) => {
 			expect(options.method).toBe('DELETE');
@@ -790,28 +867,136 @@ describe('Lenz node - error handling', () => {
 		);
 		expect(output[0].json).toEqual({ error: 'Unauthorized' });
 	});
+
+	it('carries the wait and typed code on the error output, not just a message', async () => {
+		// This is the branch the documented capacity recovery runs on:
+		// error output -> Wait node -> back into this node. A Wait node cannot
+		// read a number out of a prose string, so retry_after has to be a field.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'claim' },
+			() => {
+				throw apiError(503, {
+					detail: 'Lenz is at capacity right now.',
+					code: 'capacity',
+					retry_after: 100,
+				});
+			},
+			/* continueOnFail */ true,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(503);
+		expect(json.code).toBe('capacity');
+		expect(json.retry_after).toBe(100);
+		expect(String(json.error_message)).toContain('at capacity');
+		// `error` keeps its original value so existing workflows still read it.
+		expect(typeof json.error).toBe('string');
+	});
+});
+
+describe('Lenz node - capacity (HTTP 503)', () => {
+	// Admission control / provider outage: the API refuses the submit with a
+	// typed body code and a stated wait. Transient by contract — the node must
+	// say so, name the wait, and point at the Wait-node pattern. Explicitly NOT
+	// Retry On Fail: 2-5 tries spaced a few seconds apart cannot clear a 90-120s
+	// wait, and re-sending the submit that fast is the pile-on the server's
+	// jitter exists to prevent.
+	function capacityError(body: Record<string, unknown>) {
+		return apiError(503, body);
+	}
+
+	async function expectCapacityError(body: Record<string, unknown>) {
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
+			throw capacityError(body);
+		});
+		const node = new Lenz();
+		const err = await node.execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(err).toBeInstanceOf(NodeApiError);
+		return err as NodeApiError;
+	}
+
+	it('names the wait and points at the Wait-node pattern for code: capacity', async () => {
+		const err = await expectCapacityError({
+			detail: 'Lenz is at capacity right now.',
+			code: 'capacity',
+			retry_after: 100,
+		});
+		expect(err.message).toContain('at capacity');
+		expect(err.message).toContain('100s');
+		expect(err.description).toContain('Wait node');
+		expect(err.description).toContain('100 seconds');
+		expect(err.description).toContain('Nothing was charged');
+		expect(err.httpCode).toBe('503');
+	});
+
+	it('does not prescribe Retry On Fail as the remedy', async () => {
+		// Max Tries is 2-5 with a short gap between them, so it would burn every
+		// try inside the stated wait and fail anyway — while re-submitting each
+		// time. If the text mentions it at all, it must be to rule it out.
+		const err = await expectCapacityError({
+			detail: 'Lenz is at capacity right now.',
+			code: 'capacity',
+			retry_after: 100,
+		});
+		const description = String(err.description ?? '');
+		if (description.includes('Retry On Fail')) {
+			expect(description).toMatch(/not enough|isn't enough|too closely/i);
+		}
+		expect(err.message).not.toContain('Retry On Fail');
+	});
+
+	it('handles code: upstream_unavailable with a default wait when none is stated', async () => {
+		const err = await expectCapacityError({
+			detail: 'Providers down.',
+			code: 'upstream_unavailable',
+		});
+		expect(err.message).toContain('providers');
+		expect(err.message).toContain('90s');
+		expect(err.description).toContain('Wait node');
+		expect(err.description).toContain('90 seconds');
+	});
+
+	it('leaves a plain 503 without a typed code on the generic path', async () => {
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
+			throw apiError(503);
+		});
+		const node = new Lenz();
+		const err = (await node.execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		)) as NodeApiError;
+		expect(err).toBeInstanceOf(NodeApiError);
+		expect(err.message).not.toContain('Wait node');
+		expect(String(err.description ?? '')).not.toContain('Wait node');
+		expect(String(err.description ?? '')).not.toContain('Nothing was charged');
+	});
 });
 
 describe('Lenz node - quota (HTTP 402)', () => {
-	// Shape of a rejected request as the n8n http helper surfaces it. The
-	// status may arrive on any of several fields depending on transport, so
-	// each variant is exercised separately.
-	function quotaError(extra: Record<string, unknown>) {
+	const QUOTA_BODY = {
+		detail: 'No remaining claim checks.',
+		code: 'no_credits',
+		upgrade_url: 'https://lenz.io/plans',
+		remaining: 0,
+		resets_at: '2026-09-01T00:00:00+00:00',
+	};
+
+	// A raw transport error, i.e. what a direct helpers.httpRequest call throws.
+	// The status can land on any of several fields there, so the variants are
+	// exercised separately — but note this is NOT what reaches the node in
+	// production; see `apiError` for that path.
+	function rawQuotaError(extra: Record<string, unknown>) {
 		return Object.assign(new Error('Request failed with status code 402'), {
-			body: {
-				detail: 'No remaining claim checks.',
-				code: 'no_credits',
-				upgrade_url: 'https://lenz.io/plans',
-				remaining: 0,
-				resets_at: '2026-09-01T00:00:00+00:00',
-			},
+			body: QUOTA_BODY,
 			...extra,
 		});
 	}
 
-	async function expectQuotaError(extra: Record<string, unknown>) {
+	async function expectQuotaErrorFrom(thrown: unknown) {
 		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
-			throw quotaError(extra);
+			throw thrown;
 		});
 		const node = new Lenz();
 		const err = await node.execute.call(ctx).then(
@@ -827,12 +1012,12 @@ describe('Lenz node - quota (HTTP 402)', () => {
 		// `new NodeApiError(node, { message })`. A bare {message} carries no
 		// status, so httpCode was ALWAYS null and the node was structurally
 		// blind to 402 vs 403 vs 429 no matter what the server sent.
-		const err = await expectQuotaError({ statusCode: 402 });
+		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
 		expect(err.httpCode).toBe('402');
 	});
 
 	it('names the billing condition instead of a generic API failure', async () => {
-		const err = await expectQuotaError({ statusCode: 402 });
+		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
 		expect(err.message).toContain('No remaining claim checks.');
 		expect(err.description).toContain('lenz.io/plans');
 		// Must not tell the user to retry — a 402 never clears on retry.
@@ -840,7 +1025,7 @@ describe('Lenz node - quota (HTTP 402)', () => {
 	});
 
 	it('surfaces the reset time when the server states one', async () => {
-		const err = await expectQuotaError({ statusCode: 402 });
+		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
 		expect(err.description).toContain('2026-09-01');
 	});
 
@@ -851,17 +1036,14 @@ describe('Lenz node - quota (HTTP 402)', () => {
 			{ httpCode: '402' },
 			{ response: { status: 402 } },
 		]) {
-			const err = await expectQuotaError(shape);
+			const err = await expectQuotaErrorFrom(rawQuotaError(shape));
 			expect(err.message).toContain('No remaining claim checks.');
 		}
 	});
 
 	it('leaves a non-402 failure on the generic path', async () => {
 		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
-			throw Object.assign(new Error('Forbidden'), {
-				statusCode: 403,
-				body: { detail: 'This report is private.', code: 'private_claim' },
-			});
+			throw apiError(403, { detail: 'This report is private.', code: 'private_claim' }, 'Forbidden');
 		});
 		const node = new Lenz();
 		const err = (await node.execute.call(ctx).then(
