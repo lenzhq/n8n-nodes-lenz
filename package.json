@@ -23,6 +23,8 @@
         "lint:fix": "n8n-node lint --fix",
         "release": "n8n-node release",
         "prepublishOnly": "n8n-node prerelease",
+        "prompt:build": "node scripts/generate-workflow-prompt.mjs",
+        "prompt:check": "node scripts/generate-workflow-prompt.mjs --check",
         "test": "jest"
     },
     "files": [
