@@ -48,14 +48,14 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Send** | Asks a question grounded in the full research behind a completed **Verify (Deep)** result. Requires the `verification_id` that Verify returns — not usable standalone. |
-| **Get History** | Returns the stored conversation for a verification plus remaining ask quota. |
+| **Get History** | Returns the stored conversation for a verification plus how many follow-up questions are left. |
 | **Reset History** | Deletes the stored conversation for a verification. |
 
 ### Account
 
 | Operation | What it does |
 |---|---|
-| **Get Usage** | Returns remaining quota per capability (`assess` / `verify` / `ask` / `extract`), current plan, and when quota resets. |
+| **Get Usage** | Returns your credit balance and the per-endpoint price list (`costs`), plus the same balance projected into each capability (`assess` / `verify` / `ask`), the `extract` daily cap, your current plan, and when credits reset. |
 
 Every claim-checking operation returns a branch-ready `passed` boolean (derived from the verdict) alongside the raw verdict/confidence/citations, so you can wire an **IF** node directly off the result — e.g. route failed claims to human review.
 
@@ -192,6 +192,7 @@ So the Wait node has a number to read, the error output carries the refusal as f
 * **0.1.9** — Send a `User-Agent: n8n-nodes-lenz/<version>` header on every API request so Lenz can attribute API usage to the n8n integration.
 * **0.1.10** — Brought the node up to the full Lenz Public API v1 surface. Added operations for batch verification, claim selection, status polling, stored-verification management (get / list / delete / related), and ask history (get / reset). Verify now accepts `source_url`, `webhook_url`, and `visibility`, can skip waiting via **Wait for Completion**, and surfaces the fields the API had been returning but the node discarded — `key_finding`, `domain`, `entities`, `presumed_intent`, `warnings`, `language`, timestamps, full source detail (`snippet` / `source_name` / `date`), and an opt-in `audit` trail. A `needs_input` result now returns the offered claims and a reason-specific next step instead of dead-ending. Billable POSTs send an `Idempotency-Key` so an n8n retry cannot double-charge quota, and every request pins `X-Lenz-API-Version`. Operations are now organised under a **Resource** picker in node version 1.1; nodes already saved on version 1 keep their original flat operation list and behaviour.
 
+* **0.3.0** — Lenz replaced its six per-endpoint quotas with **one credit pool** per account, and the node now speaks it. Out-of-credits messages quote the two new fields on the 402 body — `cost` (what this call needed) beside `credits_remaining` (what you hold) — which is the difference between "you have 4 credits and this costs 10", one top-up away, and "you have nothing", a plan decision. **Get Usage** returns the balance and the live price list (`costs`) alongside the per-capability numbers, which are now projections of that one balance rather than separate allowances: spending on `assess` reduces what is left for `verify`. `/extract` still costs nothing and keeps its own daily fair-use cap, which rejects 429, not 402. No breaking change to any node output: every field the node emitted before is still emitted.
 * **0.2.0** — Out-of-credits is now reported as a billing problem instead of a generic API failure. The node re-wrapped every error as `new NodeApiError(node, { message })`, and because a bare `{message}` carries no status, `httpCode` was always `null` — so the node was structurally blind to the difference between 402, 403 and 429 regardless of what the API returned. The original error is now passed through, and an HTTP 402 gets an explicit branch naming the condition, linking to [lenz.io/plans](https://lenz.io/plans), and stating that retrying will not help. Also documents the `/extract` daily cap (1000 calls per key per day, resetting 00:00 UTC), which the operation description had only ever called "free".
 
   Also fixes an `Idempotency-Key` collision introduced in 0.1.10. The key was derived from the item index alone, so a node that ran more than once inside a single execution — **Loop Over Items**, or an **AI Agent** calling Lenz as a tool — reused the first run's key with different input, and the API rejected it (`422`, or `409` while the first call was still in flight). The key now includes a fingerprint of the request body, which keeps retry protection intact while letting repeated runs through. Verify also fails with a clear message if a submit returns no `task_id`, rather than polling an invalid status URL.

@@ -110,10 +110,22 @@ function quotaMessageFor(error: unknown): { message: string; description: string
 	const detail = typeof body.detail === 'string' ? body.detail : 'No remaining Lenz credits.';
 	const upgradeUrl = typeof body.upgrade_url === 'string' ? body.upgrade_url : PLANS_URL;
 
-	let description = `Retrying will not help — this clears when you top up or the monthly quota resets. See ${upgradeUrl}`;
+	// `cost` and `credits_remaining` are in CREDITS; `remaining` is in the
+	// capability's own unit. Quoting both is what separates "you have 4 credits
+	// and this costs 10" from "you have nothing" — the first is one top-up away,
+	// the second is a plan decision.
+	const cost = typeof body.cost === 'number' ? body.cost : undefined;
+	const creditsRemaining =
+		typeof body.credits_remaining === 'number' ? body.credits_remaining : undefined;
+
+	let description = '';
+	if (cost !== undefined && creditsRemaining !== undefined) {
+		description = `This call costs ${cost} credit${cost === 1 ? '' : 's'} and you have ${creditsRemaining} left. `;
+	}
+	description += `Retrying will not help — this clears when you top up or your monthly credits reset. See ${upgradeUrl}`;
 	const resetsAt = typeof body.resets_at === 'string' ? body.resets_at : '';
 	if (resetsAt) {
-		description += ` (quota resets ${resetsAt}).`;
+		description += ` (credits reset ${resetsAt}).`;
 	}
 
 	return { message: `Lenz: ${detail}`, description };
@@ -484,7 +496,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Get History',
 						value: 'askHistory',
-						description: 'Retrieve the follow-up conversation and remaining ask quota',
+						description: 'Retrieve the follow-up conversation and remaining follow-up questions',
 						action: 'Get ask history for a verification',
 					},
 					{

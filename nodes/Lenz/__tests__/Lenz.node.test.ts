@@ -979,7 +979,11 @@ describe('Lenz node - quota (HTTP 402)', () => {
 		detail: 'No remaining claim checks.',
 		code: 'no_credits',
 		upgrade_url: 'https://lenz.io/plans',
+		// `remaining` is in the capability's own unit (verifications);
+		// `credits_remaining` and `cost` are in credits. Both are on the body.
 		remaining: 0,
+		credits_remaining: 4,
+		cost: 10,
 		resets_at: '2026-09-01T00:00:00+00:00',
 	};
 
@@ -1027,6 +1031,31 @@ describe('Lenz node - quota (HTTP 402)', () => {
 	it('surfaces the reset time when the server states one', async () => {
 		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
 		expect(err.description).toContain('2026-09-01');
+	});
+
+	it('quotes the cost beside the balance so the user can size the shortfall', async () => {
+		// "4 credits, this needs 10" is one top-up away. "0 credits" is a plan
+		// decision. Without both numbers the message cannot tell them apart.
+		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
+		expect(err.description).toContain('costs 10 credits');
+		expect(err.description).toContain('you have 4 left');
+	});
+
+	it('omits the balance line rather than printing undefined', async () => {
+		// Both fields are omitted by the API when unresolvable — never null —
+		// so the node must render nothing rather than "costs undefined credits".
+		const withoutCredits = { ...QUOTA_BODY };
+		delete (withoutCredits as Partial<typeof QUOTA_BODY>).cost;
+		delete (withoutCredits as Partial<typeof QUOTA_BODY>).credits_remaining;
+		const err = await expectQuotaErrorFrom(apiError(402, withoutCredits));
+		expect(err.description).not.toContain('undefined');
+		expect(err.description).not.toContain('costs');
+		expect(err.description).toContain('Retrying will not help');
+	});
+
+	it('says "credit" in the singular for a one-credit call', async () => {
+		const err = await expectQuotaErrorFrom(apiError(402, { ...QUOTA_BODY, cost: 1 }));
+		expect(err.description).toContain('costs 1 credit and');
 	});
 
 	it('recognises the status wherever the transport puts it', async () => {
