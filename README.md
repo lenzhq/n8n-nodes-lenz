@@ -48,14 +48,16 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Send** | Asks a question grounded in the full research behind a completed **Verify (Deep)** result. Requires the `verification_id` that Verify returns — not usable standalone. |
-| **Get History** | Returns the stored conversation for a verification plus remaining ask quota. |
+| **Get History** | Returns the stored conversation for a verification plus how many follow-up questions are left. |
 | **Reset History** | Deletes the stored conversation for a verification. |
 
 ### Account
 
 | Operation | What it does |
 |---|---|
-| **Get Usage** | Returns remaining quota per capability (`assess` / `verify` / `ask` / `extract`), current plan, and when quota resets. |
+| **Get Usage** | Returns your credit balance and the per-endpoint price list (`costs`), plus the same balance projected into each capability (`assess` / `verify` / `ask`), the `extract` daily cap, your current plan, and when credits reset. Prices that depend on a request parameter are under `cost_options` instead, nested capability → parameter → value — today `cost_options.verify.depth.low` is 5 against a default of 10. |
+
+The per-capability blocks (`verify` / `ask` / `assess`) and each block's `credits` alias are **deprecated, and the API removes them on 2026-11-29**. They are projections of the one balance, not separate allowances, so derive them instead and branch on the balance itself: `remaining = credits.remaining // costs[capability]`. An **IF** node reading `{{ $json.verify.remaining }}` today will stop resolving on that date.
 
 Every claim-checking operation returns a branch-ready `passed` boolean (derived from the verdict) alongside the raw verdict/confidence/citations, so you can wire an **IF** node directly off the result — e.g. route failed claims to human review.
 
@@ -170,7 +172,11 @@ So the Wait node has a number to read, the error output carries the refusal as f
 | `retry_after` | Seconds to wait before submitting again — point the Wait node's duration at `{{ $json.retry_after }}` |
 | `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `no_credits` |
 | `status_code` | The HTTP status, e.g. `503` |
+| `cost` | Credits the refused call needed, present only on an out-of-credits refusal |
+| `credits_remaining` | Credits the account holds — `0` is a real value and is reported, not dropped |
 | `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing or capacity refusal |
+
+`cost` and `credits_remaining` let an **IF** node tell a shortfall from an empty balance without reading the prose: `{{ $json.credits_remaining }}` above zero is one top-up away, zero is a plan decision.
 
 `error` keeps the raw message it always carried, so existing workflows reading it are unaffected.
 
@@ -199,6 +205,8 @@ So the Wait node has a number to read, the error output carries the refusal as f
 * **0.2.1** — A failed verification now returns `failure_reason`, `failure_class` (closed set: `upstream_unavailable` / `insufficient_evidence` / `invalid_input` / `cancelled` / `internal`) and `retryable` as explicit output fields, so an IF node can branch on *why* it failed instead of parsing the prose message. Capacity refusals (HTTP 503 with `code: capacity` or `upstream_unavailable`, sent when Lenz is shedding load or every model provider is down) are reported as transient with the stated wait and the Wait-node pattern that clears it, instead of a generic 503.
 
   Also repairs the error path both of those rely on. The node read the API's error body from `.body` / `.response.data`, but `httpRequestWithAuthentication` never rethrows the transport error — it wraps it in a `NodeApiError`, which moves the parsed body to `context.data`. Nothing matched, so the typed branches never ran. Attaching the wording then failed a second time: `new NodeApiError(node, error, { message })` returns the caught error untouched when that error is already a `NodeApiError`, discarding the message, description and status. The node now reads the body from where n8n puts it and sets the wording on the caught error, so the text actually reaches the user — this is also what makes 0.2.0's out-of-credits message work, which had never appeared in practice. The error tests now build their fixtures the way n8n does, since the previous hand-built shape could not exercise either path. On top of that, the error output carries `retry_after`, `code` and `status_code` so the documented Wait-node recovery has a value to read, and **Get** no longer reports a stored verification that failed as `completed` with a null verdict.
+
+* **0.3.0** — Lenz replaced its six per-endpoint quotas with **one credit pool** per account, and the node now speaks it. Out-of-credits messages quote the two new fields on the 402 body — `cost` (what this call needed) beside `credits_remaining` (what you hold) — which is the difference between "you have 4 credits and this costs 10", one top-up away, and "you have nothing", a plan decision. **Get Usage** returns the balance and the live price list (`costs`) alongside the per-capability numbers, which are now projections of that one balance rather than separate allowances: spending on `assess` reduces what is left for `verify`, and those blocks are deprecated — the API removes them on 2026-11-29. `/extract` still costs nothing and keeps its own daily fair-use cap, which rejects 429, not 402. The error output carries both numbers as fields — `cost` and `credits_remaining` beside the existing `retry_after` / `code` / `status_code` — so an IF node can tell a shortfall from an empty balance without parsing the message. **Get Usage**'s description no longer says "quota" or "for the current API key": the pool is per account, shared across your keys, the same correction the extract cap description already carries. No breaking change to any node output: every field the node emitted before is still emitted.
 
 ## Maintainer
 

@@ -16,7 +16,7 @@ const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.2.1';
+const USER_AGENT = 'n8n-nodes-lenz/0.3.0';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -100,8 +100,9 @@ function responseBodyOf(error: unknown): IDataObject {
  * this error isn't one.
  *
  * Keyed on HTTP 402, which the Lenz API sends for exactly this condition. The
- * body's `code` and `remaining` refine the wording but are not required — a
- * 402 alone is unambiguous.
+ * body's `detail`, `cost` and `credits_remaining` refine the wording but none
+ * is required — a 402 alone is unambiguous, so a server that omits them still
+ * produces the generic text rather than "costs undefined credits".
  */
 function quotaMessageFor(error: unknown): { message: string; description: string } | undefined {
 	if (statusCodeOf(error) !== 402) return undefined;
@@ -110,10 +111,22 @@ function quotaMessageFor(error: unknown): { message: string; description: string
 	const detail = typeof body.detail === 'string' ? body.detail : 'No remaining Lenz credits.';
 	const upgradeUrl = typeof body.upgrade_url === 'string' ? body.upgrade_url : PLANS_URL;
 
-	let description = `Retrying will not help — this clears when you top up or the monthly quota resets. See ${upgradeUrl}`;
+	// `cost` and `credits_remaining` are in CREDITS; `remaining` is in the
+	// capability's own unit. Quoting both is what separates "you have 4 credits
+	// and this costs 10" from "you have nothing" — the first is one top-up away,
+	// the second is a plan decision.
+	const cost = typeof body.cost === 'number' ? body.cost : undefined;
+	const creditsRemaining =
+		typeof body.credits_remaining === 'number' ? body.credits_remaining : undefined;
+
+	let description = '';
+	if (cost !== undefined && creditsRemaining !== undefined) {
+		description = `This call costs ${cost} credit${cost === 1 ? '' : 's'} and you have ${creditsRemaining} left. `;
+	}
+	description += `Retrying will not help — this clears when you top up or your monthly credits reset. See ${upgradeUrl}`;
 	const resetsAt = typeof body.resets_at === 'string' ? body.resets_at : '';
 	if (resetsAt) {
-		description += ` (quota resets ${resetsAt}).`;
+		description += ` (credits reset ${resetsAt}).`;
 	}
 
 	return { message: `Lenz: ${detail}`, description };
@@ -484,7 +497,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Get History',
 						value: 'askHistory',
-						description: 'Retrieve the follow-up conversation and remaining ask quota',
+						description: 'Retrieve the follow-up conversation and remaining follow-up questions',
 						action: 'Get ask history for a verification',
 					},
 					{
@@ -514,8 +527,8 @@ export class Lenz implements INodeType {
 					{
 						name: 'Get Usage',
 						value: 'usage',
-						description: 'Check remaining quota for the current API key',
-						action: 'Check usage and quota',
+						description: 'Check your account credit balance, what each operation costs, and when credits reset. Credits are per account, shared across your API keys.',
+						action: 'Check usage and credits',
 					},
 				],
 				default: 'usage',
@@ -547,8 +560,8 @@ export class Lenz implements INodeType {
 					{
 						name: 'Check Usage',
 						value: 'usage',
-						description: 'Check remaining quota for the current API key',
-						action: 'Check usage and quota',
+						description: 'Check your account credit balance, what each operation costs, and when credits reset. Credits are per account, shared across your API keys.',
+						action: 'Check usage and credits',
 					},
 					{
 						name: 'Extract Claims',
@@ -1312,6 +1325,20 @@ export class Lenz implements INodeType {
 					const retryAfter = Number(body.retry_after);
 					if (Number.isFinite(retryAfter) && retryAfter > 0) {
 						json.retry_after = Math.ceil(retryAfter);
+					}
+					// The same two numbers the 402 message quotes, carried as
+					// fields rather than prose. A workflow that tops up
+					// automatically, or routes a small shortfall differently
+					// from an empty balance, should not have to parse the
+					// description to find them — that is the parsing 0.2.1
+					// removed for failure_class and retryable. Checked with
+					// typeof, not truthiness: a credits_remaining of 0 is the
+					// case that matters most and the one truthiness drops.
+					if (typeof body.cost === 'number') {
+						json.cost = body.cost;
+					}
+					if (typeof body.credits_remaining === 'number') {
+						json.credits_remaining = body.credits_remaining;
 					}
 					const typed = quotaMessageFor(error) ?? capacityMessageFor(error);
 					if (typed) {

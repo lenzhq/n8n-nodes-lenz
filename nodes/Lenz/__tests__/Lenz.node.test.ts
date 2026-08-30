@@ -1,3 +1,6 @@
+// Imported, not read off disk: the community-node lint bans `node:fs`,
+// `node:path` and `__dirname` in this package, tests included.
+import packageJson from '../../../package.json';
 import { NodeApiError } from 'n8n-workflow';
 import type { IDataObject, IExecuteFunctions, IHttpRequestOptions } from 'n8n-workflow';
 
@@ -769,6 +772,15 @@ describe('Lenz node - client identification', () => {
 		expect(calls[0].headers?.['User-Agent']).toMatch(/^n8n-nodes-lenz\//);
 	});
 
+	it('reports the version in package.json, not the last one someone typed', async () => {
+		// The header exists so Lenz can attribute API usage to this node, which
+		// only works if the version is true. A prefix match cannot catch a stale
+		// constant: the 0.3.0 bump landed with the header still saying 0.2.1
+		// and CI stayed green, which is what this assertion exists to stop.
+		const { calls } = await runNode({ operation: 'usage' }, () => ({ plan: 'free' }));
+		expect(calls[0].headers?.['User-Agent']).toBe(`n8n-nodes-lenz/${packageJson.version}`);
+	});
+
 	it('pins the API version it was built against', async () => {
 		const { calls } = await runNode({ operation: 'usage' }, () => ({ plan: 'free' }));
 		expect(calls[0].headers?.['X-Lenz-API-Version']).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -891,6 +903,59 @@ describe('Lenz node - error handling', () => {
 		// `error` keeps its original value so existing workflows still read it.
 		expect(typeof json.error).toBe('string');
 	});
+
+	it('carries the credit numbers on the error output, not only in the prose', async () => {
+		// Same reason retry_after is a field. An IF node choosing between "top
+		// up and retry" and "escalate, the plan is wrong" needs the shortfall
+		// as a number; making it regex error_description is the prose-parsing
+		// that failure_class and retryable were added to remove.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'claim' },
+			() => {
+				throw apiError(402, {
+					detail: 'No remaining claim checks.',
+					code: 'no_credits',
+					credits_remaining: 4,
+					cost: 10,
+				});
+			},
+			/* continueOnFail */ true,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(402);
+		expect(json.code).toBe('no_credits');
+		expect(json.cost).toBe(10);
+		expect(json.credits_remaining).toBe(4);
+	});
+
+	it('reports a zero balance instead of dropping it', async () => {
+		// The case truthiness would lose, and the one that most needs its own
+		// branch: nothing left at all is a plan decision, not a top-up.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'claim' },
+			() => {
+				throw apiError(402, { detail: 'No credits.', credits_remaining: 0, cost: 10 });
+			},
+			/* continueOnFail */ true,
+		);
+		expect((output[0].json as IDataObject).credits_remaining).toBe(0);
+	});
+
+	it('omits the credit fields entirely when the body has none', async () => {
+		// A 503 body carries no credit numbers; the keys must be absent rather
+		// than present-and-undefined, or an IF node on credits_remaining sees a
+		// field that is not there.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'claim' },
+			() => {
+				throw apiError(503, { detail: 'At capacity.', code: 'capacity', retry_after: 30 });
+			},
+			/* continueOnFail */ true,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('cost');
+		expect(json).not.toHaveProperty('credits_remaining');
+	});
 });
 
 describe('Lenz node - capacity (HTTP 503)', () => {
@@ -979,7 +1044,11 @@ describe('Lenz node - quota (HTTP 402)', () => {
 		detail: 'No remaining claim checks.',
 		code: 'no_credits',
 		upgrade_url: 'https://lenz.io/plans',
+		// `remaining` is in the capability's own unit (verifications);
+		// `credits_remaining` and `cost` are in credits. Both are on the body.
 		remaining: 0,
+		credits_remaining: 4,
+		cost: 10,
 		resets_at: '2026-09-01T00:00:00+00:00',
 	};
 
@@ -1027,6 +1096,31 @@ describe('Lenz node - quota (HTTP 402)', () => {
 	it('surfaces the reset time when the server states one', async () => {
 		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
 		expect(err.description).toContain('2026-09-01');
+	});
+
+	it('quotes the cost beside the balance so the user can size the shortfall', async () => {
+		// "4 credits, this needs 10" is one top-up away. "0 credits" is a plan
+		// decision. Without both numbers the message cannot tell them apart.
+		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
+		expect(err.description).toContain('costs 10 credits');
+		expect(err.description).toContain('you have 4 left');
+	});
+
+	it('omits the balance line rather than printing undefined', async () => {
+		// Both fields are omitted by the API when unresolvable — never null —
+		// so the node must render nothing rather than "costs undefined credits".
+		const withoutCredits = { ...QUOTA_BODY };
+		delete (withoutCredits as Partial<typeof QUOTA_BODY>).cost;
+		delete (withoutCredits as Partial<typeof QUOTA_BODY>).credits_remaining;
+		const err = await expectQuotaErrorFrom(apiError(402, withoutCredits));
+		expect(err.description).not.toContain('undefined');
+		expect(err.description).not.toContain('costs');
+		expect(err.description).toContain('Retrying will not help');
+	});
+
+	it('says "credit" in the singular for a one-credit call', async () => {
+		const err = await expectQuotaErrorFrom(apiError(402, { ...QUOTA_BODY, cost: 1 }));
+		expect(err.description).toContain('costs 1 credit and');
 	});
 
 	it('recognises the status wherever the transport puts it', async () => {
