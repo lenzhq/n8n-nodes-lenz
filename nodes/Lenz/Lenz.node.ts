@@ -400,7 +400,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Assess (Fast)',
 						value: 'assess',
-						description: 'Fast 3-model panel verdict (~5-10s), one entry per claim found in the text',
+						description: 'Fast 3-model panel verdict (~10s), one entry per claim found in the text',
 						action: 'Quickly assess text for factual claims',
 					},
 					{
@@ -541,7 +541,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Assess (Fast)',
 						value: 'assess',
-						description: 'Fast 3-model panel verdict (~5-10s), one entry per claim found in the text',
+						description: 'Fast 3-model panel verdict (~10s), one entry per claim found in the text',
 						action: 'Quickly assess text for factual claims',
 					},
 					{
