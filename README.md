@@ -28,7 +28,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Verify (Deep)** *(default)* | Full 8-model pipeline (research → debate → adjudication), ~90 seconds. Returns a verdict, confidence, `lenz_score` (1-10), `key_finding`, sourced citations, and an executive summary. Reserve for high-stakes claims that need a thorough, cited answer. |
-| **Assess (Fast)** | A quick 3-model panel verdict, ~5-10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. |
+| **Assess (Fast)** | A quick 3-model panel verdict, ~10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. |
 | **Extract Claims** | Free — pulls the verifiable factual claims out of a block of text without checking them. Useful as a first step before running Assess or Verify on each claim individually. |
 
 ### Verification — manage submitted and stored work
@@ -105,7 +105,7 @@ A simple "fact-check gate" pattern — verify an LLM's output before acting on i
 3. Add an **IF node** after Lenz with the condition `{{ $json.passed }}` **is true**.
 4. Wire the true branch to continue the workflow normally, and the false branch to whatever your "needs review" path is (Slack alert, email, a manual-approval step, etc.).
 
-For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~5-10s instead of ~90s.
+For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~10s instead of ~90s.
 
 ### Follow-up questions on a completed verification
 
