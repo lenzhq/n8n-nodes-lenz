@@ -289,6 +289,7 @@ describe('Lenz node - Verify (Deep)', () => {
 			source_url: 'https://origin.example/article',
 			webhook_url: 'https://hooks.example/lenz',
 			visibility: 'unlisted',
+			depth: 'standard',
 		});
 	});
 
@@ -405,6 +406,36 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(calls).toHaveLength(1); // submit only, no status poll
 	});
 
+	it('asks for the depth that was chosen, so a low check is billed at the low price', async () => {
+		const { calls } = await runNode(
+			{ operation: 'verify', claim: 'Some claim', depth: 'low' },
+			verifyResponder(completedStatus),
+		);
+		const submit = calls.find((c) => c.url === '/verify');
+		expect((submit?.body as IDataObject).depth).toBe('low');
+	});
+
+	it('reports the depth the verdict was produced with, not the one requested', async () => {
+		// A low request answered from an existing standard verdict is charged
+		// the low price but carries standard evidence. Reading back 'standard'
+		// here is correct, and is the only way a workflow can tell the two
+		// apart — so it must not be overwritten with the requested value.
+		const served = { ...completedStatus, result: { ...(completedStatus.result as IDataObject), depth: 'standard' } };
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim', depth: 'low' },
+			verifyResponder(served),
+		);
+		expect((output[0].json as IDataObject).depth).toBe('standard');
+	});
+
+	it('reports an empty depth on a verification stored before the field existed', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			verifyResponder(completedStatus),
+		);
+		expect((output[0].json as IDataObject).depth).toBe('');
+	});
+
 	it('wraps an API error from the submit call in NodeApiError rather than swallowing it', async () => {
 		const responder: Responder = () => {
 			throw new Error('Unauthorized');
@@ -457,6 +488,7 @@ describe('Lenz node - Submit Verify Batch', () => {
 			expect(options.url).toBe('/verify/batch');
 			expect(options.body).toEqual({
 				claims: [{ text: 'Claim one' }, { text: 'Claim two', language: 'es' }],
+				depth: 'standard',
 			});
 			return {
 				batch_id: 'batch_1',
@@ -510,6 +542,29 @@ describe('Lenz node - Submit Verify Batch', () => {
 		expect(httpMock).not.toHaveBeenCalled();
 	});
 
+	it('lets one batch mix depths, the per-item value winning over the default', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'verifyBatch',
+				depth: 'standard',
+				batchClaims: {
+					claim: [
+						{ text: 'Cheap one', depth: 'low' },
+						{ text: 'Careful one', depth: '' },
+					],
+				},
+			},
+			() => ({ batch_id: 'b1', items: [] }),
+		);
+		// The inheriting row carries no depth key at all. Sending '' would
+		// fail the API's enum, and sending the resolved 'standard' would
+		// erase the distinction between an override and an inheritance.
+		expect(calls[0].body).toEqual({
+			claims: [{ text: 'Cheap one', depth: 'low' }, { text: 'Careful one' }],
+			depth: 'standard',
+		});
+	});
+
 	it('skips a batch with no usable claims', async () => {
 		const { output, httpMock } = await runNode(
 			{ operation: 'verifyBatch', batchClaims: { claim: [{ text: '  ' }] } },
@@ -557,6 +612,57 @@ describe('Lenz node - Extract Claims', () => {
 		const { output, httpMock } = await runNode({ operation: 'extract', text: '  ' }, noCall);
 		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
 		expect(httpMock).not.toHaveBeenCalled();
+	});
+
+	it('sends the focus hint, with its whitespace collapsed', async () => {
+		const { calls } = await runNode(
+			{ operation: 'extract', text: 'Some text', focus: '  market size,\n  growth  ' },
+			() => ({ status: 'ready' }),
+		);
+		expect(calls[0].body).toEqual({ text: 'Some text', focus: 'market size, growth' });
+	});
+
+	it('measures the focus after collapsing, so padding alone cannot fail it', async () => {
+		// 451 raw characters that collapse to 252. The API counts the
+		// collapsed length, so rejecting this locally would refuse a focus the
+		// user correctly counted as under the limit.
+		const padded = 'a'.repeat(250) + ' '.repeat(200) + 'b';
+		const { calls } = await runNode(
+			{ operation: 'extract', text: 'Some text', focus: padded },
+			() => ({ status: 'ready' }),
+		);
+		expect(((calls[0].body as IDataObject).focus as string).length).toBe(252);
+	});
+
+	it('rejects an over-long focus before spending a request on it', async () => {
+		// Refused, never truncated: a silently shortened focus returns a
+		// subset of the claims with nothing to show that it happened.
+		const { ctx, httpMock } = createContext(
+			{ operation: 'extract', text: 'Some text', focus: 'a '.repeat(200) },
+			noCall,
+		);
+		const node = new Lenz();
+		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
+		expect(httpMock).not.toHaveBeenCalled();
+	});
+
+	it('explains a no_match instead of returning a bare empty list', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text', focus: 'unrelated topic' },
+			() => ({ status: 'no_match', claim: '', identified_claims: [] }),
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('no_match');
+		expect(json.identified_claims).toEqual([]);
+		expect(json.message).toContain('none fall within the focus');
+	});
+
+	it('adds no message to an extraction that did match', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => ({ status: 'ready', identified_claims: ['A'] }),
+		);
+		expect(output[0].json).not.toHaveProperty('message');
 	});
 
 	it('passes through the raw extract response', async () => {
