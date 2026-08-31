@@ -16,7 +16,7 @@ const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.3.0';
+const USER_AGENT = 'n8n-nodes-lenz/0.4.0';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -32,6 +32,12 @@ const POLL_BACKOFF_MS = [2000, 4000, 8000];
 
 // Server-side cap on POST /verify/batch and POST /verify/{task_id}/select.
 const BATCH_MAX_CLAIMS = 20;
+
+// Server-side cap on the /extract `focus` hint. Measured after whitespace is
+// collapsed and enforced by rejection, never truncation — a silently shortened
+// focus returns a subset the caller did not ask for and gives them no way to
+// notice.
+const MAX_FOCUS_CHARS = 300;
 
 // GET /verifications is paginated; 100 is the largest page the API allows.
 const MAX_PAGE_SIZE = 100;
@@ -282,6 +288,12 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 		citations: mapCitations(sources),
 		verification_id: result.verification_id ?? null,
 		visibility: result.visibility ?? '',
+		// The depth this verdict was actually PRODUCED with, which is not
+		// always the depth that was requested: a low request served from an
+		// existing standard verdict reads 'standard' here and is still
+		// charged the low price. Surfaced because without it there is no way
+		// to tell how much evidence is behind the answer.
+		depth: result.depth ?? '',
 		language: result.language ?? '',
 		created_at: result.created_at ?? '',
 		modified_at: result.modified_at ?? null,
@@ -619,13 +631,28 @@ export class Lenz implements INodeType {
 						displayName: 'Claim',
 						values: [
 							{
-								displayName: 'Text',
-								name: 'text',
-								type: 'string',
-								typeOptions: { rows: 2 },
+								displayName: 'Depth',
+								name: 'depth',
+								type: 'options',
+								options: [
+									{
+										name: 'Batch Default',
+										value: '',
+										description: 'Inherit the depth set for the whole batch',
+									},
+									{
+										name: 'Low',
+										value: 'low',
+										description: 'Half the credits, fewer sources, no recovery fetch tiers',
+									},
+									{
+										name: 'Standard',
+										value: 'standard',
+										description: 'The full pipeline, at the full price',
+									},
+								],
 								default: '',
-								required: true,
-								description: 'The claim to investigate in depth',
+								description: 'How widely this claim is checked. Each claim is priced on its own depth, so one batch can mix the two and pay 5 for some claims and 10 for others.',
 							},
 							{
 								displayName: 'Language',
@@ -641,6 +668,15 @@ export class Lenz implements INodeType {
 								type: 'string',
 								default: '',
 								description: 'Optional URL the claim came from, used as context when framing it',
+							},
+							{
+								displayName: 'Text',
+								name: 'text',
+								type: 'string',
+								typeOptions: { rows: 2 },
+								default: '',
+								required: true,
+								description: 'The claim to investigate in depth',
 							},
 							{
 								displayName: 'Visibility',
@@ -819,6 +855,39 @@ export class Lenz implements INodeType {
 				description: 'Who can reach the verification once it completes',
 			},
 			{
+				displayName: 'Depth',
+				name: 'depth',
+				type: 'options',
+				options: [
+					{
+						name: 'Low',
+						value: 'low',
+						description: 'Half the credits. Searches fewer sources and skips the recovery fetch tiers, so it answers sooner with less evidence behind the verdict.',
+					},
+					{
+						name: 'Standard',
+						value: 'standard',
+						description: 'The full pipeline, and the default',
+					},
+				],
+				default: 'standard',
+				displayOptions: {
+					show: { operation: ['verify', 'verifyBatch'] },
+				},
+				description: 'How widely the check searches. Low costs half the credits — 5 against 10 — and every step still runs the same models, so it narrows research breadth rather than downgrading the reasoning. You are charged for the depth you request, so a Low request answered from an existing standard verdict still costs 5 while the returned Depth reads "standard": the echo describes the evidence, the charge follows the request.',
+			},
+			{
+				displayName: 'Focus',
+				name: 'focus',
+				type: 'string',
+				default: '',
+				placeholder: 'Market size, growth and competitors',
+				displayOptions: {
+					show: { operation: ['extract'] },
+				},
+				description: 'Optional hint that narrows the result to the claims it describes, at most 300 characters. It only selects from the claims the extractor already found — it cannot add one, reword one, or change what counts as a claim. When nothing matches, Status comes back as no_match with an empty list; the unfocused claims are never substituted. Costs no extra credits.',
+			},
+			{
 				displayName: 'Language',
 				name: 'language',
 				type: 'string',
@@ -934,6 +1003,7 @@ export class Lenz implements INodeType {
 					const sourceUrl = (this.getNodeParameter('sourceUrl', itemIndex, '') as string).trim();
 					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
+					const depth = this.getNodeParameter('depth', itemIndex, 'standard') as string;
 
 					const submitBody: IDataObject = { text: claim };
 					if (language) {
@@ -947,6 +1017,13 @@ export class Lenz implements INodeType {
 					}
 					if (visibility) {
 						submitBody.visibility = visibility;
+					}
+					// Sent on every call, the way visibility is, rather than only when
+					// it differs from the default. The request then states the price it
+					// expects to pay, which is what makes the depth echoed on the result
+					// readable when the two disagree.
+					if (depth) {
+						submitBody.depth = depth;
 					}
 					const accepted = await lenzRequest('POST', '/verify', submitBody, {
 						idempotent: { operation, itemIndex },
@@ -1030,6 +1107,7 @@ export class Lenz implements INodeType {
 
 					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
+					const depth = this.getNodeParameter('depth', itemIndex, 'standard') as string;
 
 					const body: IDataObject = {
 						claims: entries.map((entry) => {
@@ -1037,6 +1115,7 @@ export class Lenz implements INodeType {
 							const entryLanguage = (((entry.language as string) ?? '') as string).trim();
 							const entrySourceUrl = (((entry.sourceUrl as string) ?? '') as string).trim();
 							const entryVisibility = (((entry.visibility as string) ?? '') as string).trim();
+							const entryDepth = (((entry.depth as string) ?? '') as string).trim();
 							if (entryLanguage) {
 								claimBody.language = entryLanguage;
 							}
@@ -1045,6 +1124,13 @@ export class Lenz implements INodeType {
 							}
 							if (entryVisibility) {
 								claimBody.visibility = entryVisibility;
+							}
+							// Left off entirely when the row says "Batch Default", so the
+							// batch-wide value applies. Sending '' instead would fail the
+							// API's enum, and sending the resolved default would hide which
+							// rows were actually overridden.
+							if (entryDepth) {
+								claimBody.depth = entryDepth;
 							}
 							return claimBody;
 						}),
@@ -1057,6 +1143,9 @@ export class Lenz implements INodeType {
 					}
 					if (visibility) {
 						body.visibility = visibility;
+					}
+					if (depth) {
+						body.depth = depth;
 					}
 
 					const accepted = await lenzRequest('POST', '/verify/batch', body, {
@@ -1165,13 +1254,45 @@ export class Lenz implements INodeType {
 						continue;
 					}
 
+					// Collapse the whitespace first and measure that, which is the order
+					// the API uses: measuring the raw string would refuse a focus the
+					// user correctly counted as short. Over-long is refused rather than
+					// trimmed, because a silently shortened focus returns a subset of
+					// the claims with nothing to show that it happened. Length is the
+					// only rule mirrored here; the API's other rejections still arrive
+					// as its own 422.
+					const focus = (this.getNodeParameter('focus', itemIndex, '') as string)
+						.trim()
+						.replace(/\s+/g, ' ');
+					if (focus.length > MAX_FOCUS_CHARS) {
+						throw new NodeOperationError(
+							this.getNode(),
+							`A focus can be at most ${MAX_FOCUS_CHARS} characters, got ${focus.length}`,
+							{ itemIndex },
+						);
+					}
+
 					const body: IDataObject = { text };
 					if (language) {
 						body.language = language;
 					}
+					// The collapsed form travels, not the raw one, so the body this node
+					// fingerprints into its Idempotency-Key is the same string the API
+					// hashes into its own — two spellings of one focus stay one request.
+					if (focus) {
+						body.focus = focus;
+					}
 					responseData = await lenzRequest('POST', '/extract', body, {
 						idempotent: { operation, itemIndex },
 					});
+					// `no_match` means claims were found and the focus excluded all of
+					// them. The empty list is the answer rather than a failure, but on
+					// its own it is indistinguishable from "nothing here", so name the
+					// cause and the way out.
+					if (responseData.status === 'no_match') {
+						responseData.message =
+							'Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted.';
+					}
 				} else if (operation === 'ask') {
 					const verificationId = this.getNodeParameter('verificationId', itemIndex) as string;
 					const question = this.getNodeParameter('question', itemIndex) as string;
