@@ -16,7 +16,7 @@ const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.4.0';
+const USER_AGENT = 'n8n-nodes-lenz/0.4.1';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -603,6 +603,21 @@ export class Lenz implements INodeType {
 				description: 'The claim to investigate in depth. Reserve for high-stakes statements that warrant a thorough, sourced check.',
 			},
 			{
+				// Labelled "Claim" — a document is text, a claim is a claim. The
+				// parameter NAME stays `text`: it is the key saved workflows persist,
+				// so renaming it would break every existing Assess node.
+				displayName: 'Claim',
+				name: 'text',
+				type: 'string',
+				typeOptions: { rows: 3 },
+				default: '',
+				required: true,
+				displayOptions: {
+					show: { operation: ['assess'] },
+				},
+				description: 'The claim to check. If it contains several claims, each is assessed separately.',
+			},
+			{
 				displayName: 'Text',
 				name: 'text',
 				type: 'string',
@@ -610,9 +625,9 @@ export class Lenz implements INodeType {
 				default: '',
 				required: true,
 				displayOptions: {
-					show: { operation: ['assess', 'extract'] },
+					show: { operation: ['extract'] },
 				},
-				description: 'The text to check. If it contains several claims, each is handled separately.',
+				description: 'The text to pull the verifiable claims out of',
 			},
 			{
 				displayName: 'Claims',
@@ -630,6 +645,17 @@ export class Lenz implements INodeType {
 						name: 'claim',
 						displayName: 'Claim',
 						values: [
+							{
+								// Labelled "Claim"; the NAME stays `text` because saved
+								// workflows persist it (see the Assess field above).
+								displayName: 'Claim',
+								name: 'text',
+								type: 'string',
+								typeOptions: { rows: 2 },
+								default: '',
+								required: true,
+								description: 'The claim to investigate in depth',
+							},
 							{
 								displayName: 'Depth',
 								name: 'depth',
@@ -668,15 +694,6 @@ export class Lenz implements INodeType {
 								type: 'string',
 								default: '',
 								description: 'Optional URL the claim came from, used as context when framing it',
-							},
-							{
-								displayName: 'Text',
-								name: 'text',
-								type: 'string',
-								typeOptions: { rows: 2 },
-								default: '',
-								required: true,
-								description: 'The claim to investigate in depth',
 							},
 							{
 								displayName: 'Visibility',
