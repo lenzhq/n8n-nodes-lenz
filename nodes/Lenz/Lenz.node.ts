@@ -437,7 +437,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Verify (Deep)',
 						value: 'verify',
-						description: 'Full 8-model pipeline with sourced citations (~90s). Reserve for high-stakes claims.',
+						description: 'Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims.',
 						action: 'Deeply verify a claim',
 					},
 				],
@@ -584,7 +584,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Verify (Deep)',
 						value: 'verify',
-						description: 'Full 8-model pipeline with sourced citations (~90s). Reserve for high-stakes claims.',
+						description: 'Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims.',
 						action: 'Deeply verify a claim',
 					},
 				],
