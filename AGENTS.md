@@ -112,8 +112,15 @@ reached its branch.
   a tag uploads the tagged commit too, and publishing fires on any version
   tag, so the hook checks that rather than trusting the ref name.
 - **`npm run release` needs `REVIEW_GATE_BYPASS=1`.** It commits and pushes in
-  one step, so its commit cannot have been reviewed beforehand. CI releases
-  are unaffected — no agent environment there.
+  one step, so its commit cannot have been reviewed beforehand. Only the
+  exact value `1` bypasses. In PowerShell, which is the primary shell here,
+  the POSIX prefix form is a parse error — use
+  `$env:REVIEW_GATE_BYPASS=1; npm run release`. CI releases are unaffected:
+  no agent environment there.
+- **The gate has its own tests, run separately.** `npm run test:hooks`, and
+  CI runs it on every PR. They are deliberately not in `npm test`, because
+  the publish workflow gates releases on that and a broken developer hook
+  must not be able to block publishing the node.
 
 It is a git hook rather than a Claude Code hook on purpose: git invokes it for
 every push whatever issued it — either shell tool, a script, or a chained
