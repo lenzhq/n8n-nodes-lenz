@@ -16,7 +16,7 @@ const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.4.1';
+const USER_AGENT = 'n8n-nodes-lenz/0.4.2';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -669,7 +669,7 @@ export class Lenz implements INodeType {
 									{
 										name: 'Low',
 										value: 'low',
-										description: 'Half the credits, fewer sources, no recovery fetch tiers',
+										description: 'Half the credits — fewer sources, no recovery fetch tiers, and the debate stops after the opening arguments',
 									},
 									{
 										name: 'Standard',
@@ -678,7 +678,7 @@ export class Lenz implements INodeType {
 									},
 								],
 								default: '',
-								description: 'How widely this claim is checked. Each claim is priced on its own depth, so one batch can mix the two and pay 5 for some claims and 10 for others.',
+								description: 'How much work this claim gets. Each claim is priced on its own depth, so one batch can mix the two and pay 5 for some claims and 10 for others.',
 							},
 							{
 								displayName: 'Language',
@@ -795,7 +795,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['getVerification', 'verify', 'verifyStatus'] },
 				},
-				description: 'Whether to include the panel reasoning, debate transcript, and per-panelist assessments. Adds a lot of data to each item.',
+				description: 'Whether to include the panel reasoning, debate transcript, and per-panelist assessments. Adds a lot of data to each item. At Low depth the transcript carries no rebuttals, because that round does not run.',
 			},
 			{
 				displayName: 'Return All',
@@ -879,7 +879,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Low',
 						value: 'low',
-						description: 'Half the credits. Searches fewer sources and skips the recovery fetch tiers, so it answers sooner with less evidence behind the verdict.',
+						description: 'Half the credits. Searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments, so it answers sooner with less evidence behind the verdict.',
 					},
 					{
 						name: 'Standard',
@@ -891,7 +891,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['verify', 'verifyBatch'] },
 				},
-				description: 'How widely the check searches. Low costs half the credits — 5 against 10 — and every step still runs the same models, so it narrows research breadth rather than downgrading the reasoning. You are charged for the depth you request, so a Low request answered from an existing standard verdict still costs 5 while the returned Depth reads "standard": the echo describes the evidence, the charge follows the request.',
+				description: 'How much work the check does. Low costs half the credits — 5 against 10 — and runs the same models at every step it runs: it searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments. You are charged for the depth you request, so a Low request served from an existing standard verdict still costs 5 and returns Depth "standard".',
 			},
 			{
 				displayName: 'Focus',
