@@ -4,3 +4,9 @@ coverage
 dev.log
 *.log
 .gstack/
+
+# Local review marker written by .claude/hooks/mark-reviewed.sh — per-checkout state
+.claude/.review-ok
+
+# Agent worktrees live inside the repo but are never part of it
+.claude/worktrees/

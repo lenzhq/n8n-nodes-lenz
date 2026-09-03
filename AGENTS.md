@@ -79,7 +79,34 @@ project _may_ contain example nodes and/or credentials that need to be
 - Make sure to use **proper types whenever possible**
 - If you are updating the npm package version, make sure to **update
   CHANGELOG.md** in the root of the repository
+- **Get changes reviewed before pushing them.** Run `/code-review`, deal with
+  what it finds, then record it with
+  `node .claude/hooks/review-gate.cjs --mark`. This is enforced, not
+  advisory — see below.
 - Read `.agents/workflow.md` for more info
+
+## Review before push
+A `pre-push` git hook refuses to push commits an agent has not had reviewed.
+It lives in `.githooks/pre-push` and needs enabling once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+The config is shared by every worktree of the repository, so agent worktrees
+under `.claude/worktrees/` inherit it. Three things worth knowing:
+
+- **Only agents are gated.** The hook enforces when `CLAUDECODE` / `AI_AGENT`
+  is set. Pushing by hand from your own terminal is unaffected.
+- **Recording is per-commit.** Committing again after a review invalidates it,
+  because the fixes made in response to a review are the part most likely to
+  be wrong.
+- **Tag pushes are exempt.** A tag is what publishes to npm and only ever
+  points at a commit that already reached `main` through a reviewed PR.
+
+It is a git hook rather than a Claude Code hook on purpose: git invokes it for
+every push whatever issued it — either shell tool, a script, `npm run release`,
+or a chained `commit && push` — and tells it which refs are actually going.
 
 ## Context-specific docs
 Load these before working on the relevant area:
