@@ -41,3 +41,9 @@ jobs:
 
       - name: Run tests
         run: 'npm test'
+
+      # The pre-push review gate, checked here but deliberately not in
+      # publish.yml: a broken developer hook must not be able to block a
+      # release of the node itself.
+      - name: Run review-gate tests
+        run: 'npm run test:hooks'

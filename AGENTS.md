@@ -79,7 +79,57 @@ project _may_ contain example nodes and/or credentials that need to be
 - Make sure to use **proper types whenever possible**
 - If you are updating the npm package version, make sure to **update
   CHANGELOG.md** in the root of the repository
+- **Get changes reviewed before pushing them.** Run `/code-review`, deal with
+  what it finds, then record it with
+  `node .claude/hooks/review-gate.cjs --mark`. A git hook refuses the push
+  until you do — see below.
 - Read `.agents/workflow.md` for more info
+
+## Review before push
+A `pre-push` git hook refuses to push commits an agent has not had reviewed.
+It lives in `.githooks/pre-push` and needs enabling once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+It has to be run by hand: n8n's community-node lint forbids install-time
+lifecycle scripts (`prepare`, `postinstall`) in this package, which is the
+conventional way to automate it — and the rule is right, since arbitrary code
+on install is exactly what n8n Cloud is refusing. The config is shared by
+every worktree, and so are the
+recorded reviews (they live in the shared git directory, so they survive
+`git worktree remove`). The hook itself is only present on branches that
+contain `.githooks/`, so it starts protecting a checkout once this has
+reached its branch.
+
+- **Only agents are gated.** It enforces when `CLAUDECODE` / `AI_AGENT` is
+  set. Pushing by hand from your own terminal is unaffected.
+- **Recording is per-commit.** Committing again after a review invalidates it,
+  because the fixes made in response to a review are the part most likely to
+  be wrong.
+- **A tag is exempt only if its commit is already on `origin/main`.** Pushing
+  a tag uploads the tagged commit too, and publishing fires on any version
+  tag, so the hook checks that rather than trusting the ref name.
+- **`npm run release` needs `REVIEW_GATE_BYPASS=1`.** It commits and pushes in
+  one step, so its commit cannot have been reviewed beforehand. Only the
+  exact value `1` bypasses. In PowerShell, which is the primary shell here,
+  the POSIX prefix form is a parse error — use
+  `$env:REVIEW_GATE_BYPASS=1; npm run release`. CI releases are unaffected:
+  no agent environment there.
+- **The gate has its own tests, run separately.** `npm run test:hooks`, and
+  CI runs it on every PR. They are deliberately not in `npm test`, because
+  the publish workflow gates releases on that and a broken developer hook
+  must not be able to block publishing the node.
+
+It is a git hook rather than a Claude Code hook on purpose: git invokes it for
+every push whatever issued it — either shell tool, a script, or a chained
+`commit && push` — and tells it which refs are actually going.
+
+**What it is not:** a security control. Whoever composes the push command can
+pass `--no-verify`, and `--mark` asserts that a review happened rather than
+proving it. It makes reviewing the path of least resistance and catches
+forgetting; it does not stop a determined bypass.
 
 ## Context-specific docs
 Load these before working on the relevant area:
