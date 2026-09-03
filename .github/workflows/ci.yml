@@ -23,7 +23,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          # Pinned to match publish.yml: a release is gated on this workflow, so
+          # the Node it passes on has to be the Node that publishes it. 'lts/*'
+          # drifts (Node 26 from Oct 2026) and would let CI go green on a
+          # runtime the publish job never uses.
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
