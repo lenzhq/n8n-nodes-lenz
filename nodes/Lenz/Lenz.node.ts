@@ -669,7 +669,7 @@ export class Lenz implements INodeType {
 									{
 										name: 'Low',
 										value: 'low',
-										description: 'Half the credits: fewer sources, no recovery fetch tiers, and no rebuttal round in the debate',
+										description: 'Half the credits — fewer sources, no recovery fetch tiers, and the debate stops after the opening arguments',
 									},
 									{
 										name: 'Standard',
@@ -678,7 +678,7 @@ export class Lenz implements INodeType {
 									},
 								],
 								default: '',
-								description: 'How widely this claim is checked. Each claim is priced on its own depth, so one batch can mix the two and pay 5 for some claims and 10 for others.',
+								description: 'How much work this claim gets. Each claim is priced on its own depth, so one batch can mix the two and pay 5 for some claims and 10 for others.',
 							},
 							{
 								displayName: 'Language',
@@ -795,7 +795,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['getVerification', 'verify', 'verifyStatus'] },
 				},
-				description: 'Whether to include the panel reasoning, debate transcript, and per-panelist assessments. Adds a lot of data to each item.',
+				description: 'Whether to include the panel reasoning, debate transcript, and per-panelist assessments. Adds a lot of data to each item. At Low depth the transcript carries no rebuttals, because that round does not run.',
 			},
 			{
 				displayName: 'Return All',
@@ -891,7 +891,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['verify', 'verifyBatch'] },
 				},
-				description: 'How much work the check does. Low costs half the credits — 5 against 10 — and runs the same models at every step it runs, so it is a volume lever rather than a downgrade: it searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments, leaving no rebuttal round. Framing, the adjudication panel and the conclusion are unchanged. You are charged for the depth you request, so a Low request answered from an existing standard verdict still costs 5 while the returned Depth reads "standard": the echo describes the evidence, the charge follows the request.',
+				description: 'How much work the check does. Low costs half the credits — 5 against 10 — and runs the same models at every step it runs: it searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments. You are charged for the depth you request, so a Low request served from an existing standard verdict still costs 5 and returns Depth "standard".',
 			},
 			{
 				displayName: 'Focus',
