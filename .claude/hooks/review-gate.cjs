@@ -1,124 +1,172 @@
 #!/usr/bin/env node
 /**
- * Refuses to push a commit an agent has not had reviewed.
+ * Refuses to push commits an agent has not had reviewed.
  *
- * Runs as git's own `pre-push` hook rather than as a Claude Code PreToolUse
- * hook. That is the whole design: git invokes this for every push — any tool,
- * any shell, from a script, from `npm run release`, from a compound
+ * Runs as git's own `pre-push` hook, not as a Claude Code hook: git invokes it
+ * for every push whatever issued it — either shell tool, a script, a chained
  * `commit && push` — and hands it the refs actually being sent on stdin, as
- * `<local ref> <local sha> <remote ref> <remote sha>` lines. A gate that
- * instead pattern-matches one tool's command strings misses the PowerShell
- * tool, misses pushes made inside subprocesses, and reads HEAD *before* a
- * chained commit has created the commit being pushed.
+ * `<local ref> <local sha> <remote ref> <remote sha>` lines.
  *
- * Scoped to agents. Enforced only when CLAUDECODE / AI_AGENT is set, which
- * Claude Code puts in its subprocess environment. A human pushing from their
- * own terminal is not gated — this exists to stop an agent shipping work it
- * has not checked, not to stand between you and your own repository.
+ * Scoped to agents, via CLAUDECODE / AI_AGENT. A human pushing from their own
+ * terminal is never gated; this exists to stop an agent shipping work it has
+ * not checked, not to stand between you and your repository.
  *
- * Fails CLOSED. Every internal failure exits non-zero with a message on
- * stderr, so a broken gate stops the push instead of waving it through. The
- * previous version of this idea failed open in four separate places and its
- * first draft did nothing at all while reporting success.
+ * WHAT THIS IS NOT: a security control. The agent it gates composes the push
+ * command, so `--no-verify` walks past it, and `--mark` asserts a review
+ * rather than proving one. It makes reviewing the path of least resistance and
+ * catches forgetting — it does not stop a determined bypass, and the docs must
+ * not claim otherwise.
+ *
+ * Plain `.cjs`, deliberately: a git hook has to run directly from a fresh
+ * clone with no build step and no `npm install`, so it cannot be TypeScript
+ * compiled into `dist/`, and it cannot import anything. That is the specific
+ * reason it sits outside the tsconfig and eslint scope; its behaviour is
+ * pinned by tests instead (see `__tests__/review-gate.test.cjs`, which is
+ * itself `.cjs` because spawning a process is banned in this package's `.ts`).
+ *
+ * Fails CLOSED: every internal failure and every line it cannot parse refuses
+ * the push. A previous attempt at this failed open in four places, and its
+ * first draft did nothing whatsoever while reporting success.
  *
  * Usage:
- *   review-gate.cjs           gate mode: reads the ref list on stdin
- *   review-gate.cjs --mark    record the current HEAD as reviewed
+ *   review-gate.cjs           gate mode; expects the ref list on stdin
+ *   review-gate.cjs --mark    record HEAD as reviewed
  */
 const { execFileSync } = require('node:child_process');
-const { readFileSync, writeFileSync, mkdirSync } = require('node:fs');
+const { readFileSync, writeFileSync, writeSync } = require('node:fs');
 const path = require('node:path');
 
 const ALL_ZERO = /^0+$/;
 const KEEP_MARKS = 50;
 
-function fail(message) {
-	process.stderr.write(`review-gate: ${message}\n`);
-	process.exit(1);
-}
+/** Refusing is a control-flow decision, not a crash — carry it as one. */
+class Refuse extends Error {}
+const refuse = (message) => {
+	throw new Refuse(message);
+};
 
-function repoRoot() {
+function git(args, { allowFailure = false } = {}) {
 	try {
-		return execFileSync('git', ['rev-parse', '--show-toplevel'], {
-			encoding: 'utf8',
-			stdio: ['ignore', 'pipe', 'ignore'],
-		}).trim();
-	} catch {
-		return fail('could not locate the repository root — refusing the push.');
+		return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+	} catch (err) {
+		if (allowFailure) return null;
+		throw err;
 	}
 }
 
-function markerPath(root) {
-	return path.join(root, '.claude', '.review-ok');
+/**
+ * Marks live in the shared git directory, not the working tree: it is common
+ * to every worktree, so a review recorded in one checkout counts in all of
+ * them, and it survives `git worktree remove` — which is routine here and
+ * would otherwise silently discard every review recorded in that worktree.
+ */
+function markerPath() {
+	// Overridable so the tests can run against a scratch file instead of the
+	// real marks. Not a weakening: the gated agent can already write the marks.
+	if (process.env.REVIEW_GATE_MARKS) return path.resolve(process.env.REVIEW_GATE_MARKS);
+	const common = git(['rev-parse', '--git-common-dir'], { allowFailure: true });
+	if (!common) refuse('could not locate the git directory.');
+	return path.resolve(common, 'review-gate-marks');
 }
 
-function readMarks(root) {
+/** `missingIsEmpty`: absent marker = nothing reviewed yet. Any OTHER read
+ *  failure is a real error and must not be mistaken for "no marks", or a
+ *  rewrite would silently discard the whole history. */
+function readMarks(file, { missingIsEmpty = true } = {}) {
 	try {
 		return new Set(
-			readFileSync(markerPath(root), 'utf8')
+			readFileSync(file, 'utf8')
 				.split('\n')
-				.map((line) => line.trim())
+				.map((l) => l.trim())
 				.filter(Boolean),
 		);
-	} catch {
-		return new Set();
+	} catch (err) {
+		if (err.code === 'ENOENT' && missingIsEmpty) return new Set();
+		refuse(`could not read the review marks at ${file}: ${err.code || err.message}`);
 	}
 }
 
 function mark() {
-	const root = repoRoot();
-	let head;
-	try {
-		head = execFileSync('git', ['rev-parse', 'HEAD'], {
-			encoding: 'utf8',
-			stdio: ['ignore', 'pipe', 'ignore'],
-		}).trim();
-	} catch {
-		return fail('no HEAD to record.');
-	}
-	const marks = readMarks(root);
+	const head = git(['rev-parse', 'HEAD'], { allowFailure: true });
+	if (!head) refuse('no HEAD to record.');
+	const file = markerPath();
+	// Read strictly here: rewriting from a Set we failed to load would destroy
+	// every previously recorded review.
+	const marks = readMarks(file, { missingIsEmpty: true });
+	// delete-then-add moves an existing SHA to the end. A bare `add` leaves it
+	// in place, so re-marking an old commit would not save it from eviction.
+	marks.delete(head);
 	marks.add(head);
-	// Keep a bounded history rather than a single SHA: reviewing A, then B,
-	// then pushing a branch that contains both should not need a re-review.
-	const kept = [...marks].slice(-KEEP_MARKS);
-	mkdirSync(path.dirname(markerPath(root)), { recursive: true });
-	writeFileSync(markerPath(root), `${kept.join('\n')}\n`);
+	writeFileSync(file, `${[...marks].slice(-KEEP_MARKS).join('\n')}\n`);
 	process.stdout.write(`review-gate: recorded review of ${head.slice(0, 7)}.\n`);
 }
 
+/**
+ * A tag is exempt only if what it points at already reached origin/main.
+ * Pushing a tag uploads the tagged commit's objects too, and this repo's
+ * publish workflow fires on any `*.*.*` tag — so exempting tags on the ref
+ * name alone is a straight path from an unreviewed commit to npm. The old
+ * version asserted this invariant in a comment; this checks it.
+ */
+function tagIsOnMain(sha) {
+	if (!git(['rev-parse', '--verify', '--quiet', 'origin/main'], { allowFailure: true })) {
+		refuse('cannot resolve origin/main, so a tag cannot be verified — fetch first.');
+	}
+	try {
+		execFileSync('git', ['merge-base', '--is-ancestor', sha, 'origin/main'], { stdio: 'ignore' });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function gate() {
-	// Not an agent — leave the human alone.
-	if (!process.env.CLAUDECODE && !process.env.AI_AGENT) return;
+	if (!process.env.CLAUDECODE && !process.env.AI_AGENT) return; // human push
+	// Documented escape for `npm run release`, which commits and pushes in one
+	// step so its commit can never have been marked in advance. Named loudly
+	// on purpose: it should be visible in a transcript when it is used.
+	if (process.env.REVIEW_GATE_BYPASS) {
+		writeSync(2, 'review-gate: bypassed via REVIEW_GATE_BYPASS.\n');
+		return;
+	}
+
+	if (process.stdin.isTTY) {
+		refuse('gate mode reads the ref list on stdin; git supplies it. Use --mark to record a review.');
+	}
 
 	let input;
 	try {
 		input = readFileSync(0, 'utf8');
-	} catch {
-		return fail('could not read the ref list on stdin — refusing the push.');
+	} catch (err) {
+		refuse(`could not read the ref list on stdin: ${err.code || err.message}`);
 	}
 
-	const root = repoRoot();
-	const marks = readMarks(root);
+	const marks = readMarks(markerPath());
 	const blocked = [];
 
-	for (const line of input.split('\n')) {
-		const [localRef, localSha] = line.trim().split(/\s+/);
-		if (!localRef || !localSha) continue;
-		// Deleting a remote ref pushes nothing.
-		if (ALL_ZERO.test(localSha)) continue;
-		// Release tags are exempt: a tag here is what publishes to npm, and it
-		// only ever points at a commit that already reached main through a
-		// reviewed PR. Matched on the real ref, not on the text of a flag.
-		if (localRef.startsWith('refs/tags/')) continue;
+	for (const raw of input.split('\n')) {
+		const line = raw.trim();
+		if (!line) continue;
+		const fields = line.split(/\s+/);
+		// Anything git sends that does not look like a ref line is refused, not
+		// skipped: silently waving through a line we failed to understand is
+		// the fail-open this gate exists to avoid.
+		if (fields.length < 2) refuse(`unrecognised ref line from git: ${JSON.stringify(line)}`);
+		const [localRef, localSha] = fields;
+		if (ALL_ZERO.test(localSha)) continue; // deleting a remote ref pushes nothing
+		if (localRef.startsWith('refs/tags/')) {
+			if (tagIsOnMain(localSha)) continue;
+			blocked.push(`${localRef} -> ${localSha.slice(0, 7)} (tagged commit is not on origin/main)`);
+			continue;
+		}
 		if (!marks.has(localSha)) blocked.push(`${localRef} -> ${localSha.slice(0, 7)}`);
 	}
 
 	if (blocked.length === 0) return;
 
-	process.stderr.write(
+	refuse(
 		[
-			'',
-			'review-gate: refusing to push commits that have not been reviewed.',
+			'refusing to push commits that have not been reviewed.',
 			'',
 			...blocked.map((b) => `    ${b}`),
 			'',
@@ -127,15 +175,18 @@ function gate() {
 			'',
 			'Recording is per-commit, so committing again after a review means',
 			'reviewing again — the fixes are the part most likely to be wrong.',
-			'Tag pushes are exempt. Humans pushing by hand are not gated.',
-			'',
 		].join('\n'),
 	);
-	process.exit(1);
 }
 
-if (process.argv.includes('--mark')) {
-	mark();
-} else {
-	gate();
+try {
+	if (process.argv.includes('--mark')) mark();
+	else gate();
+} catch (err) {
+	if (!(err instanceof Refuse)) throw err;
+	// writeSync, not process.stderr.write + process.exit: exit() discards
+	// whatever is still buffered on a pipe, and git runs hooks with stderr
+	// piped — which would turn an explained refusal into a bare failure.
+	writeSync(2, `\nreview-gate: ${err.message}\n\n`);
+	process.exitCode = 1;
 }
