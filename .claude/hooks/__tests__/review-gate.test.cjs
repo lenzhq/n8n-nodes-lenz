@@ -34,7 +34,19 @@ const sha = (rev) => git(['rev-parse', rev]);
  *  would fail on main for a reason that has nothing to do with the gate. */
 function orphanCommit() {
 	const emptyTree = git(['hash-object', '-t', 'tree', '--stdin'], { input: '' });
-	return git(['commit-tree', emptyTree, '-m', 'review-gate test fixture'], { input: '' });
+	// Identity via env, not `git config`: CI runners have no user.name set, so
+	// `commit-tree` fails there with "Please tell me who you are" — and writing
+	// a global config from a test would be a side effect on the machine.
+	return git(['commit-tree', emptyTree, '-m', 'review-gate test fixture'], {
+		input: '',
+		env: {
+			...process.env,
+			GIT_AUTHOR_NAME: 'review-gate tests',
+			GIT_AUTHOR_EMAIL: 'review-gate@invalid',
+			GIT_COMMITTER_NAME: 'review-gate tests',
+			GIT_COMMITTER_EMAIL: 'review-gate@invalid',
+		},
+	});
 }
 
 const mainResolvable = () =>
