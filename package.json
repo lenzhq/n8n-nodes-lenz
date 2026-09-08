@@ -23,7 +23,8 @@
         "lint:fix": "n8n-node lint --fix",
         "release": "n8n-node release",
         "prepublishOnly": "n8n-node prerelease",
-        "test": "jest"
+        "test": "jest",
+        "test:hooks": "jest --config jest.hooks.config.cjs"
     },
     "files": [
         "dist"
