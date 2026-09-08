@@ -241,9 +241,15 @@ function bodyFingerprint(body?: IDataObject): string {
 // Sources without a URL can't be cited, so they're dropped. The rest are passed
 // through in full — snippet and source_name are what make a citation quotable
 // rather than merely linkable.
-function mapCitations(sources: IDataObject[]): IDataObject[] {
+function mapCitations(sources: unknown): IDataObject[] {
+	// Guarded rather than cast. A verification is paid for and finished by the
+	// time this runs, so throwing here would fail the item *after* the money was
+	// spent — over a malformed citation, of all things. A `sources` that is not
+	// a list, or a list with a null in it, costs the caller that entry and
+	// nothing else.
+	if (!Array.isArray(sources)) return [];
 	return sources
-		.filter((s) => s.url)
+		.filter((s): s is IDataObject => typeof s === 'object' && s !== null && !!(s as IDataObject).url)
 		.map((s) => ({
 			title: s.title ?? '',
 			url: s.url ?? '',
@@ -271,7 +277,7 @@ function needsInputMessage(reason?: string): string {
 }
 
 function mapCompletedVerification(result: IDataObject, includeAudit: boolean): IDataObject {
-	const sources = (result.sources ?? []) as IDataObject[];
+	const sources = result.sources;
 	const mapped: IDataObject = {
 		status: 'completed',
 		passed: isPassingVerdict(result.verdict as string | undefined),
@@ -938,15 +944,25 @@ export class Lenz implements INodeType {
 		// execution, each time restarting itemIndex at 0. Keyed on position alone,
 		// the second run would reuse the first run's key with different text and
 		// the API would reject it (422, or 409 while the first is still in flight).
+		// The node's identity goes in as its UUID, never its display name. Names
+		// are user-editable free text — `Prüfung`, `Lenz ✅`, `Vérification` — and
+		// Node rejects a non-ASCII header value outright, so a renamed node used
+		// to fail every billable POST before the request left the machine, with
+		// an error naming the header rather than the cause. The id is ASCII by
+		// construction, and it also survives a rename mid-execution, which the
+		// name did not. Where n8n does not populate it, the name is hashed rather
+		// than sent: same guarantee, and it keeps a node named after a customer
+		// or project out of the request.
 		const executionId = this.getExecutionId();
-		const nodeName = this.getNode().name;
+		const node = this.getNode();
+		const nodeKey = node.id ?? bodyFingerprint({ name: node.name });
 		const buildIdempotencyKey = (
 			operation: string,
 			itemIndex: number,
 			body?: IDataObject,
 		): string =>
 			executionId
-				? `n8n:${executionId}:${nodeName}:${operation}:${itemIndex}:${bodyFingerprint(body)}`
+				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint(body)}`
 				: '';
 
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
