@@ -52,6 +52,9 @@ function createContext(
 	responder: Responder,
 	continueOnFail = false,
 	itemCount = 1,
+	// The node's identity is a test input for the Idempotency-Key: its name is
+	// user-editable free text, and its id is absent on older n8n versions.
+	nodeIdentity: { name?: string; id?: string } = {},
 ): { ctx: IExecuteFunctions; httpMock: jest.Mock; calls: IHttpRequestOptions[] } {
 	const items = Array.from({ length: itemCount }, () => ({ json: {} }));
 	const calls: IHttpRequestOptions[] = [];
@@ -65,7 +68,13 @@ function createContext(
 			if (name in params) return params[name];
 			return fallback;
 		}),
-		getNode: jest.fn(() => ({ name: 'Lenz', type: 'lenz', typeVersion: 1, position: [0, 0] })),
+		getNode: jest.fn(() => ({
+			name: nodeIdentity.name ?? 'Lenz',
+			...(nodeIdentity.id === undefined ? {} : { id: nodeIdentity.id }),
+			type: 'lenz',
+			typeVersion: 1,
+			position: [0, 0],
+		})),
 		getExecutionId: jest.fn(() => 'exec-1'),
 		continueOnFail: jest.fn(() => continueOnFail),
 		helpers: {
@@ -80,8 +89,15 @@ async function runNode(
 	responder: Responder,
 	continueOnFail = false,
 	itemCount = 1,
+	nodeIdentity: { name?: string; id?: string } = {},
 ) {
-	const { ctx, httpMock, calls } = createContext(params, responder, continueOnFail, itemCount);
+	const { ctx, httpMock, calls } = createContext(
+		params,
+		responder,
+		continueOnFail,
+		itemCount,
+		nodeIdentity,
+	);
 	const node = new Lenz();
 	const result = await node.execute.call(ctx);
 	return { output: result[0], httpMock, calls };
@@ -254,6 +270,33 @@ describe('Lenz node - Verify (Deep)', () => {
 		});
 		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, responder);
 		expect((output[0].json as IDataObject).key_finding).toBe('');
+	});
+
+	it('returns the verdict even when sources is not a list', async () => {
+		// The verification is finished and paid for by the time this maps. Throwing
+		// over a malformed citation would fail the item after the money was spent.
+		const served = {
+			...completedStatus,
+			result: { ...(completedStatus.result as IDataObject), sources: 'not a list' },
+		};
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, verifyResponder(served));
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('completed');
+		expect(json.citations).toEqual([]);
+	});
+
+	it('drops a null entry in sources instead of failing the item', async () => {
+		const served = {
+			...completedStatus,
+			result: {
+				...(completedStatus.result as IDataObject),
+				sources: [null, { title: 'Real', url: 'https://real.example' }],
+			},
+		};
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, verifyResponder(served));
+		const citations = (output[0].json as IDataObject).citations as IDataObject[];
+		expect(citations).toHaveLength(1);
+		expect(citations[0].url).toBe('https://real.example');
 	});
 
 	it('omits the audit trail by default and includes it when asked', async () => {
@@ -900,7 +943,51 @@ describe('Lenz node - idempotency', () => {
 
 	it('sends an Idempotency-Key on billable POSTs so a retry cannot double-charge', async () => {
 		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, assessResponder);
-		expect(calls[0].headers?.['Idempotency-Key']).toMatch(/^n8n:exec-1:Lenz:assess:0:[0-9a-z]+$/);
+		// The third segment is the node's identity, hashed — see the non-ASCII
+		// test below for why it is not the name.
+		expect(calls[0].headers?.['Idempotency-Key']).toMatch(
+			/^n8n:exec-1:[0-9a-z]+:assess:0:[0-9a-z]+$/,
+		);
+	});
+
+	it('keeps the key ASCII when the node has been renamed to something non-English', async () => {
+		// Node names are user-editable free text and Node rejects a non-ASCII
+		// header value outright, so a node called "Prüfung" failed every billable
+		// POST before the request left the machine — with an error naming the
+		// header, not the node. n8n's user base is heavily non-English.
+		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			name: 'Prüfung ✅ Vérification',
+		});
+		const key = calls[0].headers?.['Idempotency-Key'] as string;
+		expect(key).toBeTruthy();
+		expect(key).toMatch(/^[ -~]+$/);
+	});
+
+	it('does not send the node name to the API', async () => {
+		// A node named after a customer or a project would otherwise be on every
+		// request this node makes.
+		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			name: 'Acme merger due diligence',
+		});
+		expect(calls[0].headers?.['Idempotency-Key']).not.toContain('Acme');
+	});
+
+	it('keys on the node id, so a rename mid-execution does not change the key', async () => {
+		const before = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			id: 'a1b2c3', name: 'Check the claim',
+		});
+		const after = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			id: 'a1b2c3', name: 'Renamed halfway through',
+		});
+		expect(before.calls[0].headers?.['Idempotency-Key']).toBe(after.calls[0].headers?.['Idempotency-Key']);
+	});
+
+	it('still separates two different nodes in one execution', async () => {
+		// The key exists to keep separate calls apart; hashing the identity must
+		// not collapse two nodes into one.
+		const one = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, { id: 'node-one' });
+		const two = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, { id: 'node-two' });
+		expect(one.calls[0].headers?.['Idempotency-Key']).not.toBe(two.calls[0].headers?.['Idempotency-Key']);
 	});
 
 	it('repeats the same key for identical input so a retry replays instead of re-charging', async () => {
@@ -948,7 +1035,9 @@ describe('Lenz node - idempotency', () => {
 			}
 			return { status: 'completed', result: { verdict: 'True', sources: [] } };
 		});
-		expect(calls[0].headers?.['Idempotency-Key']).toMatch(/^n8n:exec-1:Lenz:verify:0:[0-9a-z]+$/);
+		expect(calls[0].headers?.['Idempotency-Key']).toMatch(
+			/^n8n:exec-1:[0-9a-z]+:verify:0:[0-9a-z]+$/,
+		);
 		expect(calls[1].headers?.['Idempotency-Key']).toBeUndefined();
 	});
 
