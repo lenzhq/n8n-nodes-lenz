@@ -944,18 +944,25 @@ export class Lenz implements INodeType {
 		// execution, each time restarting itemIndex at 0. Keyed on position alone,
 		// the second run would reuse the first run's key with different text and
 		// the API would reject it (422, or 409 while the first is still in flight).
-		// The node's identity goes in as its UUID, never its display name. Names
-		// are user-editable free text — `Prüfung`, `Lenz ✅`, `Vérification` — and
-		// Node rejects a non-ASCII header value outright, so a renamed node used
-		// to fail every billable POST before the request left the machine, with
-		// an error naming the header rather than the cause. The id is ASCII by
-		// construction, and it also survives a rename mid-execution, which the
-		// name did not. Where n8n does not populate it, the name is hashed rather
-		// than sent: same guarantee, and it keeps a node named after a customer
-		// or project out of the request.
+		// The node's identity is HASHED into the key, never written into it raw.
+		// Node refuses to send a header value containing anything above U+00FF —
+		// verified: `Prüfung` and `Vérification` are accepted (Latin-1 passes),
+		// while `Lenz ✅`, `検証` and `Проверка` throw ERR_INVALID_CHAR. So a node
+		// named in Cyrillic, Greek, Hebrew, Arabic, any CJK script, or with an
+		// emoji failed every billable POST before the request left the machine,
+		// with an error naming the header rather than the node.
+		//
+		// Hashing rather than trusting the id makes that structural: the id is
+		// normally a UUID, but it comes from the workflow JSON and a hand-edited
+		// or third-party-generated file can carry anything, which would bring the
+		// same crash back from a new direction. It also keeps a node named after
+		// a customer or project off the wire, and preferring the id means a
+		// rename mid-execution no longer changes the key. `||`, not `??`: an
+		// empty-string id must fall through to the name, or two nodes would
+		// collapse onto one key — the collision 0.2.0 was released to fix.
 		const executionId = this.getExecutionId();
 		const node = this.getNode();
-		const nodeKey = node.id ?? bodyFingerprint({ name: node.name });
+		const nodeKey = bodyFingerprint({ node: node.id || node.name });
 		const buildIdempotencyKey = (
 			operation: string,
 			itemIndex: number,

@@ -950,17 +950,41 @@ describe('Lenz node - idempotency', () => {
 		);
 	});
 
-	it('keeps the key ASCII when the node has been renamed to something non-English', async () => {
-		// Node names are user-editable free text and Node rejects a non-ASCII
-		// header value outright, so a node called "Prüfung" failed every billable
-		// POST before the request left the machine — with an error naming the
-		// header, not the node. n8n's user base is heavily non-English.
+	it.each([
+		['Cyrillic', 'Проверка'],
+		['CJK', '検証'],
+		['an emoji', 'Lenz ✅'],
+		['Latin-1', 'Prüfung Vérification'],
+	])('keeps the key ASCII when the node name contains %s', async (_label, nodeName) => {
+		// Node refuses a header value containing anything above U+00FF, so a node
+		// named in Cyrillic, CJK, Greek, Hebrew, Arabic or with an emoji failed
+		// every billable POST before the request left the machine, with an error
+		// naming the header rather than the node.
+		//
+		// Latin-1 is in the list because it was NOT affected — `Prüfung` and
+		// `Vérification` always went through — and the first version of this fix
+		// used exactly those two as its examples. Pinning the case that never
+		// broke keeps the boundary honest if anyone narrows the hash later.
 		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
-			name: 'Prüfung ✅ Vérification',
+			name: nodeName,
 		});
 		const key = calls[0].headers?.['Idempotency-Key'] as string;
 		expect(key).toBeTruthy();
 		expect(key).toMatch(/^[ -~]+$/);
+	});
+
+	it('falls back to the name when the node id is an empty string', async () => {
+		// `??` would let '' through as the identity, so two nodes in one execution
+		// running the same operation on the same body would share a key and the
+		// second would get the first's replayed answer — the collision 0.2.0 was
+		// released to fix.
+		const one = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			id: '', name: 'First',
+		});
+		const two = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			id: '', name: 'Second',
+		});
+		expect(one.calls[0].headers?.['Idempotency-Key']).not.toBe(two.calls[0].headers?.['Idempotency-Key']);
 	});
 
 	it('does not send the node name to the API', async () => {
