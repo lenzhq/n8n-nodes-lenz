@@ -51,6 +51,13 @@
 #
 # This will lint, build, prompt for a version bump, update the changelog,
 # commit, tag, and push — which triggers this workflow to publish to npm.
+#
+# Prefer it over pushing a tag by hand. `auto-changelog` rewrites
+# CHANGELOG.md as part of that command; when the release runs here in CI
+# instead, the regenerated file is discarded with the runner, so a
+# hand-pushed tag publishes correctly and leaves CHANGELOG.md silently
+# behind. That is how it came to stop at 0.2.1 while 0.3.0 and 0.4.x
+# shipped — the publish was never the part that broke.
 
 name: Publish
 
@@ -86,8 +93,32 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
+      - name: Verify the tag matches package.json
+        # The trigger is any `*.*.*` tag on any commit, so without this a tag
+        # publishes whatever that commit's package.json happens to say — under
+        # the tag's name, which npm never checks. A mismatch means the version
+        # people install is not the version that was tagged, and npm publishes
+        # are immutable, so there is no taking it back. Runs before `npm ci` to
+        # fail in seconds rather than after an install.
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag $TAG does not match package.json version $PKG."
+            echo "Bump package.json (and the USER_AGENT constant) to $TAG, or retag at the right commit."
+            exit 1
+          fi
+          echo "Tag and package.json agree on $PKG."
+
       - name: Install dependencies
         run: 'npm ci'
+
+      - name: Run tests
+        # `npm run release` runs lint and build but NOT tests, so a tag push
+        # would otherwise publish code no test has seen. CI covers the PR that
+        # produced the commit; this covers the tag, which can be pushed at any
+        # commit by hand and is the thing that actually reaches users.
+        run: 'npm test'
 
       - name: Release
         # Publishes to npm with a provenance attestation (requires id-token: write above).

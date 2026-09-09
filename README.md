@@ -27,9 +27,9 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 
 | Operation | What it does |
 |---|---|
-| **Verify (Deep)** *(default)* | Full 8-model pipeline (research → debate → adjudication), ~90 seconds. Returns a verdict, confidence, `lenz_score` (1-10), `key_finding`, sourced citations, and an executive summary. Reserve for high-stakes claims that need a thorough, cited answer. |
-| **Assess (Fast)** | A quick 3-model panel verdict, ~5-10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. |
-| **Extract Claims** | Free — pulls the verifiable factual claims out of a block of text without checking them. Useful as a first step before running Assess or Verify on each claim individually. |
+| **Verify (Deep)** *(default)* | Full multi-model pipeline (research → debate → adjudication), ~90 seconds. Returns a verdict, confidence, `lenz_score` (1-10), `key_finding`, sourced citations, and an executive summary. Reserve for high-stakes claims that need a thorough, cited answer. **Depth** trades work for price: *Low* searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments, for **5 credits instead of 10**. |
+| **Assess (Fast)** | A quick 3-model panel verdict, ~10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. |
+| **Extract Claims** | Free — pulls the verifiable factual claims out of a block of text without checking them. Useful as a first step before running Assess or Verify on each claim individually. **Focus** narrows the result to the claims you describe (300 characters, no extra cost); when none of them match, `status` comes back as `no_match` with an empty list rather than the unfocused claims. |
 
 ### Verification — manage submitted and stored work
 
@@ -37,7 +37,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 |---|---|
 | **Get Status** | Polls a submitted verification by `task_id`. Pairs with Verify's **Wait for Completion** toggle and with webhook delivery. |
 | **Select Claims** | Resolves a paused verification (see [Ambiguous and multi-claim input](#ambiguous-and-multi-claim-input)). |
-| **Submit Batch** | Submits up to 20 claims at once without waiting. Returns one item per spawned task. |
+| **Submit Batch** | Submits up to 20 claims at once without waiting. Returns one item per spawned task. Each claim can override the batch **Depth**, so one batch can mix 5- and 10-credit checks. |
 | **Get** | Retrieves a stored verification report by `verification_id`. |
 | **Get Many** | Lists the verifications stored against this API key, with **Return All** / **Limit**. |
 | **List Related** | Public verifications semantically related to a given one — useful for "see also" surfaces. |
@@ -48,22 +48,24 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Send** | Asks a question grounded in the full research behind a completed **Verify (Deep)** result. Requires the `verification_id` that Verify returns — not usable standalone. |
-| **Get History** | Returns the stored conversation for a verification plus remaining ask quota. |
+| **Get History** | Returns the stored conversation for a verification plus how many follow-up questions are left. |
 | **Reset History** | Deletes the stored conversation for a verification. |
 
 ### Account
 
 | Operation | What it does |
 |---|---|
-| **Get Usage** | Returns remaining quota per capability (`assess` / `verify` / `ask` / `extract`), current plan, and when quota resets. |
+| **Get Usage** | Returns your credit balance and the per-endpoint price list (`costs`), plus the same balance projected into each capability (`assess` / `verify` / `ask`), the `extract` daily cap, your current plan, and when credits reset. Prices that depend on a request parameter are under `cost_options` instead, nested capability → parameter → value — today `cost_options.verify.depth.low` is 5 against a default of 10. That is the only place it appears: it is a price rather than a capability, so it has no balance block of its own, and `costs` carries just the four capability keys (`verify`, `assess`, `ask`, `extract`). To size how many low-depth checks you can afford, divide `credits.remaining` by `cost_options.verify.depth.low`. If that block is missing, `costs.verify` is a safe fallback but it is the *standard* price, so it understates the answer by half. |
+
+The per-capability blocks (`verify` / `ask` / `assess`) and each block's `credits` alias are **deprecated, and the API removes them on 2026-11-29**. They are projections of the one balance, not separate allowances, so derive them instead and branch on the balance itself: `Math.floor(credits.remaining / costs[capability])`. Note the single slash — in an n8n expression `//` starts a comment, so the older form silently returned the raw balance. Only divide for a capability that costs credits: `costs.extract` is `0`. An **IF** node reading `{{ $json.verify.remaining }}` today will stop resolving on that date.
 
 Every claim-checking operation returns a branch-ready `passed` boolean (derived from the verdict) alongside the raw verdict/confidence/citations, so you can wire an **IF** node directly off the result — e.g. route failed claims to human review.
 
-Verify and Get also expose an **Include Audit Trail** toggle, which adds the adjudication reasoning, debate transcript, per-panelist assessments, and panel agreement under `audit`. It's off by default because it's a lot of data per item.
+Verify and Get also expose an **Include Audit Trail** toggle, which adds the adjudication reasoning, debate transcript, per-panelist assessments, and panel agreement under `audit`. It's off by default because it's a lot of data per item. At Low depth the debate transcript carries no rebuttals, because that round does not run.
 
 ### Retry safety
 
-Billable calls (Verify, Assess, Extract, Submit Batch, Select Claims) send an `Idempotency-Key` derived from the execution ID, node name, item index, and a fingerprint of the request body. If n8n retries the node — via **Retry On Fail**, or after a dropped response — the input is identical, so Lenz replays the original response instead of charging you a second time. A fresh run of the workflow is a new execution, so it bills normally.
+Billable calls (Verify, Assess, Extract, Submit Batch, Select Claims) send an `Idempotency-Key` derived from the execution ID, a hash of the node's identity, the item index, and a fingerprint of the request body. If n8n retries the node — via **Retry On Fail**, or after a dropped response — the input is identical, so Lenz replays the original response instead of charging you a second time. A fresh run of the workflow is a new execution, so it bills normally.
 
 Including the body in the key is what makes repeated runs safe: **Loop Over Items** and **AI Agent** tool calls both execute the node several times within a single execution, each time restarting the item index at 0, so a position-only key would send one key with different inputs and the API would reject it.
 
@@ -83,6 +85,8 @@ Built against `n8n-workflow` (n8n API version 1) and tested against n8n v2.30.4.
 ## Usage
 
 - **Verify (Deep) takes ~90 seconds** — it's the full multi-model pipeline, not an instant call. The node blocks/polls until the result is ready, so no separate polling setup is needed on your end.
+- **Low depth drops a debate round, not just sources.** As well as searching fewer sources and skipping the recovery fetch tiers, *Low* stops the debate after the opening arguments — so with **Include Audit Trail** on, `audit.debate_pro.rebuttal` and `audit.debate_con.rebuttal` come back as empty strings. Every step that does run uses the same models, so Low is a volume lever rather than a model downgrade — but it is one round of argument fewer, not merely a narrower search.
+- **You are charged for the Depth you asked for, not the one you got.** A *Low* request that Lenz can answer from an existing *standard* verdict still costs 5 — and the `depth` field on the result reads `standard`, because it describes the evidence behind the verdict rather than the request. Seeing `standard` come back from a *Low* request is correct, not a bug.
 - To feed data from a previous node instead of a fixed value, toggle a field to **Expression** and reference it, e.g. `{{ $json.output }}`.
 - For **Ask Follow-Up**, keep the Question field as a fixed, generic string (e.g. `"What are the main sources supporting this verdict?"`) and only make the Verification ID dynamic via expression — that way the same follow-up question works for whatever claim was just verified.
 - The node is `usableAsTool`, so it can also be called directly by an n8n **AI Agent** as a tool, not just as a manual workflow step.
@@ -105,7 +109,7 @@ A simple "fact-check gate" pattern — verify an LLM's output before acting on i
 3. Add an **IF node** after Lenz with the condition `{{ $json.passed }}` **is true**.
 4. Wire the true branch to continue the workflow normally, and the false branch to whatever your "needs review" path is (Slack alert, email, a manual-approval step, etc.).
 
-For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~5-10s instead of ~90s.
+For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~10s instead of ~90s.
 
 ### Follow-up questions on a completed verification
 
@@ -170,7 +174,11 @@ So the Wait node has a number to read, the error output carries the refusal as f
 | `retry_after` | Seconds to wait before submitting again — point the Wait node's duration at `{{ $json.retry_after }}` |
 | `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `no_credits` |
 | `status_code` | The HTTP status, e.g. `503` |
+| `cost` | Credits the refused call needed, present only on an out-of-credits refusal |
+| `credits_remaining` | Credits the account holds — `0` is a real value and is reported, not dropped |
 | `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing or capacity refusal |
+
+`cost` and `credits_remaining` let an **IF** node tell a shortfall from an empty balance without reading the prose: `{{ $json.credits_remaining }}` above zero is one top-up away, zero is a plan decision.
 
 `error` keeps the raw message it always carried, so existing workflows reading it are unaffected.
 
@@ -199,6 +207,22 @@ So the Wait node has a number to read, the error output carries the refusal as f
 * **0.2.1** — A failed verification now returns `failure_reason`, `failure_class` (closed set: `upstream_unavailable` / `insufficient_evidence` / `invalid_input` / `cancelled` / `internal`) and `retryable` as explicit output fields, so an IF node can branch on *why* it failed instead of parsing the prose message. Capacity refusals (HTTP 503 with `code: capacity` or `upstream_unavailable`, sent when Lenz is shedding load or every model provider is down) are reported as transient with the stated wait and the Wait-node pattern that clears it, instead of a generic 503.
 
   Also repairs the error path both of those rely on. The node read the API's error body from `.body` / `.response.data`, but `httpRequestWithAuthentication` never rethrows the transport error — it wraps it in a `NodeApiError`, which moves the parsed body to `context.data`. Nothing matched, so the typed branches never ran. Attaching the wording then failed a second time: `new NodeApiError(node, error, { message })` returns the caught error untouched when that error is already a `NodeApiError`, discarding the message, description and status. The node now reads the body from where n8n puts it and sets the wording on the caught error, so the text actually reaches the user — this is also what makes 0.2.0's out-of-credits message work, which had never appeared in practice. The error tests now build their fixtures the way n8n does, since the previous hand-built shape could not exercise either path. On top of that, the error output carries `retry_after`, `code` and `status_code` so the documented Wait-node recovery has a value to read, and **Get** no longer reports a stored verification that failed as `completed` with a null verdict.
+
+* **0.3.0** — Lenz replaced its six per-endpoint quotas with **one credit pool** per account, and the node now speaks it. Out-of-credits messages quote the two new fields on the 402 body — `cost` (what this call needed) beside `credits_remaining` (what you hold) — which is the difference between "you have 4 credits and this costs 10", one top-up away, and "you have nothing", a plan decision. **Get Usage** returns the balance and the live price list (`costs`) alongside the per-capability numbers, which are now projections of that one balance rather than separate allowances: spending on `assess` reduces what is left for `verify`, and those blocks are deprecated — the API removes them on 2026-11-29. `/extract` still costs nothing and keeps its own daily fair-use cap, which rejects 429, not 402. The error output carries both numbers as fields — `cost` and `credits_remaining` beside the existing `retry_after` / `code` / `status_code` — so an IF node can tell a shortfall from an empty balance without parsing the message. **Get Usage**'s description no longer says "quota" or "for the current API key": the pool is per account, shared across your keys, the same correction the extract cap description already carries. No breaking change to any node output: every field the node emitted before is still emitted.
+
+* **0.4.0** — Exposes the two API parameters the node could not reach. **Verify (Deep)** and **Submit Batch** gain **Depth**: *Low* searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments for **half the credits** (5 against 10), running the same models at every step it runs — a volume lever, not a model downgrade. In a batch each claim can override the batch-wide default, so one submission can mix 5- and 10-credit checks. A completed verification now reports the `depth` its verdict was actually produced with, which is not always the one requested: a *Low* request that Lenz answers from an existing standard verdict is charged 5 and reads back `standard`. The echo describes the evidence, the charge follows the request, and without the field there was no way to tell the two apart. **Extract Claims** gains **Focus**, a free-text hint (300 characters, no extra cost) that narrows the result to the claims you describe. It only selects from what the extractor already found — it cannot add, reword or reorder claims. When nothing matches, the API answers `status: "no_match"` with an empty list rather than substituting the unfocused claims, and the node names that case in a `message` so an empty result is not mistaken for "nothing here". An over-long focus is refused before the request is sent, measured the way the API measures it — after collapsing whitespace — and never silently truncated, since a shortened focus returns a subset with nothing to show it happened. The low-depth price is readable on **Get Usage** at `cost_options.verify.depth.low`; it is a price rather than a capability, so it has no balance block of its own and never appears in `costs`. One UI consequence: adding Depth makes the per-claim batch row a five-field collection, which the n8n linter alphabetizes, so those fields render in a new order. (0.4.1 relabelled that row’s **Text** field to **Claim**, which sorts first again, so the required field is back at the top.) No output field was removed or renamed. *(Two claims in this entry were wrong — the low-depth price location and what Low actually skips. The wording above is the corrected text; see 0.4.2.)* Separately, the **Verify (Deep)** description no longer advertises a fixed "8-model" pipeline. The count has drifted once already — it read "7-model" until a docs sweep corrected it — so the copy now says "multi-model" and leaves the stage names (research, debate, adjudication) to carry the specificity they were always the ones carrying.
+
+  **0.4.0 has no npm release.** The version bump reached `main` but was never tagged, so nothing published it; everything described above shipped inside 0.4.1. npm goes 0.3.0 → 0.4.1.
+
+* **0.4.1** — The input field on **Assess (Fast)** and on each **Verify (Batch)** item is now labelled **Claim** instead of **Text**, matching the API's vocabulary: a document is `text` (**Extract Claims** keeps that label), a claim is `claim`. Labels only: the parameter keys saved in your workflows are unchanged, and so is every request the node sends.
+
+* **0.4.2** — Two corrections to what 0.4.x said about **Depth**, both of them wrong rather than merely unclear. The low-depth price was documented as appearing in `costs` under `verify_low`, with the advice to divide `credits.remaining` by it: that key does not exist — the API carries the four capability keys in `costs` and nothing else — so the suggested expression evaluated to `NaN`. The price is readable only at `cost_options.verify.depth.low`, which is where the docs now point. Separately, *Low* was described as searching fewer sources and skipping the recovery fetch tiers; it also stops the debate after the opening arguments, so a Low verdict has no rebuttal round and comes back with an empty `rebuttal` on its debate entries under **Include Audit Trail**. Every description of Depth in the node and the README now says so.
+
+  It also carries two fixes that are behaviour, not wording. The `Idempotency-Key` was built from the node's **display name**, which is user-editable free text. Node refuses to send a header value containing anything above U+00FF, so a node named in Cyrillic, Greek, Hebrew, Arabic or any CJK script — or carrying an emoji — failed **every billable call** before the request left the machine, with an error naming the header rather than the node. Latin-1 names such as `Prüfung` and `Vérification` were never affected, despite what an earlier draft of this entry said. The identity is now *hashed* into the key rather than written into it, which makes the guarantee structural rather than an assumption about what the id contains; the node id is preferred, so a rename mid-execution no longer changes the key, and the name never reaches the wire.
+
+  Separately, a `sources` value that was not a list — or a list containing `null` — threw while mapping the result, failing a verification that had already completed and been charged for. A `null` entry now costs that one citation; a `sources` that is not a list returns none at all, which is worth knowing if you branch on `citations.length`. No output field was removed or renamed. Two things changed on the wire: the `User-Agent` version, and the `Idempotency-Key` format.
+
+  This release also adds a `pre-push` git hook that refuses to push agent commits which have not been reviewed. It only affects contributors, needs `git config core.hooksPath .githooks` once per clone, and never gates a human pushing by hand — see AGENTS.md.
 
 ## Maintainer
 

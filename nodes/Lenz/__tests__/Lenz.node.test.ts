@@ -1,3 +1,6 @@
+// Imported, not read off disk: the community-node lint bans `node:fs`,
+// `node:path` and `__dirname` in this package, tests included.
+import packageJson from '../../../package.json';
 import { NodeApiError } from 'n8n-workflow';
 import type { IDataObject, IExecuteFunctions, IHttpRequestOptions } from 'n8n-workflow';
 
@@ -49,6 +52,9 @@ function createContext(
 	responder: Responder,
 	continueOnFail = false,
 	itemCount = 1,
+	// The node's identity is a test input for the Idempotency-Key: its name is
+	// user-editable free text, and its id is absent on older n8n versions.
+	nodeIdentity: { name?: string; id?: string } = {},
 ): { ctx: IExecuteFunctions; httpMock: jest.Mock; calls: IHttpRequestOptions[] } {
 	const items = Array.from({ length: itemCount }, () => ({ json: {} }));
 	const calls: IHttpRequestOptions[] = [];
@@ -62,7 +68,13 @@ function createContext(
 			if (name in params) return params[name];
 			return fallback;
 		}),
-		getNode: jest.fn(() => ({ name: 'Lenz', type: 'lenz', typeVersion: 1, position: [0, 0] })),
+		getNode: jest.fn(() => ({
+			name: nodeIdentity.name ?? 'Lenz',
+			...(nodeIdentity.id === undefined ? {} : { id: nodeIdentity.id }),
+			type: 'lenz',
+			typeVersion: 1,
+			position: [0, 0],
+		})),
 		getExecutionId: jest.fn(() => 'exec-1'),
 		continueOnFail: jest.fn(() => continueOnFail),
 		helpers: {
@@ -77,8 +89,15 @@ async function runNode(
 	responder: Responder,
 	continueOnFail = false,
 	itemCount = 1,
+	nodeIdentity: { name?: string; id?: string } = {},
 ) {
-	const { ctx, httpMock, calls } = createContext(params, responder, continueOnFail, itemCount);
+	const { ctx, httpMock, calls } = createContext(
+		params,
+		responder,
+		continueOnFail,
+		itemCount,
+		nodeIdentity,
+	);
 	const node = new Lenz();
 	const result = await node.execute.call(ctx);
 	return { output: result[0], httpMock, calls };
@@ -253,6 +272,33 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect((output[0].json as IDataObject).key_finding).toBe('');
 	});
 
+	it('returns the verdict even when sources is not a list', async () => {
+		// The verification is finished and paid for by the time this maps. Throwing
+		// over a malformed citation would fail the item after the money was spent.
+		const served = {
+			...completedStatus,
+			result: { ...(completedStatus.result as IDataObject), sources: 'not a list' },
+		};
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, verifyResponder(served));
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('completed');
+		expect(json.citations).toEqual([]);
+	});
+
+	it('drops a null entry in sources instead of failing the item', async () => {
+		const served = {
+			...completedStatus,
+			result: {
+				...(completedStatus.result as IDataObject),
+				sources: [null, { title: 'Real', url: 'https://real.example' }],
+			},
+		};
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, verifyResponder(served));
+		const citations = (output[0].json as IDataObject).citations as IDataObject[];
+		expect(citations).toHaveLength(1);
+		expect(citations[0].url).toBe('https://real.example');
+	});
+
 	it('omits the audit trail by default and includes it when asked', async () => {
 		const withoutAudit = await runNode(
 			{ operation: 'verify', claim: 'Some claim' },
@@ -286,6 +332,7 @@ describe('Lenz node - Verify (Deep)', () => {
 			source_url: 'https://origin.example/article',
 			webhook_url: 'https://hooks.example/lenz',
 			visibility: 'unlisted',
+			depth: 'standard',
 		});
 	});
 
@@ -402,6 +449,36 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(calls).toHaveLength(1); // submit only, no status poll
 	});
 
+	it('asks for the depth that was chosen, so a low check is billed at the low price', async () => {
+		const { calls } = await runNode(
+			{ operation: 'verify', claim: 'Some claim', depth: 'low' },
+			verifyResponder(completedStatus),
+		);
+		const submit = calls.find((c) => c.url === '/verify');
+		expect((submit?.body as IDataObject).depth).toBe('low');
+	});
+
+	it('reports the depth the verdict was produced with, not the one requested', async () => {
+		// A low request answered from an existing standard verdict is charged
+		// the low price but carries standard evidence. Reading back 'standard'
+		// here is correct, and is the only way a workflow can tell the two
+		// apart — so it must not be overwritten with the requested value.
+		const served = { ...completedStatus, result: { ...(completedStatus.result as IDataObject), depth: 'standard' } };
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim', depth: 'low' },
+			verifyResponder(served),
+		);
+		expect((output[0].json as IDataObject).depth).toBe('standard');
+	});
+
+	it('reports an empty depth on a verification stored before the field existed', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			verifyResponder(completedStatus),
+		);
+		expect((output[0].json as IDataObject).depth).toBe('');
+	});
+
 	it('wraps an API error from the submit call in NodeApiError rather than swallowing it', async () => {
 		const responder: Responder = () => {
 			throw new Error('Unauthorized');
@@ -454,6 +531,7 @@ describe('Lenz node - Submit Verify Batch', () => {
 			expect(options.url).toBe('/verify/batch');
 			expect(options.body).toEqual({
 				claims: [{ text: 'Claim one' }, { text: 'Claim two', language: 'es' }],
+				depth: 'standard',
 			});
 			return {
 				batch_id: 'batch_1',
@@ -507,6 +585,29 @@ describe('Lenz node - Submit Verify Batch', () => {
 		expect(httpMock).not.toHaveBeenCalled();
 	});
 
+	it('lets one batch mix depths, the per-item value winning over the default', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'verifyBatch',
+				depth: 'standard',
+				batchClaims: {
+					claim: [
+						{ text: 'Cheap one', depth: 'low' },
+						{ text: 'Careful one', depth: '' },
+					],
+				},
+			},
+			() => ({ batch_id: 'b1', items: [] }),
+		);
+		// The inheriting row carries no depth key at all. Sending '' would
+		// fail the API's enum, and sending the resolved 'standard' would
+		// erase the distinction between an override and an inheritance.
+		expect(calls[0].body).toEqual({
+			claims: [{ text: 'Cheap one', depth: 'low' }, { text: 'Careful one' }],
+			depth: 'standard',
+		});
+	});
+
 	it('skips a batch with no usable claims', async () => {
 		const { output, httpMock } = await runNode(
 			{ operation: 'verifyBatch', batchClaims: { claim: [{ text: '  ' }] } },
@@ -554,6 +655,57 @@ describe('Lenz node - Extract Claims', () => {
 		const { output, httpMock } = await runNode({ operation: 'extract', text: '  ' }, noCall);
 		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
 		expect(httpMock).not.toHaveBeenCalled();
+	});
+
+	it('sends the focus hint, with its whitespace collapsed', async () => {
+		const { calls } = await runNode(
+			{ operation: 'extract', text: 'Some text', focus: '  market size,\n  growth  ' },
+			() => ({ status: 'ready' }),
+		);
+		expect(calls[0].body).toEqual({ text: 'Some text', focus: 'market size, growth' });
+	});
+
+	it('measures the focus after collapsing, so padding alone cannot fail it', async () => {
+		// 451 raw characters that collapse to 252. The API counts the
+		// collapsed length, so rejecting this locally would refuse a focus the
+		// user correctly counted as under the limit.
+		const padded = 'a'.repeat(250) + ' '.repeat(200) + 'b';
+		const { calls } = await runNode(
+			{ operation: 'extract', text: 'Some text', focus: padded },
+			() => ({ status: 'ready' }),
+		);
+		expect(((calls[0].body as IDataObject).focus as string).length).toBe(252);
+	});
+
+	it('rejects an over-long focus before spending a request on it', async () => {
+		// Refused, never truncated: a silently shortened focus returns a
+		// subset of the claims with nothing to show that it happened.
+		const { ctx, httpMock } = createContext(
+			{ operation: 'extract', text: 'Some text', focus: 'a '.repeat(200) },
+			noCall,
+		);
+		const node = new Lenz();
+		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
+		expect(httpMock).not.toHaveBeenCalled();
+	});
+
+	it('explains a no_match instead of returning a bare empty list', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text', focus: 'unrelated topic' },
+			() => ({ status: 'no_match', claim: '', identified_claims: [] }),
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('no_match');
+		expect(json.identified_claims).toEqual([]);
+		expect(json.message).toContain('none fall within the focus');
+	});
+
+	it('adds no message to an extraction that did match', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => ({ status: 'ready', identified_claims: ['A'] }),
+		);
+		expect(output[0].json).not.toHaveProperty('message');
 	});
 
 	it('passes through the raw extract response', async () => {
@@ -769,6 +921,15 @@ describe('Lenz node - client identification', () => {
 		expect(calls[0].headers?.['User-Agent']).toMatch(/^n8n-nodes-lenz\//);
 	});
 
+	it('reports the version in package.json, not the last one someone typed', async () => {
+		// The header exists so Lenz can attribute API usage to this node, which
+		// only works if the version is true. A prefix match cannot catch a stale
+		// constant: the 0.3.0 bump landed with the header still saying 0.2.1
+		// and CI stayed green, which is what this assertion exists to stop.
+		const { calls } = await runNode({ operation: 'usage' }, () => ({ plan: 'free' }));
+		expect(calls[0].headers?.['User-Agent']).toBe(`n8n-nodes-lenz/${packageJson.version}`);
+	});
+
 	it('pins the API version it was built against', async () => {
 		const { calls } = await runNode({ operation: 'usage' }, () => ({ plan: 'free' }));
 		expect(calls[0].headers?.['X-Lenz-API-Version']).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -782,7 +943,75 @@ describe('Lenz node - idempotency', () => {
 
 	it('sends an Idempotency-Key on billable POSTs so a retry cannot double-charge', async () => {
 		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, assessResponder);
-		expect(calls[0].headers?.['Idempotency-Key']).toMatch(/^n8n:exec-1:Lenz:assess:0:[0-9a-z]+$/);
+		// The third segment is the node's identity, hashed — see the non-ASCII
+		// test below for why it is not the name.
+		expect(calls[0].headers?.['Idempotency-Key']).toMatch(
+			/^n8n:exec-1:[0-9a-z]+:assess:0:[0-9a-z]+$/,
+		);
+	});
+
+	it.each([
+		['Cyrillic', 'Проверка'],
+		['CJK', '検証'],
+		['an emoji', 'Lenz ✅'],
+		['Latin-1', 'Prüfung Vérification'],
+	])('keeps the key ASCII when the node name contains %s', async (_label, nodeName) => {
+		// Node refuses a header value containing anything above U+00FF, so a node
+		// named in Cyrillic, CJK, Greek, Hebrew, Arabic or with an emoji failed
+		// every billable POST before the request left the machine, with an error
+		// naming the header rather than the node.
+		//
+		// Latin-1 is in the list because it was NOT affected — `Prüfung` and
+		// `Vérification` always went through — and the first version of this fix
+		// used exactly those two as its examples. Pinning the case that never
+		// broke keeps the boundary honest if anyone narrows the hash later.
+		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			name: nodeName,
+		});
+		const key = calls[0].headers?.['Idempotency-Key'] as string;
+		expect(key).toBeTruthy();
+		expect(key).toMatch(/^[ -~]+$/);
+	});
+
+	it('falls back to the name when the node id is an empty string', async () => {
+		// `??` would let '' through as the identity, so two nodes in one execution
+		// running the same operation on the same body would share a key and the
+		// second would get the first's replayed answer — the collision 0.2.0 was
+		// released to fix.
+		const one = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			id: '', name: 'First',
+		});
+		const two = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			id: '', name: 'Second',
+		});
+		expect(one.calls[0].headers?.['Idempotency-Key']).not.toBe(two.calls[0].headers?.['Idempotency-Key']);
+	});
+
+	it('does not send the node name to the API', async () => {
+		// A node named after a customer or a project would otherwise be on every
+		// request this node makes.
+		const { calls } = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			name: 'Acme merger due diligence',
+		});
+		expect(calls[0].headers?.['Idempotency-Key']).not.toContain('Acme');
+	});
+
+	it('keys on the node id, so a rename mid-execution does not change the key', async () => {
+		const before = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			id: 'a1b2c3', name: 'Check the claim',
+		});
+		const after = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, {
+			id: 'a1b2c3', name: 'Renamed halfway through',
+		});
+		expect(before.calls[0].headers?.['Idempotency-Key']).toBe(after.calls[0].headers?.['Idempotency-Key']);
+	});
+
+	it('still separates two different nodes in one execution', async () => {
+		// The key exists to keep separate calls apart; hashing the identity must
+		// not collapse two nodes into one.
+		const one = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, { id: 'node-one' });
+		const two = await runNode({ operation: 'assess', text: 'some text' }, assessResponder, false, 1, { id: 'node-two' });
+		expect(one.calls[0].headers?.['Idempotency-Key']).not.toBe(two.calls[0].headers?.['Idempotency-Key']);
 	});
 
 	it('repeats the same key for identical input so a retry replays instead of re-charging', async () => {
@@ -830,7 +1059,9 @@ describe('Lenz node - idempotency', () => {
 			}
 			return { status: 'completed', result: { verdict: 'True', sources: [] } };
 		});
-		expect(calls[0].headers?.['Idempotency-Key']).toMatch(/^n8n:exec-1:Lenz:verify:0:[0-9a-z]+$/);
+		expect(calls[0].headers?.['Idempotency-Key']).toMatch(
+			/^n8n:exec-1:[0-9a-z]+:verify:0:[0-9a-z]+$/,
+		);
 		expect(calls[1].headers?.['Idempotency-Key']).toBeUndefined();
 	});
 
@@ -890,6 +1121,59 @@ describe('Lenz node - error handling', () => {
 		expect(String(json.error_message)).toContain('at capacity');
 		// `error` keeps its original value so existing workflows still read it.
 		expect(typeof json.error).toBe('string');
+	});
+
+	it('carries the credit numbers on the error output, not only in the prose', async () => {
+		// Same reason retry_after is a field. An IF node choosing between "top
+		// up and retry" and "escalate, the plan is wrong" needs the shortfall
+		// as a number; making it regex error_description is the prose-parsing
+		// that failure_class and retryable were added to remove.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'claim' },
+			() => {
+				throw apiError(402, {
+					detail: 'No remaining claim checks.',
+					code: 'no_credits',
+					credits_remaining: 4,
+					cost: 10,
+				});
+			},
+			/* continueOnFail */ true,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(402);
+		expect(json.code).toBe('no_credits');
+		expect(json.cost).toBe(10);
+		expect(json.credits_remaining).toBe(4);
+	});
+
+	it('reports a zero balance instead of dropping it', async () => {
+		// The case truthiness would lose, and the one that most needs its own
+		// branch: nothing left at all is a plan decision, not a top-up.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'claim' },
+			() => {
+				throw apiError(402, { detail: 'No credits.', credits_remaining: 0, cost: 10 });
+			},
+			/* continueOnFail */ true,
+		);
+		expect((output[0].json as IDataObject).credits_remaining).toBe(0);
+	});
+
+	it('omits the credit fields entirely when the body has none', async () => {
+		// A 503 body carries no credit numbers; the keys must be absent rather
+		// than present-and-undefined, or an IF node on credits_remaining sees a
+		// field that is not there.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'claim' },
+			() => {
+				throw apiError(503, { detail: 'At capacity.', code: 'capacity', retry_after: 30 });
+			},
+			/* continueOnFail */ true,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('cost');
+		expect(json).not.toHaveProperty('credits_remaining');
 	});
 });
 
@@ -979,7 +1263,11 @@ describe('Lenz node - quota (HTTP 402)', () => {
 		detail: 'No remaining claim checks.',
 		code: 'no_credits',
 		upgrade_url: 'https://lenz.io/plans',
+		// `remaining` is in the capability's own unit (verifications);
+		// `credits_remaining` and `cost` are in credits. Both are on the body.
 		remaining: 0,
+		credits_remaining: 4,
+		cost: 10,
 		resets_at: '2026-09-01T00:00:00+00:00',
 	};
 
@@ -1027,6 +1315,31 @@ describe('Lenz node - quota (HTTP 402)', () => {
 	it('surfaces the reset time when the server states one', async () => {
 		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
 		expect(err.description).toContain('2026-09-01');
+	});
+
+	it('quotes the cost beside the balance so the user can size the shortfall', async () => {
+		// "4 credits, this needs 10" is one top-up away. "0 credits" is a plan
+		// decision. Without both numbers the message cannot tell them apart.
+		const err = await expectQuotaErrorFrom(apiError(402, QUOTA_BODY));
+		expect(err.description).toContain('costs 10 credits');
+		expect(err.description).toContain('you have 4 left');
+	});
+
+	it('omits the balance line rather than printing undefined', async () => {
+		// Both fields are omitted by the API when unresolvable — never null —
+		// so the node must render nothing rather than "costs undefined credits".
+		const withoutCredits = { ...QUOTA_BODY };
+		delete (withoutCredits as Partial<typeof QUOTA_BODY>).cost;
+		delete (withoutCredits as Partial<typeof QUOTA_BODY>).credits_remaining;
+		const err = await expectQuotaErrorFrom(apiError(402, withoutCredits));
+		expect(err.description).not.toContain('undefined');
+		expect(err.description).not.toContain('costs');
+		expect(err.description).toContain('Retrying will not help');
+	});
+
+	it('says "credit" in the singular for a one-credit call', async () => {
+		const err = await expectQuotaErrorFrom(apiError(402, { ...QUOTA_BODY, cost: 1 }));
+		expect(err.description).toContain('costs 1 credit and');
 	});
 
 	it('recognises the status wherever the transport puts it', async () => {

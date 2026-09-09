@@ -16,7 +16,7 @@ const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.2.1';
+const USER_AGENT = 'n8n-nodes-lenz/0.4.2';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -32,6 +32,12 @@ const POLL_BACKOFF_MS = [2000, 4000, 8000];
 
 // Server-side cap on POST /verify/batch and POST /verify/{task_id}/select.
 const BATCH_MAX_CLAIMS = 20;
+
+// Server-side cap on the /extract `focus` hint. Measured after whitespace is
+// collapsed and enforced by rejection, never truncation — a silently shortened
+// focus returns a subset the caller did not ask for and gives them no way to
+// notice.
+const MAX_FOCUS_CHARS = 300;
 
 // GET /verifications is paginated; 100 is the largest page the API allows.
 const MAX_PAGE_SIZE = 100;
@@ -100,8 +106,9 @@ function responseBodyOf(error: unknown): IDataObject {
  * this error isn't one.
  *
  * Keyed on HTTP 402, which the Lenz API sends for exactly this condition. The
- * body's `code` and `remaining` refine the wording but are not required — a
- * 402 alone is unambiguous.
+ * body's `detail`, `cost` and `credits_remaining` refine the wording but none
+ * is required — a 402 alone is unambiguous, so a server that omits them still
+ * produces the generic text rather than "costs undefined credits".
  */
 function quotaMessageFor(error: unknown): { message: string; description: string } | undefined {
 	if (statusCodeOf(error) !== 402) return undefined;
@@ -110,10 +117,22 @@ function quotaMessageFor(error: unknown): { message: string; description: string
 	const detail = typeof body.detail === 'string' ? body.detail : 'No remaining Lenz credits.';
 	const upgradeUrl = typeof body.upgrade_url === 'string' ? body.upgrade_url : PLANS_URL;
 
-	let description = `Retrying will not help — this clears when you top up or the monthly quota resets. See ${upgradeUrl}`;
+	// `cost` and `credits_remaining` are in CREDITS; `remaining` is in the
+	// capability's own unit. Quoting both is what separates "you have 4 credits
+	// and this costs 10" from "you have nothing" — the first is one top-up away,
+	// the second is a plan decision.
+	const cost = typeof body.cost === 'number' ? body.cost : undefined;
+	const creditsRemaining =
+		typeof body.credits_remaining === 'number' ? body.credits_remaining : undefined;
+
+	let description = '';
+	if (cost !== undefined && creditsRemaining !== undefined) {
+		description = `This call costs ${cost} credit${cost === 1 ? '' : 's'} and you have ${creditsRemaining} left. `;
+	}
+	description += `Retrying will not help — this clears when you top up or your monthly credits reset. See ${upgradeUrl}`;
 	const resetsAt = typeof body.resets_at === 'string' ? body.resets_at : '';
 	if (resetsAt) {
-		description += ` (quota resets ${resetsAt}).`;
+		description += ` (credits reset ${resetsAt}).`;
 	}
 
 	return { message: `Lenz: ${detail}`, description };
@@ -222,9 +241,15 @@ function bodyFingerprint(body?: IDataObject): string {
 // Sources without a URL can't be cited, so they're dropped. The rest are passed
 // through in full — snippet and source_name are what make a citation quotable
 // rather than merely linkable.
-function mapCitations(sources: IDataObject[]): IDataObject[] {
+function mapCitations(sources: unknown): IDataObject[] {
+	// Guarded rather than cast. A verification is paid for and finished by the
+	// time this runs, so throwing here would fail the item *after* the money was
+	// spent — over a malformed citation, of all things. A `sources` that is not
+	// a list, or a list with a null in it, costs the caller that entry and
+	// nothing else.
+	if (!Array.isArray(sources)) return [];
 	return sources
-		.filter((s) => s.url)
+		.filter((s): s is IDataObject => typeof s === 'object' && s !== null && !!(s as IDataObject).url)
 		.map((s) => ({
 			title: s.title ?? '',
 			url: s.url ?? '',
@@ -252,7 +277,7 @@ function needsInputMessage(reason?: string): string {
 }
 
 function mapCompletedVerification(result: IDataObject, includeAudit: boolean): IDataObject {
-	const sources = (result.sources ?? []) as IDataObject[];
+	const sources = result.sources;
 	const mapped: IDataObject = {
 		status: 'completed',
 		passed: isPassingVerdict(result.verdict as string | undefined),
@@ -269,6 +294,12 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 		citations: mapCitations(sources),
 		verification_id: result.verification_id ?? null,
 		visibility: result.visibility ?? '',
+		// The depth this verdict was actually PRODUCED with, which is not
+		// always the depth that was requested: a low request served from an
+		// existing standard verdict reads 'standard' here and is still
+		// charged the low price. Surfaced because without it there is no way
+		// to tell how much evidence is behind the answer.
+		depth: result.depth ?? '',
 		language: result.language ?? '',
 		created_at: result.created_at ?? '',
 		modified_at: result.modified_at ?? null,
@@ -400,7 +431,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Assess (Fast)',
 						value: 'assess',
-						description: 'Fast 3-model panel verdict (~5-10s), one entry per claim found in the text',
+						description: 'Fast 3-model panel verdict (~10s), one entry per claim found in the text',
 						action: 'Quickly assess text for factual claims',
 					},
 					{
@@ -412,7 +443,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Verify (Deep)',
 						value: 'verify',
-						description: 'Full 8-model pipeline with sourced citations (~90s). Reserve for high-stakes claims.',
+						description: 'Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims.',
 						action: 'Deeply verify a claim',
 					},
 				],
@@ -484,7 +515,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Get History',
 						value: 'askHistory',
-						description: 'Retrieve the follow-up conversation and remaining ask quota',
+						description: 'Retrieve the follow-up conversation and remaining follow-up questions',
 						action: 'Get ask history for a verification',
 					},
 					{
@@ -514,8 +545,8 @@ export class Lenz implements INodeType {
 					{
 						name: 'Get Usage',
 						value: 'usage',
-						description: 'Check remaining quota for the current API key',
-						action: 'Check usage and quota',
+						description: 'Check your account credit balance, what each operation costs, and when credits reset. Credits are per account, shared across your API keys.',
+						action: 'Check usage and credits',
 					},
 				],
 				default: 'usage',
@@ -541,14 +572,14 @@ export class Lenz implements INodeType {
 					{
 						name: 'Assess (Fast)',
 						value: 'assess',
-						description: 'Fast 3-model panel verdict (~5-10s), one entry per claim found in the text',
+						description: 'Fast 3-model panel verdict (~10s), one entry per claim found in the text',
 						action: 'Quickly assess text for factual claims',
 					},
 					{
 						name: 'Check Usage',
 						value: 'usage',
-						description: 'Check remaining quota for the current API key',
-						action: 'Check usage and quota',
+						description: 'Check your account credit balance, what each operation costs, and when credits reset. Credits are per account, shared across your API keys.',
+						action: 'Check usage and credits',
 					},
 					{
 						name: 'Extract Claims',
@@ -559,7 +590,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Verify (Deep)',
 						value: 'verify',
-						description: 'Full 8-model pipeline with sourced citations (~90s). Reserve for high-stakes claims.',
+						description: 'Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims.',
 						action: 'Deeply verify a claim',
 					},
 				],
@@ -578,6 +609,21 @@ export class Lenz implements INodeType {
 				description: 'The claim to investigate in depth. Reserve for high-stakes statements that warrant a thorough, sourced check.',
 			},
 			{
+				// Labelled "Claim" — a document is text, a claim is a claim. The
+				// parameter NAME stays `text`: it is the key saved workflows persist,
+				// so renaming it would break every existing Assess node.
+				displayName: 'Claim',
+				name: 'text',
+				type: 'string',
+				typeOptions: { rows: 3 },
+				default: '',
+				required: true,
+				displayOptions: {
+					show: { operation: ['assess'] },
+				},
+				description: 'The claim to check. If it contains several claims, each is assessed separately.',
+			},
+			{
 				displayName: 'Text',
 				name: 'text',
 				type: 'string',
@@ -585,9 +631,9 @@ export class Lenz implements INodeType {
 				default: '',
 				required: true,
 				displayOptions: {
-					show: { operation: ['assess', 'extract'] },
+					show: { operation: ['extract'] },
 				},
-				description: 'The text to check. If it contains several claims, each is handled separately.',
+				description: 'The text to pull the verifiable claims out of',
 			},
 			{
 				displayName: 'Claims',
@@ -606,13 +652,39 @@ export class Lenz implements INodeType {
 						displayName: 'Claim',
 						values: [
 							{
-								displayName: 'Text',
+								// Labelled "Claim"; the NAME stays `text` because saved
+								// workflows persist it (see the Assess field above).
+								displayName: 'Claim',
 								name: 'text',
 								type: 'string',
 								typeOptions: { rows: 2 },
 								default: '',
 								required: true,
 								description: 'The claim to investigate in depth',
+							},
+							{
+								displayName: 'Depth',
+								name: 'depth',
+								type: 'options',
+								options: [
+									{
+										name: 'Batch Default',
+										value: '',
+										description: 'Inherit the depth set for the whole batch',
+									},
+									{
+										name: 'Low',
+										value: 'low',
+										description: 'Half the credits — fewer sources, no recovery fetch tiers, and the debate stops after the opening arguments',
+									},
+									{
+										name: 'Standard',
+										value: 'standard',
+										description: 'The full pipeline, at the full price',
+									},
+								],
+								default: '',
+								description: 'How much work this claim gets. Each claim is priced on its own depth, so one batch can mix the two and pay 5 for some claims and 10 for others.',
 							},
 							{
 								displayName: 'Language',
@@ -729,7 +801,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['getVerification', 'verify', 'verifyStatus'] },
 				},
-				description: 'Whether to include the panel reasoning, debate transcript, and per-panelist assessments. Adds a lot of data to each item.',
+				description: 'Whether to include the panel reasoning, debate transcript, and per-panelist assessments. Adds a lot of data to each item. At Low depth the transcript carries no rebuttals, because that round does not run.',
 			},
 			{
 				displayName: 'Return All',
@@ -806,6 +878,39 @@ export class Lenz implements INodeType {
 				description: 'Who can reach the verification once it completes',
 			},
 			{
+				displayName: 'Depth',
+				name: 'depth',
+				type: 'options',
+				options: [
+					{
+						name: 'Low',
+						value: 'low',
+						description: 'Half the credits. Searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments, so it answers sooner with less evidence behind the verdict.',
+					},
+					{
+						name: 'Standard',
+						value: 'standard',
+						description: 'The full pipeline, and the default',
+					},
+				],
+				default: 'standard',
+				displayOptions: {
+					show: { operation: ['verify', 'verifyBatch'] },
+				},
+				description: 'How much work the check does. Low costs half the credits — 5 against 10 — and runs the same models at every step it runs: it searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments. You are charged for the depth you request, so a Low request served from an existing standard verdict still costs 5 and returns Depth "standard".',
+			},
+			{
+				displayName: 'Focus',
+				name: 'focus',
+				type: 'string',
+				default: '',
+				placeholder: 'Market size, growth and competitors',
+				displayOptions: {
+					show: { operation: ['extract'] },
+				},
+				description: 'Optional hint that narrows the result to the claims it describes, at most 300 characters. It only selects from the claims the extractor already found — it cannot add one, reword one, or change what counts as a claim. When nothing matches, Status comes back as no_match with an empty list; the unfocused claims are never substituted. Costs no extra credits.',
+			},
+			{
 				displayName: 'Language',
 				name: 'language',
 				type: 'string',
@@ -839,15 +944,32 @@ export class Lenz implements INodeType {
 		// execution, each time restarting itemIndex at 0. Keyed on position alone,
 		// the second run would reuse the first run's key with different text and
 		// the API would reject it (422, or 409 while the first is still in flight).
+		// The node's identity is HASHED into the key, never written into it raw.
+		// Node refuses to send a header value containing anything above U+00FF —
+		// verified: `Prüfung` and `Vérification` are accepted (Latin-1 passes),
+		// while `Lenz ✅`, `検証` and `Проверка` throw ERR_INVALID_CHAR. So a node
+		// named in Cyrillic, Greek, Hebrew, Arabic, any CJK script, or with an
+		// emoji failed every billable POST before the request left the machine,
+		// with an error naming the header rather than the node.
+		//
+		// Hashing rather than trusting the id makes that structural: the id is
+		// normally a UUID, but it comes from the workflow JSON and a hand-edited
+		// or third-party-generated file can carry anything, which would bring the
+		// same crash back from a new direction. It also keeps a node named after
+		// a customer or project off the wire, and preferring the id means a
+		// rename mid-execution no longer changes the key. `||`, not `??`: an
+		// empty-string id must fall through to the name, or two nodes would
+		// collapse onto one key — the collision 0.2.0 was released to fix.
 		const executionId = this.getExecutionId();
-		const nodeName = this.getNode().name;
+		const node = this.getNode();
+		const nodeKey = bodyFingerprint({ node: node.id || node.name });
 		const buildIdempotencyKey = (
 			operation: string,
 			itemIndex: number,
 			body?: IDataObject,
 		): string =>
 			executionId
-				? `n8n:${executionId}:${nodeName}:${operation}:${itemIndex}:${bodyFingerprint(body)}`
+				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint(body)}`
 				: '';
 
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
@@ -921,6 +1043,7 @@ export class Lenz implements INodeType {
 					const sourceUrl = (this.getNodeParameter('sourceUrl', itemIndex, '') as string).trim();
 					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
+					const depth = this.getNodeParameter('depth', itemIndex, 'standard') as string;
 
 					const submitBody: IDataObject = { text: claim };
 					if (language) {
@@ -934,6 +1057,13 @@ export class Lenz implements INodeType {
 					}
 					if (visibility) {
 						submitBody.visibility = visibility;
+					}
+					// Sent on every call, the way visibility is, rather than only when
+					// it differs from the default. The request then states the price it
+					// expects to pay, which is what makes the depth echoed on the result
+					// readable when the two disagree.
+					if (depth) {
+						submitBody.depth = depth;
 					}
 					const accepted = await lenzRequest('POST', '/verify', submitBody, {
 						idempotent: { operation, itemIndex },
@@ -1017,6 +1147,7 @@ export class Lenz implements INodeType {
 
 					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
+					const depth = this.getNodeParameter('depth', itemIndex, 'standard') as string;
 
 					const body: IDataObject = {
 						claims: entries.map((entry) => {
@@ -1024,6 +1155,7 @@ export class Lenz implements INodeType {
 							const entryLanguage = (((entry.language as string) ?? '') as string).trim();
 							const entrySourceUrl = (((entry.sourceUrl as string) ?? '') as string).trim();
 							const entryVisibility = (((entry.visibility as string) ?? '') as string).trim();
+							const entryDepth = (((entry.depth as string) ?? '') as string).trim();
 							if (entryLanguage) {
 								claimBody.language = entryLanguage;
 							}
@@ -1032,6 +1164,13 @@ export class Lenz implements INodeType {
 							}
 							if (entryVisibility) {
 								claimBody.visibility = entryVisibility;
+							}
+							// Left off entirely when the row says "Batch Default", so the
+							// batch-wide value applies. Sending '' instead would fail the
+							// API's enum, and sending the resolved default would hide which
+							// rows were actually overridden.
+							if (entryDepth) {
+								claimBody.depth = entryDepth;
 							}
 							return claimBody;
 						}),
@@ -1044,6 +1183,9 @@ export class Lenz implements INodeType {
 					}
 					if (visibility) {
 						body.visibility = visibility;
+					}
+					if (depth) {
+						body.depth = depth;
 					}
 
 					const accepted = await lenzRequest('POST', '/verify/batch', body, {
@@ -1152,13 +1294,45 @@ export class Lenz implements INodeType {
 						continue;
 					}
 
+					// Collapse the whitespace first and measure that, which is the order
+					// the API uses: measuring the raw string would refuse a focus the
+					// user correctly counted as short. Over-long is refused rather than
+					// trimmed, because a silently shortened focus returns a subset of
+					// the claims with nothing to show that it happened. Length is the
+					// only rule mirrored here; the API's other rejections still arrive
+					// as its own 422.
+					const focus = (this.getNodeParameter('focus', itemIndex, '') as string)
+						.trim()
+						.replace(/\s+/g, ' ');
+					if (focus.length > MAX_FOCUS_CHARS) {
+						throw new NodeOperationError(
+							this.getNode(),
+							`A focus can be at most ${MAX_FOCUS_CHARS} characters, got ${focus.length}`,
+							{ itemIndex },
+						);
+					}
+
 					const body: IDataObject = { text };
 					if (language) {
 						body.language = language;
 					}
+					// The collapsed form travels, not the raw one, so the body this node
+					// fingerprints into its Idempotency-Key is the same string the API
+					// hashes into its own — two spellings of one focus stay one request.
+					if (focus) {
+						body.focus = focus;
+					}
 					responseData = await lenzRequest('POST', '/extract', body, {
 						idempotent: { operation, itemIndex },
 					});
+					// `no_match` means claims were found and the focus excluded all of
+					// them. The empty list is the answer rather than a failure, but on
+					// its own it is indistinguishable from "nothing here", so name the
+					// cause and the way out.
+					if (responseData.status === 'no_match') {
+						responseData.message =
+							'Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted.';
+					}
 				} else if (operation === 'ask') {
 					const verificationId = this.getNodeParameter('verificationId', itemIndex) as string;
 					const question = this.getNodeParameter('question', itemIndex) as string;
@@ -1312,6 +1486,20 @@ export class Lenz implements INodeType {
 					const retryAfter = Number(body.retry_after);
 					if (Number.isFinite(retryAfter) && retryAfter > 0) {
 						json.retry_after = Math.ceil(retryAfter);
+					}
+					// The same two numbers the 402 message quotes, carried as
+					// fields rather than prose. A workflow that tops up
+					// automatically, or routes a small shortfall differently
+					// from an empty balance, should not have to parse the
+					// description to find them — that is the parsing 0.2.1
+					// removed for failure_class and retryable. Checked with
+					// typeof, not truthiness: a credits_remaining of 0 is the
+					// case that matters most and the one truthiness drops.
+					if (typeof body.cost === 'number') {
+						json.cost = body.cost;
+					}
+					if (typeof body.credits_remaining === 'number') {
+						json.credits_remaining = body.credits_remaining;
 					}
 					const typed = quotaMessageFor(error) ?? capacityMessageFor(error);
 					if (typed) {

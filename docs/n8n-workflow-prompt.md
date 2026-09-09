@@ -30,15 +30,15 @@ your assumptions in one line underneath.
 | Credential type | `lenzApi` — **omit the `credentials` block entirely** (see rules) |
 | Inputs / outputs | 1 main in, 1 main out |
 
-Generated from `n8n-nodes-lenz@0.2.1`. Do not hand-edit.
+Generated from `n8n-nodes-lenz@0.4.2`. Do not hand-edit.
 
 ### `resource: "claim"` — Claim
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `assess` | Fast 3-model panel verdict (~5-10s), one entry per claim found in the text | `text`**\***, `language` |
-| `extract` | Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `language` |
-| `verify` | Full 8-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `language` |
+| `assess` | Fast 3-model panel verdict (~10s), one entry per claim found in the text | `text`**\***, `language` |
+| `extract` | Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `focus`, `language` |
+| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
 
 ### `resource: "verification"` — Verification
 
@@ -50,13 +50,13 @@ Generated from `n8n-nodes-lenz@0.2.1`. Do not hand-edit.
 | `verifyStatus` | Poll a submitted verification task by its task ID | `taskId`**\***, `includeAudit` |
 | `listRelated` | Retrieve public verifications semantically related to a given one | `verificationId`**\***, `relatedLimit` |
 | `select` | Resolve a needs-input interrupt by picking which offered claims to verify | `taskId`**\***, `selectedClaims`**\*** |
-| `verifyBatch` | Submit up to 20 claims for deep verification at once, without waiting | `batchClaims`, `webhookUrl`, `visibility`, `language` |
+| `verifyBatch` | Submit up to 20 claims for deep verification at once, without waiting | `batchClaims`, `webhookUrl`, `visibility`, `depth`, `language` |
 
 ### `resource: "askResource"` — Ask
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `askHistory` | Retrieve the follow-up conversation and remaining ask quota | `verificationId`**\*** |
+| `askHistory` | Retrieve the follow-up conversation and remaining follow-up questions | `verificationId`**\*** |
 | `resetAsk` | Delete the follow-up conversation stored for a verification | `verificationId`**\*** |
 | `ask` | Ask a grounded follow-up question about a completed Verify (Deep) result | `verificationId`**\***, `question`**\***, `language` |
 
@@ -64,7 +64,7 @@ Generated from `n8n-nodes-lenz@0.2.1`. Do not hand-edit.
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `usage` | Check remaining quota for the current API key | — |
+| `usage` | Check your account credit balance, what each operation costs, and when credits reset. Credits are per account, shared across your API keys. | — |
 
 `*` = required. Parameters not listed for an operation are not shown by the node and
 must not appear in the workflow JSON for it.

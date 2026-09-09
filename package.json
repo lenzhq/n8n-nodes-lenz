@@ -1,6 +1,6 @@
 {
     "name": "n8n-nodes-lenz",
-    "version": "0.2.1",
+    "version": "0.4.2",
     "description": "Fact-check claims and catch AI hallucinations with Lenz - verified, sourced verdicts inside your n8n workflows.",
     "license": "MIT",
     "homepage": "https://lenz.io",
@@ -25,7 +25,8 @@
         "prepublishOnly": "n8n-node prerelease",
         "prompt:build": "node scripts/generate-workflow-prompt.mjs",
         "prompt:check": "node scripts/generate-workflow-prompt.mjs --check",
-        "test": "jest"
+        "test": "jest",
+        "test:hooks": "jest --config jest.hooks.config.cjs"
     },
     "files": [
         "dist"

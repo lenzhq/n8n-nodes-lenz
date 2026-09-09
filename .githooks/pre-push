@@ -1,0 +1,10 @@
+#!/bin/sh
+# Delegates to Node. `jq` is not installed on every machine here and the
+# primary shell on this one is PowerShell, so shell text-processing is the
+# fragile path; Node is already a hard dependency of this package.
+#
+# `exec` hands the hook's stdin — the `<local ref> <local sha> <remote ref>
+# <remote sha>` lines git supplies — straight to the script. If node cannot be
+# found, exec fails non-zero and git aborts the push, which is the behaviour
+# we want from a broken gate.
+exec node "$(git rev-parse --show-toplevel)/.claude/hooks/review-gate.cjs" "$@"
