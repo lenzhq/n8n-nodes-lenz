@@ -42,6 +42,13 @@ jobs:
       - name: Run tests
         run: 'npm test'
 
+      # The workflow prompt hands an agent literal node types, operation values
+      # and parameter names. A stale one produces workflow JSON that pastes as a
+      # broken node, and nothing else in CI would notice. Runs after build
+      # because it reads the compiled node description.
+      - name: Check workflow prompt is current
+        run: 'npm run prompt:check'
+
       # The pre-push review gate, checked here but deliberately not in
       # publish.yml: a broken developer hook must not be able to block a
       # release of the node itself.

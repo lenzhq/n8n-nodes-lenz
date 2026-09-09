@@ -1,0 +1,11 @@
+# `prompt:check` compares the generated prompt byte-for-byte against a rebuild,
+# and the rebuild splices an LF-joined generated block into the template's
+# prose. If git hands either file back with CRLF on checkout — which it does on
+# Windows under the default `core.autocrlf=true` — the two differ on every line
+# ending and the check reports the doc as stale about the node when it matches
+# the node exactly. `prompt:build` then writes a mixed-ending file that git
+# reports as unchanged, so there is nothing to see in the diff either.
+#
+# Pinning both files to LF makes the check deterministic on every platform.
+scripts/workflow-prompt.template.md text eol=lf
+docs/n8n-workflow-prompt.md text eol=lf
