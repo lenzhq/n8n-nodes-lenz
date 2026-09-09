@@ -40,9 +40,15 @@ you can ask follow-up questions about. Do not put a `verify` on a path that
 needs to respond quickly — 90 seconds is a long time inside a webhook.
 
 **`extract`** — free, and does not check anything. It pulls the verifiable
-claims out of a block of text. Use it when the input is a paragraph and you want
-to check claims individually, or to show a user what *would* be checked before
-spending anything.
+claims out of a block of text, as plain strings.
+
+**You almost never need it before `assess`.** `assess` already finds the claims
+in whatever text you hand it and returns one entry per claim, so
+`extract → assess` does the same work twice and costs the same either way.
+Reach for `extract` only when something happens BETWEEN finding the claims and
+checking them: showing a user what would be checked and letting them choose,
+filtering or deduplicating the list, storing it, or checking a subset. If
+nothing happens in between, send the text straight to `assess`.
 
 Billing note that changes workflow design: **`assess` bills per claim found in
 the text, not per request.** A paragraph containing five claims costs five
@@ -80,6 +86,30 @@ or Filter node over `claims` instead. Choose deliberately and say which you chos
 `assess` can also return `status: "no_claim"` or `status: "ambiguous"` with
 `candidate_claims` — there was nothing checkable in the text. Handle it rather
 than letting it fall through the `passed` branch as a silent false.
+
+**`extract`** returns the claims as **plain strings**, under a different field
+name from `assess`, with a different status value:
+
+```
+{ status: "ready", identified_claims: [ "Claim A", "Claim B" ], domain: "General" }
+```
+
+Read that carefully before wiring it: the field is `identified_claims`, not
+`claims`; the entries are strings, not objects, so there is no `.claim`,
+`.passed` or `.verdict` on them; and the status is `"ready"`, not `"ok"`.
+
+**The trap that will not show up in your testing:** when the text contains
+exactly ONE claim, `identified_claims` is `[]` and the claim is in `claim`
+instead. Split Out on `identified_claims` therefore yields ZERO items for
+single-claim input — the workflow looks right on a multi-claim paragraph and
+silently processes nothing on the one-line message it meets in production. So
+never Split Out that field raw. Coalesce first, with a **Code** node returning
+`identified_claims.length ? identified_claims : [claim]` as items, and Split Out
+the result of that.
+
+Empty input returns `{ skipped: true, reason: "empty_input" }` instead of
+failing the batch, so nothing downstream sees either field — branch on `skipped`
+if the input can be blank.
 
 ## Wiring patterns
 
@@ -159,4 +189,27 @@ for an interactive one, let it fail.
 4. **Do not add a `verify` to a high-volume loop** without telling me what it
    will cost in time — 90 seconds each, serially.
 5. Prefer the smallest workflow that does the job. Every node I did not ask for
-   is one I have to understand before I can trust the result.
+   is one I have to understand before I can trust the result. Smallest does not
+   mean unfinished — see rule 6, which outranks this one.
+6. **Route on the verdict, or the workflow is not finished.** The whole point is
+   that a failed claim goes somewhere different from a passing one. Every
+   workflow ends in a branch on `{{ $json.passed }}` — after a **Split Out** on
+   `claims` for `assess`, or directly for `verify` — and BOTH sides of that
+   branch lead to a node that does something. A workflow that computes a verdict
+   and stops, or that leaves the false branch empty, has done the expensive part
+   and thrown the answer away. Checking `status` is not this: `status` tells you
+   whether there was anything to check, `passed` tells you the answer.
+
+## Before you answer
+
+Read your own JSON back and confirm all five. If one fails, fix it rather than
+noting it:
+
+1. Is there an **IF** on `{{ $json.passed }}`, with both branches leading
+   somewhere? (rule 6)
+2. Does every field name you read appear in "Output shapes" for the operation
+   that produced it — `claims` for `assess`, `identified_claims` for `extract`?
+   You may not read a field that is not documented there.
+3. Is every `type`, `resource` and `operation` copied exactly from the table?
+4. Is the `credentials` block absent from every node?
+5. Does the JSON parse, with every `connections` entry closed?
