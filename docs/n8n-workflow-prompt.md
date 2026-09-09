@@ -30,7 +30,7 @@ your assumptions in one line underneath.
 | Credential type | `lenzApi` — **omit the `credentials` block entirely** (see rules) |
 | Inputs / outputs | 1 main in, 1 main out |
 
-Generated from `n8n-nodes-lenz@0.4.2`. Do not hand-edit.
+Generated from `n8n-nodes-lenz`. Do not hand-edit.
 
 ### `resource: "claim"` — Claim
 
