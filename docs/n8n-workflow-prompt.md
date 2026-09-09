@@ -75,31 +75,55 @@ must not appear in the workflow JSON for it.
 
 This is the part that actually decides whether the workflow is useful.
 
-**`assess`** — a 3-model panel verdict in ~5–10 seconds. The default for
-anything high-volume or low-stakes: moderating user posts, checking a batch of
-marketing lines, screening LLM output before it goes to a human reviewer.
+**`assess`** — a 3-model panel verdict. The default for anything high-volume or
+low-stakes: moderating user posts, checking a batch of marketing lines,
+screening LLM output before it goes to a human reviewer. Timings are in the
+table above; take them from there rather than from this prose, which cannot be
+regenerated when the node changes.
 
-**`verify`** — the full 8-model pipeline (research → debate → adjudication) in
-**~90 seconds**. Worth it when a wrong answer is expensive and someone will want
-to see the reasoning: publishing, legal or medical copy, anything a customer
-sees unedited. It returns citations, an executive summary, and a `verification_id`
-you can ask follow-up questions about. Do not put a `verify` on a path that
-needs to respond quickly — 90 seconds is a long time inside a webhook.
+**`verify`** — the full multi-model pipeline (research → debate → adjudication).
+Worth it when a wrong answer is expensive and someone will want to see the
+reasoning: publishing, legal or medical copy, anything a customer sees unedited.
+It returns citations, an executive summary, and a `verification_id` you can ask
+follow-up questions about. Do not put a `verify` on a path that needs to respond
+quickly — it is the slowest thing here by two orders of magnitude, which is a
+long time inside a webhook. It also gives up if the pipeline overruns, returning
+`status: "timeout"` rather than a verdict; see the branching rule below.
 
 **`extract`** — free, and does not check anything. It pulls the verifiable
 claims out of a block of text, as plain strings.
 
-**You almost never need it before `assess`.** `assess` already finds the claims
-in whatever text you hand it and returns one entry per claim, so
-`extract → assess` does the same work twice and costs the same either way.
-Reach for `extract` only when something happens BETWEEN finding the claims and
-checking them: showing a user what would be checked and letting them choose,
-filtering or deduplicating the list, storing it, or checking a subset. If
-nothing happens in between, send the text straight to `assess`.
+**For a paragraph, you usually do not need it before `assess`.** `assess`
+already finds the claims in whatever text you hand it and returns one entry per
+claim, so on short text `extract → assess` does the same work twice and costs
+the same either way. Reach for it when something happens BETWEEN finding the
+claims and checking them: showing a user what would be checked and letting them
+choose, filtering or deduplicating the list, storing it, or checking a subset.
+
+**For a document, `extract` first is the designed path, not a redundancy.**
+`assess` truncates a single text at 10,000 characters and says nothing about
+having done so — the claims past the cut are silently never checked. `extract`
+accepts 50,000. So anything article- or transcript-sized goes to `extract`,
+then its claims to `assess`; one `extract` output is one `assess` call. Sending
+a long document straight to `assess` is the silently-lossy option.
 
 Billing note that changes workflow design: **`assess` bills per claim found in
 the text, not per request.** A paragraph containing five claims costs five
 assess units. If you are looping over many rows, mention this.
+
+Two parameters change the result rather than just the request, so do not set
+either one silently:
+
+- **`depth: "low"` on `verify` halves the credits** — it searches fewer sources,
+  skips the recovery fetch tiers and shortens the debate. That is a real
+  reduction in evidence, not a free discount, so pick it only for a
+  lower-stakes path and say that you did. (A low request answered from an
+  existing standard verdict still costs the same as low and comes back marked
+  standard.)
+- **`focus` on `extract`** narrows the result to the claims it describes. It
+  only selects among the claims the extractor already found — it cannot add
+  one or reword one — and when nothing matches you get `status: "no_match"`
+  and an empty list rather than the unfocused claims.
 
 ## Where the check belongs
 
@@ -135,24 +159,51 @@ or Filter node over `claims` instead. Choose deliberately and say which you chos
 than letting it fall through the `passed` branch as a silent false.
 
 **`extract`** returns the claims as **plain strings**, under a different field
-name from `assess`, with a different status value:
+name from `assess`, with a different set of status values:
 
 ```
-{ status: "ready", identified_claims: [ "Claim A", "Claim B" ], domain: "General" }
+{ status: "ready",       identified_claims: [ "Claim A", "Claim B" ], claim: "…", domain: "General" }
+{ status: "not_a_claim", identified_claims: [], claim: "" }
+{ status: "no_match",    identified_claims: [], claim: "", message: "…" }
 ```
 
 Read that carefully before wiring it: the field is `identified_claims`, not
 `claims`; the entries are strings, not objects, so there is no `.claim`,
 `.passed` or `.verdict` on them; and the status is `"ready"`, not `"ok"`.
 
+`not_a_claim` means there was nothing checkable in the text. `no_match` means a
+`focus` was given and nothing matched it — the unfocused claims are NOT
+substituted. In both, `identified_claims` is `[]` **and `claim` is the empty
+string**.
+
 **The trap that will not show up in your testing:** when the text contains
-exactly ONE claim, `identified_claims` is `[]` and the claim is in `claim`
-instead. Split Out on `identified_claims` therefore yields ZERO items for
-single-claim input — the workflow looks right on a multi-claim paragraph and
-silently processes nothing on the one-line message it meets in production. So
-never Split Out that field raw. Coalesce first, with a **Code** node returning
-`identified_claims.length ? identified_claims : [claim]` as items, and Split Out
-the result of that.
+exactly ONE claim, `status` is `"ready"` but `identified_claims` is `[]` and the
+claim is in `claim` instead. Split Out on `identified_claims` therefore yields
+ZERO items for single-claim input — the workflow looks right on a multi-claim
+paragraph and silently processes nothing on the one-line message it meets in
+production. So never Split Out that field raw.
+
+Gate on the status first, then coalesce. A **Code** node (Run Once for All
+Items) that reads the input explicitly and returns properly-shaped items:
+
+```javascript
+const out = [];
+for (const item of $input.all()) {
+  const { status, identified_claims = [], claim = '' } = item.json;
+  if (status !== 'ready') continue;              // not_a_claim / no_match
+  const texts = identified_claims.length ? identified_claims : (claim ? [claim] : []);
+  for (const text of texts) out.push({ json: { text } });
+}
+return out;
+```
+
+That emits one item per claim, so there is **nothing left to Split Out** — wire
+it straight into the next Lenz node. Do not add a Split Out after it. Two
+reasons the guard matters: a Code node must return `[{ json: … }]` (an array of
+bare strings throws "Code doesn't return items properly"), and without the
+`status`/`claim` check the empty string becomes an item, which the next node
+answers with `{ skipped: true, reason: "empty_input" }` — a processed item that
+checked nothing, which is the failure this whole section exists to prevent.
 
 Empty input returns `{ skipped: true, reason: "empty_input" }` instead of
 failing the batch, so nothing downstream sees either field — branch on `skipped`
@@ -160,13 +211,21 @@ if the input can be blank.
 
 ## Wiring patterns
 
-**The gate.** Lenz → **IF** → true continues, false routes to review:
+**The gate.** Lenz → status filter → **IF** → true continues, false routes to
+review:
 
 ```
-[source] → [Lenz: assess] → [Split Out: claims] → [IF: {{ $json.passed }}]
-                                                     ├─ true  → continue
-                                                     └─ false → human review
+[source] → [Lenz: assess] → [IF: {{ $json.status }} equals "ok"]
+                               ├─ false → nothing checkable → its own path
+                               └─ true  → [Split Out: claims] → [IF: {{ $json.passed }}]
+                                                                   ├─ true  → continue
+                                                                   └─ false → human review
 ```
+
+The status filter is not optional padding. When `assess` finds nothing it
+returns `no_claim` or `ambiguous` **with no `claims` key at all**, and Split Out
+throws on a missing field — so without the first IF that item fails the whole
+execution rather than routing anywhere.
 
 **Ambiguous input (verify only).** `verify` pauses instead of guessing when the
 text is not one unambiguous claim: `status: "needs_input"` with a `reason` of
@@ -234,29 +293,47 @@ for an interactive one, let it fail.
 3. **Do not invent parameters.** If a parameter is not listed for that
    operation, the node does not show it and it does nothing.
 4. **Do not add a `verify` to a high-volume loop** without telling me what it
-   will cost in time — 90 seconds each, serially.
+   will cost in time — see the table, and remember they run serially.
 5. Prefer the smallest workflow that does the job. Every node I did not ask for
    is one I have to understand before I can trust the result. Smallest does not
    mean unfinished — see rule 6, which outranks this one.
-6. **Route on the verdict, or the workflow is not finished.** The whole point is
-   that a failed claim goes somewhere different from a passing one. Every
-   workflow ends in a branch on `{{ $json.passed }}` — after a **Split Out** on
-   `claims` for `assess`, or directly for `verify` — and BOTH sides of that
-   branch lead to a node that does something. A workflow that computes a verdict
-   and stops, or that leaves the false branch empty, has done the expensive part
-   and thrown the answer away. Checking `status` is not this: `status` tells you
-   whether there was anything to check, `passed` tells you the answer.
+6. **If the workflow produces a verdict, route on it, or it is not finished.**
+   The whole point is that a failed claim goes somewhere different from a
+   passing one. So a workflow whose last Lenz call is `assess` or `verify` ends
+   in a branch on `{{ $json.passed }}` — after a **Split Out** on `claims` for
+   `assess`, or directly for `verify` — and BOTH sides lead to a node that does
+   something. Computing a verdict and stopping, or leaving the false branch
+   empty, does the expensive part and throws the answer away.
+
+   Two limits on this rule, both of which matter more than the rule:
+
+   - **Only `assess` and `verify` emit `passed`.** `extract`, `verifyBatch`,
+     `ask`, `usage`, `select`, the `verifyStatus` poll and every list or delete
+     operation do not. Do not put an IF on `passed` after one of those — the
+     field is `undefined` and every item takes the false branch. A workflow that
+     ends in "list my verifications" is finished when it has listed them.
+   - **Check `status` BEFORE `passed`, never instead of it.** `passed` is only
+     meaningful once you know a verdict exists. `assess` returns `no_claim` or
+     `ambiguous` with no `claims` array at all, and `verify` returns
+     `needs_input`, `failed`, `timeout` or `queued` with no `passed`. Branching
+     straight on `passed` reports every one of those as "the claim is false" —
+     a provider outage becomes a debunking. Gate on `status` first, route the
+     non-verdict statuses somewhere of their own, and only then branch on
+     `passed`.
 
 ## Before you answer
 
 Read your own JSON back and confirm all five. If one fails, fix it rather than
 noting it:
 
-1. Is there an **IF** on `{{ $json.passed }}`, with both branches leading
-   somewhere? (rule 6)
-2. Does every field name you read appear in "Output shapes" for the operation
-   that produced it — `claims` for `assess`, `identified_claims` for `extract`?
-   You may not read a field that is not documented there.
+1. If the last Lenz call is `assess` or `verify`: is `status` checked before
+   `passed`, and is there an **IF** on `{{ $json.passed }}` with both branches
+   leading somewhere? If it is any other operation, skip this. (rule 6)
+2. For the operations documented under "Output shapes", are you reading the
+   field names given there — `claims` for `assess`, `identified_claims` for
+   `extract` — rather than the other one's? That section is not a complete
+   field list for every operation, so a field it does not mention is not
+   forbidden; but where it does specify the shape, match it exactly.
 3. Is every `type`, `resource` and `operation` copied exactly from the table?
 4. Is the `credentials` block absent from every node?
 5. Does the JSON parse, with every `connections` entry closed?
