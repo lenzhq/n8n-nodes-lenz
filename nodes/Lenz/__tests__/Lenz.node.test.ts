@@ -1,7 +1,7 @@
 // Imported, not read off disk: the community-node lint bans `node:fs`,
 // `node:path` and `__dirname` in this package, tests included.
 import packageJson from '../../../package.json';
-import { NodeApiError } from 'n8n-workflow';
+import { NodeApiError, sleep } from 'n8n-workflow';
 import type { IDataObject, IExecuteFunctions, IHttpRequestOptions } from 'n8n-workflow';
 
 // sleep is used for verify polling backoff; make it instant in tests.
@@ -1366,5 +1366,256 @@ describe('Lenz node - quota (HTTP 402)', () => {
 		expect(err).toBeInstanceOf(NodeApiError);
 		expect(err.httpCode).toBe('403');
 		expect(err.description ?? '').not.toContain('lenz.io/plans');
+	});
+});
+
+describe('Lenz node - Verify poll resilience', () => {
+	// Credits are debited when POST /verify is accepted, so every failure below
+	// lands on a claim the caller has ALREADY paid for. These paths had no
+	// coverage at all: every other verify test hands back a terminal status on
+	// the first poll, so the retry, the multi-poll backoff and the timeout
+	// branch were never executed by the suite.
+	const sleepMock = sleep as unknown as jest.Mock;
+
+	beforeEach(() => {
+		sleepMock.mockClear();
+	});
+
+	/** Submit succeeds, then each GET consumes one step of `steps`. */
+	function polling(steps: Array<() => unknown>): Responder {
+		let idx = 0;
+		return (options) => {
+			if (options.method === 'POST' && options.url === '/verify') {
+				return { task_id: 'task_1' };
+			}
+			if (options.method === 'GET' && options.url === '/verify/status/task_1') {
+				const step = steps[Math.min(idx, steps.length - 1)];
+				idx += 1;
+				return step();
+			}
+			throw new Error(`unexpected request: ${options.method} ${options.url}`);
+		};
+	}
+
+	const processing = () => ({ status: 'processing' });
+	const completed = () => ({
+		status: 'completed',
+		result: { verdict: 'True', confidence: 'high', verification_id: 'ver_1' },
+	});
+
+	it('retries a transient 502 mid-poll instead of losing the paid-for task', async () => {
+		const { output, calls } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => {
+					throw apiError(502, undefined, 'Bad gateway');
+				},
+				completed,
+			]),
+		);
+
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('completed');
+		expect(json.passed).toBe(true);
+		// the failed poll and the retry that recovered it
+		expect(calls.filter((c) => c.method === 'GET').length).toBe(2);
+		// And it BACKED OFF between them. Without this the assertion above is
+		// satisfied by a hot loop, which would hammer an already-struggling
+		// status endpoint for the whole window — the opposite of the point.
+		expect(sleepMock.mock.calls[0][0]).toBe(2000);
+	});
+
+	it('retries a 429 — the failure a 2s poll cadence is most likely to cause', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => {
+					throw apiError(429, { retry_after: 1 }, 'Too many requests');
+				},
+				completed,
+			]),
+		);
+
+		expect((output[0].json as IDataObject).status).toBe('completed');
+	});
+
+	it('gives a status-less error a bounded retry, then surfaces it instead of faking a timeout', async () => {
+		const { output, calls } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => {
+					throw new Error('getaddrinfo ENOTFOUND api.lenz.io');
+				},
+			]),
+			true, // continueOnFail
+		);
+
+		const json = output[0].json as IDataObject;
+		// The real failure reaches the caller — NOT swallowed into a made-up
+		// `status: 'timeout'` claiming the verification is still running.
+		// (n8n rewrites a bare network Error into its own connection wording,
+		// so assert the shape rather than the original string.)
+		expect(json.status).toBeUndefined();
+		expect(json.error).toBeDefined();
+		expect(json.task_id).toBe('task_1');
+		// Bounded: two retries, not the whole Max Wait window.
+		expect(calls.filter((c) => c.method === 'GET').length).toBe(3);
+	});
+
+	it('does NOT retry a 4xx, and still hands back the task_id', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => {
+					throw apiError(404, undefined, 'Not found');
+				},
+			]),
+			true, // continueOnFail
+		);
+
+		const json = output[0].json as IDataObject;
+		expect(json.error).toBeDefined();
+		// The point of the issue: the receipt survives the failure.
+		expect(json.task_id).toBe('task_1');
+	});
+
+	it('puts the task_id in the thrown error too, for workflows with no error output', async () => {
+		const err = (await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => {
+					throw apiError(404, undefined, 'Not found');
+				},
+			]),
+		).then(
+			() => {
+				throw new Error('expected the node to throw');
+			},
+			(e: unknown) => e,
+		)) as NodeApiError;
+		expect(err.description ?? '').toContain('task_1');
+	});
+
+	it('walks the documented backoff across several polls', async () => {
+		await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([processing, processing, processing, completed]),
+		);
+
+		const waits = sleepMock.mock.calls.map((c) => c[0]);
+		expect(waits.slice(0, 3)).toEqual([2000, 4000, 8000]);
+	});
+
+	// `sleep` is mocked instant but the deadline reads the real clock, so a
+	// genuine give-up would spin on wall-clock time (an in-range Max Wait of 10
+	// spins for ten seconds; a bigger one exhausts the heap). Driving Date.now
+	// makes the deadline paths testable and deterministic instead.
+	function fakeClock(stepMs = 1000) {
+		let t = 1_000_000;
+		return jest.spyOn(Date, 'now').mockImplementation(() => {
+			t += stepMs;
+			return t;
+		});
+	}
+
+	function pollCount(calls: IHttpRequestOptions[]) {
+		return calls.filter((c) => c.method === 'GET').length;
+	}
+
+	it('gives up at Max Wait with a timeout that names the task and defines passed', async () => {
+		const clock = fakeClock();
+		try {
+			const { output, calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 10 },
+				polling([processing]),
+			);
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('timeout');
+			expect(json.task_id).toBe('task_1');
+			// Present and null, so the key shows up in n8n's output schema.
+			// NOTE: null is still falsy — an IF on `passed` alone routes a
+			// timeout down the false arm regardless. Checking `status` first is
+			// the real fix, which is why the README pattern leads with it.
+			expect(json).toHaveProperty('passed', null);
+			// Grounded in what was actually seen, so the message can't claim
+			// knowledge the node never had.
+			expect(json).toHaveProperty('last_status', 'processing');
+			// It really polled and really ran out of time — the old version of
+			// this test passed a zero deadline and never entered the loop.
+			expect(pollCount(calls)).toBeGreaterThan(0);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it('polls for longer when Max Wait is raised, so the parameter is load-bearing', async () => {
+		const shortClock = fakeClock();
+		let shortPolls: number;
+		try {
+			const { calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 10 },
+				polling([processing]),
+			);
+			shortPolls = pollCount(calls);
+		} finally {
+			shortClock.mockRestore();
+		}
+
+		const longClock = fakeClock();
+		let longPolls: number;
+		try {
+			const { calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 120 },
+				polling([processing]),
+			);
+			longPolls = pollCount(calls);
+		} finally {
+			longClock.mockRestore();
+		}
+
+		expect(longPolls).toBeGreaterThan(shortPolls);
+	});
+
+	it('refuses a non-numeric Max Wait instead of timing out on a claim it never polled', async () => {
+		const err = (await runNode(
+			{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 'two minutes' },
+			polling([processing]),
+		).then(
+			() => {
+				throw new Error('expected the node to throw');
+			},
+			(e: unknown) => e,
+		)) as Error;
+		expect(err.message).toContain('Max Wait');
+	});
+
+	it('never reports one item’s task_id on another item’s error', async () => {
+		let submits = 0;
+		const responder: Responder = (options) => {
+			if (options.method === 'POST' && options.url === '/verify') {
+				submits += 1;
+				// The second item fails at submit, so it was never charged and
+				// must carry no receipt — a task id on an error that says the
+				// caller paid is worse than no id at all.
+				if (submits === 2) {
+					throw apiError(400, undefined, 'Bad request');
+				}
+				return { task_id: 'task_1' };
+			}
+			return completed();
+		};
+
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			responder,
+			true, // continueOnFail
+			2, // itemCount
+		);
+
+		expect((output[0].json as IDataObject).status).toBe('completed');
+		const second = output[1].json as IDataObject;
+		expect(second.error).toBeDefined();
+		expect(second.task_id).toBeUndefined();
 	});
 });

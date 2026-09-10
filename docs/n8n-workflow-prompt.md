@@ -38,7 +38,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 |---|---|---|
 | `assess` | Fast 3-model panel verdict (~10s), one entry per claim found in the text | `text`**\***, `language` |
 | `extract` | Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `focus`, `language` |
-| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
+| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
 
 ### `resource: "verification"` — Verification
 
@@ -315,11 +315,11 @@ for an interactive one, let it fail.
    - **Check `status` BEFORE `passed`, never instead of it.** `passed` is only
      meaningful once you know a verdict exists. `assess` returns `no_claim` or
      `ambiguous` with no `claims` array at all, and `verify` returns
-     `needs_input`, `failed`, `timeout` or `queued` with no `passed`. Branching
-     straight on `passed` reports every one of those as "the claim is false" —
-     a provider outage becomes a debunking. Gate on `status` first, route the
-     non-verdict statuses somewhere of their own, and only then branch on
-     `passed`.
+     `needs_input`, `failed`, `timeout` or `queued` whose `passed` is `null`
+     (`queued` omits it entirely). Null is falsy, so branching straight on
+     `passed` reports every one of those as "the claim is false" — a provider
+     outage becomes a debunking. Gate on `status` first, route the non-verdict
+     statuses somewhere of their own, and only then branch on `passed`.
 
 ## Before you answer
 
