@@ -77,7 +77,15 @@ lines.push(`| \`typeVersion\` | \`${typeVersion}\` |`);
 lines.push(`| Credential type | \`${credentialName}\` — **omit the \`credentials\` block entirely** (see rules) |`);
 lines.push(`| Inputs / outputs | ${description.inputs.length} main in, ${description.outputs.length} main out |`);
 lines.push('');
-lines.push(`Generated from \`${pkg.name}@${pkg.version}\`. Do not hand-edit.`);
+// Deliberately no version here. `prompt:check` compares this block byte-for-
+// byte and runs in CI, while `npm run release` bumps package.json, commits and
+// pushes without ever calling `prompt:build` — so embedding the version made
+// every release commit fail CI over a doc that was not stale about the node at
+// all. Nothing in the prompt depends on the package version: what the agent
+// needs is the node's `typeVersion`, which is in the table above and is a fact
+// about the node rather than an artifact of releasing it. If you want to know
+// which release a given doc came from, git knows.
+lines.push(`Generated from \`${pkg.name}\`. Do not hand-edit.`);
 lines.push('');
 
 for (const opProp of operationProps) {
