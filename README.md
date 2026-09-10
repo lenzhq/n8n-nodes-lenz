@@ -107,7 +107,7 @@ A simple "fact-check gate" pattern — verify an LLM's output before acting on i
 
 1. Add an **LLM node** (or any node producing text) upstream.
 2. Add the **Lenz node**, set Operation to **Verify (Deep)**, and set the Claim field to an expression referencing the upstream output, e.g. `{{ $json.text }}`.
-3. Add an **IF node** after Lenz with the condition `{{ $json.status }}` **equals** `completed`. Send the false branch wherever unfinished work should go — a timeout or a `needs_input` interrupt is not a verdict, and it carries no `passed`.
+3. Add an **IF node** after Lenz with the condition `{{ $json.status }}` **equals** `completed`. Send the false branch wherever unfinished work should go — a timeout, a `failed` pipeline or a `needs_input` interrupt is not a verdict, and its `passed` is `null`.
 4. After that, add a second **IF node** with the condition `{{ $json.passed }}` **is true**.
 5. Wire its true branch to continue the workflow normally, and its false branch to whatever your "needs review" path is (Slack alert, email, a manual-approval step, etc.).
 
