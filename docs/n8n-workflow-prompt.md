@@ -38,7 +38,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 |---|---|---|
 | `assess` | Fast 3-model panel verdict (~10s), one entry per claim found in the text | `text`**\***, `language` |
 | `extract` | Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `focus`, `language` |
-| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
+| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
 
 ### `resource: "verification"` — Verification
 

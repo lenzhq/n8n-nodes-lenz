@@ -794,6 +794,18 @@ export class Lenz implements INodeType {
 				description: 'Whether to poll until the verification finishes (~90s). Turn off to return the task ID immediately and collect the result later via Get Verify Status or a webhook.',
 			},
 			{
+				displayName: 'Max Wait (Seconds)',
+				name: 'maxWaitSeconds',
+				type: 'number',
+				default: 120,
+				typeOptions: { minValue: 10, maxValue: 900 },
+				displayOptions: {
+					show: { operation: ['verify'], waitForCompletion: [true] },
+				},
+				description:
+					'How long to keep polling before giving up and returning Status "timeout" with the task ID. A verification usually takes ~90s but can legitimately run longer. Giving up never cancels anything: the task keeps running server-side and stays fetchable with Get Verify Status, so the credits are not lost. Raise this only if the workflow can afford to block that long.',
+			},
+			{
 				displayName: 'Include Audit Trail',
 				name: 'includeAudit',
 				type: 'boolean',
@@ -1016,6 +1028,14 @@ export class Lenz implements INodeType {
 		};
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+			// The task_id of a verification this item has already PAID for, held
+			// outside the try so the catch below can still hand it back. Verify
+			// debits at submit, so everything that can go wrong afterwards goes
+			// wrong on a claim the caller has been charged for; without this the
+			// error output carried the HTTP failure and nothing else, and the
+			// only handle to a running, paid-for verification was gone. Reset
+			// per item so one item's id can never be reported on another's error.
+			let pendingTaskId = '';
 			try {
 				const operation = this.getNodeParameter('operation', itemIndex) as string;
 				const language = (this.getNodeParameter('language', itemIndex, '') as string) || undefined;
@@ -1079,6 +1099,8 @@ export class Lenz implements INodeType {
 							{ itemIndex },
 						);
 					}
+					// From here on the claim is paid for; keep the receipt reachable.
+					pendingTaskId = taskId;
 
 					if (!waitForCompletion) {
 						responseData = {
@@ -1088,11 +1110,53 @@ export class Lenz implements INodeType {
 							message: 'Submitted. Poll this task_id with the Get Verify Status operation, or wait for the webhook.',
 						};
 					} else {
-						const deadline = Date.now() + POLL_TIMEOUT_MS;
+						const maxWaitSeconds = this.getNodeParameter(
+							'maxWaitSeconds',
+							itemIndex,
+							POLL_TIMEOUT_MS / 1000,
+						) as number;
+						const deadline = Date.now() + Math.max(0, maxWaitSeconds) * 1000;
 						let terminal: IDataObject | undefined;
 						let pollIdx = 0;
 						while (Date.now() < deadline) {
-							const status = await lenzRequest('GET', `/verify/status/${taskId}`);
+							let status: IDataObject;
+							try {
+								status = await lenzRequest('GET', `/verify/status/${taskId}`);
+							} catch (pollError) {
+								// The submit above already spent the credits, so a poll
+								// that fails must never be the end of the story. A 5xx or
+								// a bare network error is the status endpoint having a
+								// moment, not a verdict — the task is still running, so
+								// sleep the same backoff and ask again while the deadline
+								// allows. Before this, one 502 anywhere in ~15 polls threw
+								// straight out of the operation and took the task_id with
+								// it, leaving a paid-for verification the caller had no
+								// handle to fetch.
+								//
+								// A 4xx is different: a bad id or a revoked key will not
+								// heal by asking again, so it still throws. `pendingTaskId`
+								// (set at submit) puts the task_id on that error's output
+								// either way.
+								const code = statusCodeOf(pollError);
+								const transient = code === undefined || code >= 500;
+								if (!transient) {
+									// Typed rather than re-thrown raw: the community-node lint
+									// requires it, and the outer catch then attaches the
+									// task_id receipt as it does for every post-submit failure.
+									throw describeApiError(this.getNode(), pollError, itemIndex, {
+										message: (pollError as Error).message,
+									});
+								}
+								const retryIn =
+									POLL_BACKOFF_MS[Math.min(pollIdx, POLL_BACKOFF_MS.length - 1)];
+								const remaining = Math.max(0, deadline - Date.now());
+								if (remaining === 0) {
+									break;
+								}
+								await sleep(Math.min(retryIn, remaining));
+								pollIdx += 1;
+								continue;
+							}
 							const state = status.status as string;
 							if (state === 'completed' || state === 'needs_input' || state === 'failed') {
 								terminal = status;
@@ -1106,8 +1170,19 @@ export class Lenz implements INodeType {
 						if (!terminal) {
 							responseData = {
 								status: 'timeout',
+								// `passed` is present and null rather than absent. Null is
+								// still falsy, so this does NOT rescue a workflow that
+								// branches straight on `{{ $json.passed }}` — that IF
+								// routes a timeout down the false arm exactly as before,
+								// reporting "not verified" for a claim nobody verified.
+								// What it buys is visibility: the key shows up in n8n's
+								// output panel and schema, so the case is discoverable
+								// instead of silent. Routing correctly still means
+								// checking `status` first, which is what the README's
+								// pattern now does.
+								passed: null,
 								task_id: taskId,
-								message: 'The verification did not complete in time (task_id: ' + taskId + '). It may still be running server-side.',
+								message: 'The verification did not complete in time (task_id: ' + taskId + '). It is still running server-side — fetch it later with Get Verify Status; the credits are already spent and are not lost.',
 							};
 						} else {
 							responseData = mapVerifyStatus(terminal, taskId, includeAudit);
@@ -1475,6 +1550,14 @@ export class Lenz implements INodeType {
 					// it. `error` keeps its original value — existing workflows
 					// reading it are unaffected.
 					const json: IDataObject = { error: (error as Error).message };
+					// A verification that was submitted before this threw is
+					// running and already charged. Without the id the caller
+					// cannot fetch it, retry it, or even prove it happened — so
+					// the receipt travels on the error output too, not only on
+					// the success paths.
+					if (pendingTaskId) {
+						json.task_id = pendingTaskId;
+					}
 					const status = statusCodeOf(error);
 					if (status !== undefined) {
 						json.status_code = status;
@@ -1513,12 +1596,29 @@ export class Lenz implements INodeType {
 					continue;
 				}
 
+				// Most workflows never switch on the error output, so a task_id
+				// that only rides `continueOnFail` is invisible to them. Put it
+				// in the error text itself: it is the one piece of state the
+				// caller cannot reconstruct, and they have already paid for it.
+				const withReceipt = (text: { message: string; description?: string }) =>
+					pendingTaskId
+						? {
+								message: text.message,
+								description: [
+									text.description,
+									`The verification was submitted and charged before this failed — its task ID is ${pendingTaskId}. It is still running server-side; fetch the result with Get Verify Status.`,
+								]
+									.filter(Boolean)
+									.join(' '),
+							}
+						: text;
+
 				// Out of credits (HTTP 402) is a billing state, not a broken
 				// request. Name it explicitly so the user is told to top up
 				// rather than left reading a generic API failure.
 				const quota = quotaMessageFor(error);
 				if (quota) {
-					throw describeApiError(this.getNode(), error, itemIndex, quota, '402');
+					throw describeApiError(this.getNode(), error, itemIndex, withReceipt(quota), '402');
 				}
 
 				// At capacity / providers down (HTTP 503 with a typed code) is
@@ -1527,7 +1627,13 @@ export class Lenz implements INodeType {
 				// automatic retry that cannot clear a 90-120s window.
 				const capacity = capacityMessageFor(error);
 				if (capacity) {
-					throw describeApiError(this.getNode(), error, itemIndex, capacity, '503');
+					throw describeApiError(
+						this.getNode(),
+						error,
+						itemIndex,
+						withReceipt(capacity),
+						'503',
+					);
 				}
 
 				// Pass the ORIGINAL error object through. NodeApiError derives
@@ -1536,9 +1642,12 @@ export class Lenz implements INodeType {
 				// httpCode permanently null and left the node structurally
 				// blind to 402 vs 403 vs 429. n8n's own status table (which
 				// already contains '402': 'Payment required') was dead code.
-				throw describeApiError(this.getNode(), error, itemIndex, {
-					message: (error as Error).message,
-				});
+				throw describeApiError(
+					this.getNode(),
+					error,
+					itemIndex,
+					withReceipt({ message: (error as Error).message }),
+				);
 			}
 		}
 
