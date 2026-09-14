@@ -963,13 +963,21 @@ export class Lenz implements INodeType {
 		const executionId = this.getExecutionId();
 		const node = this.getNode();
 		const nodeKey = bodyFingerprint({ node: node.id || node.name });
+		// The fingerprint covers the PATH as well as the body. Select Claims puts
+		// its task_id in the URL (`/verify/{task_id}/select`) and sends only the
+		// chosen texts in the body — so fingerprinting the body alone gave two
+		// paused tasks that offered the same claim text the same key, and Lenz
+		// replayed the first task's response for the second. Two different
+		// requests to two different resources cannot share an idempotency key;
+		// the path is what tells them apart.
 		const buildIdempotencyKey = (
 			operation: string,
 			itemIndex: number,
+			path: string,
 			body?: IDataObject,
 		): string =>
 			executionId
-				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint(body)}`
+				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint({ path, body })}`
 				: '';
 
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
@@ -989,6 +997,7 @@ export class Lenz implements INodeType {
 				const key = buildIdempotencyKey(
 					extra.idempotent.operation,
 					extra.idempotent.itemIndex,
+					path,
 					body,
 				);
 				if (key) {
@@ -1405,11 +1414,19 @@ export class Lenz implements INodeType {
 
 					let page = 1;
 					let collected = 0;
+					// ONE page size for the whole walk. The server computes the
+					// offset as (page - 1) * page_size, so the size must not change
+					// between requests: it used to shrink to `limit - collected`,
+					// and with Limit 150 that asked for page 1 at size 100 (rows
+					// 1-100) then page 2 at size 50 — which is rows 51-100 again.
+					// Rows 51-100 came back twice and 101-150 never came back at
+					// all, silently. The per-item `collected >= limit` check below
+					// trims the overshoot on the last page instead.
+					const pageSize = returnAll ? MAX_PAGE_SIZE : Math.min(MAX_PAGE_SIZE, limit);
 					// Page until the server's reported total is covered (or the caller's
 					// limit is reached). A short page also stops the loop, so a shrinking
 					// result set can't spin forever.
 					while (collected < limit) {
-						const pageSize = returnAll ? MAX_PAGE_SIZE : Math.min(MAX_PAGE_SIZE, limit - collected);
 						const response = await lenzRequest('GET', '/verifications', undefined, {
 							qs: { page, page_size: pageSize },
 						});
@@ -1511,6 +1528,21 @@ export class Lenz implements INodeType {
 						pairedItem: { item: itemIndex },
 					});
 					continue;
+				}
+
+				// A NodeOperationError is one of OUR validation failures — an
+				// over-long focus, an empty batch, a missing task_id — thrown
+				// before any request was made. It must leave as the type it
+				// arrived as. Everything below this line reshapes an error into
+				// a NodeApiError, and describeApiError's fallback branch wraps
+				// whatever it is handed; routed through that, a validation error
+				// reached the user as an "API error" with no HTTP code, which is
+				// both the wrong category and the wrong advice.
+				if (error instanceof NodeOperationError) {
+					throw new NodeOperationError(this.getNode(), error.message, {
+						itemIndex,
+						description: error.description ?? undefined,
+					});
 				}
 
 				// Out of credits (HTTP 402) is a billing state, not a broken
