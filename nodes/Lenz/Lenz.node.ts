@@ -634,7 +634,7 @@ export class Lenz implements INodeType {
 					show: { operation: ['extract'] },
 				},
 				description:
-					"The text to pull the verifiable claims out of, or a single public web page URL. Lenz reads the page, or a YouTube video's transcript, and extracts the claims from its first 15,000 characters; pages behind a login can't be read. A URL call typically takes 5-40 seconds.",
+					"The text to pull the verifiable claims out of, or a single public web page URL. Lenz reads the page, or a YouTube video's transcript, and extracts the claims from its first 50,000 characters; pages behind a login can't be read. A URL call typically takes 5-40 seconds.",
 			},
 			{
 				displayName: 'Claims',
