@@ -1047,6 +1047,54 @@ describe('Lenz node - idempotency', () => {
 		);
 	});
 
+	it('sends an Idempotency-Key on Ask Follow-Up, which is billable too', async () => {
+		const { calls } = await runNode(
+			{ operation: 'ask', verificationId: 'ver_123', question: 'Which source is strongest?' },
+			() => ({ role: 'expert', content: 'Source X is strongest.' }),
+		);
+		expect(calls[0].headers?.['Idempotency-Key']).toMatch(
+			/^n8n:exec-1:[0-9a-z]+:ask:0:[0-9a-z]+$/,
+		);
+	});
+
+	it('asks the same question of two verifications under two different keys', async () => {
+		// The verification being asked about is in the URL, not the body, so a key
+		// built from the body alone would be the same for both, and the second
+		// question would be taken for a retry of the first. Loop Over Items and
+		// AI Agent tool calls make this ordinary: each re-execution restarts the
+		// item index at 0, so only the request itself can tell them apart — and
+		// the README recommends keeping the question fixed and varying only the
+		// verification, which is exactly this shape.
+		const responder: Responder = () => ({ role: 'expert', content: 'Because.' });
+		const one = await runNode(
+			{ operation: 'ask', verificationId: 'ver_1', question: 'Why?' },
+			responder,
+		);
+		const two = await runNode(
+			{ operation: 'ask', verificationId: 'ver_2', question: 'Why?' },
+			responder,
+		);
+		expect(one.calls[0].headers?.['Idempotency-Key']).not.toBe(
+			two.calls[0].headers?.['Idempotency-Key'],
+		);
+	});
+
+	it('selects claims on two verifications under two different keys', async () => {
+		// Same reason: Select Claims carries its task in the URL as well.
+		const responder: Responder = () => ({ batch_id: 'batch_1', items: [] });
+		const one = await runNode(
+			{ operation: 'select', taskId: 'task_1', selectedClaims: ['A claim'] },
+			responder,
+		);
+		const two = await runNode(
+			{ operation: 'select', taskId: 'task_2', selectedClaims: ['A claim'] },
+			responder,
+		);
+		expect(one.calls[0].headers?.['Idempotency-Key']).not.toBe(
+			two.calls[0].headers?.['Idempotency-Key'],
+		);
+	});
+
 	it('does not send an Idempotency-Key on reads', async () => {
 		const { calls } = await runNode({ operation: 'usage' }, () => ({ plan: 'free' }));
 		expect(calls[0].headers?.['Idempotency-Key']).toBeUndefined();
