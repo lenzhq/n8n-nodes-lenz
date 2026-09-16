@@ -437,7 +437,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
+						description: 'Pull verifiable claims out of text, or out of a public web page given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -584,7 +584,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
+						description: 'Pull verifiable claims out of text, or out of a public web page given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -633,7 +633,8 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['extract'] },
 				},
-				description: 'The text to pull the verifiable claims out of',
+				description:
+					"The text to pull the verifiable claims out of, or a single public web page URL. Lenz reads the page, or a YouTube video's transcript, and extracts the claims from its first 50,000 characters; pages behind a login can't be read. A URL call typically takes 5-40 seconds.",
 			},
 			{
 				displayName: 'Claims',
