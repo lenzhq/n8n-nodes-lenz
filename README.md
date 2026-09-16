@@ -29,7 +29,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 |---|---|
 | **Verify (Deep)** *(default)* | Full multi-model pipeline (research → debate → adjudication), ~90 seconds. Returns a verdict, confidence, `lenz_score` (1-10), `key_finding`, sourced citations, and an executive summary. Reserve for high-stakes claims that need a thorough, cited answer. **Depth** trades work for price: *Low* searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments, for **5 credits instead of 10**. |
 | **Assess (Fast)** | A quick 3-model panel verdict, ~10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. |
-| **Extract Claims** | Free — pulls the verifiable factual claims out of a block of text without checking them. Useful as a first step before running Assess or Verify on each claim individually. **Focus** narrows the result to the claims you describe (300 characters, no extra cost); when none of them match, `status` comes back as `no_match` with an empty list rather than the unfocused claims. |
+| **Extract Claims** | Free — pulls the verifiable factual claims out of a block of text without checking them. Useful as a first step before running Assess or Verify on each claim individually. **Focus** narrows the result to the claims you describe (300 characters, no extra cost); when none of them match, `status` comes back as `no_match` with an empty list rather than the unfocused claims. **Text** can also be a single public web page URL: Lenz reads the page, or a YouTube video's transcript, and extracts the claims from its first 50,000 characters. Pages behind a login (Facebook, Instagram, Threads, LinkedIn) can't be read, and a URL call typically takes 5-40 seconds. |
 
 ### Verification — manage submitted and stored work
 
@@ -65,9 +65,11 @@ Verify and Get also expose an **Include Audit Trail** toggle, which adds the adj
 
 ### Retry safety
 
-Billable calls (Verify, Assess, Extract, Submit Batch, Select Claims) send an `Idempotency-Key` derived from the execution ID, a hash of the node's identity, the item index, and a fingerprint of the request body. If n8n retries the node — via **Retry On Fail**, or after a dropped response — the input is identical, so Lenz replays the original response instead of charging you a second time. A fresh run of the workflow is a new execution, so it bills normally.
+Billable calls (Verify, Assess, Extract, Submit Batch, Select Claims, Ask Follow-Up) send an `Idempotency-Key` derived from the execution ID, a hash of the node's identity, the item index, and a fingerprint of the request — its path as well as its body. If n8n retries the node — via **Retry On Fail**, or after a dropped response — the input is identical, so Lenz replays the original response instead of charging you a second time. A fresh run of the workflow is a new execution, so it bills normally.
 
-Including the body in the key is what makes repeated runs safe: **Loop Over Items** and **AI Agent** tool calls both execute the node several times within a single execution, each time restarting the item index at 0, so a position-only key would send one key with different inputs and the API would reject it.
+On **Ask Follow-Up** the key also keeps the conversation clean: an unkeyed retry asks the question again, so the question and a second answer are appended to the history that **Get Ask History** returns and that the next follow-up reads as context. A retry that arrives while the first question is still being answered gets a `409` — there is no answer yet to replay.
+
+Including the request in the key is what makes repeated runs safe: **Loop Over Items** and **AI Agent** tool calls both execute the node several times within a single execution, each time restarting the item index at 0, so a position-only key would send one key with different inputs and the API would reject it. The path is part of it because **Ask Follow-Up** and **Select Claims** name what they act on in the URL rather than in the body — asking one fixed question of several verifications, the wiring suggested below, is otherwise indistinguishable from a retry of the first.
 
 Note that **Assess bills per claim found in the text**, not per request: a paragraph containing five claims spends five assess units.
 

@@ -252,10 +252,10 @@ function describeApiError(
 	});
 }
 
-// Stable fingerprint of a request body, mixed into the Idempotency-Key so the
-// key follows the *input* and not just the item's position. FNV-1a: a verified
-// node can't reach `crypto`, and this only has to tell two bodies apart within
-// a single execution — it isn't a security boundary.
+// Stable fingerprint of a request, mixed into the Idempotency-Key so the key
+// follows the *input* and not just the item's position. FNV-1a: a verified
+// node can't reach `crypto`, and this only has to tell two requests apart
+// within a single execution — it isn't a security boundary.
 function bodyFingerprint(body?: IDataObject): string {
 	const json = body === undefined ? '' : JSON.stringify(body);
 	let hash = 0x811c9dc5;
@@ -475,7 +475,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
+						description: 'Pull verifiable claims out of text, or out of a public web page given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -622,7 +622,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
+						description: 'Pull verifiable claims out of text, or out of a public web page given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -671,7 +671,8 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['extract'] },
 				},
-				description: 'The text to pull the verifiable claims out of',
+				description:
+					"The text to pull the verifiable claims out of, or a single public web page URL. Lenz reads the page, or a YouTube video's transcript, and extracts the claims from its first 50,000 characters; pages behind a login can't be read. A URL call typically takes 5-40 seconds.",
 			},
 			{
 				displayName: 'Claims',
@@ -983,17 +984,21 @@ export class Lenz implements INodeType {
 		// so the key has to be stable across retries of one logical call and
 		// distinct between genuinely separate calls.
 		//
-		// Execution ID + node name + item index + a fingerprint of the body gives
-		// that. n8n's "Retry On Fail" re-runs the node inside the same execution
-		// with identical input, so the key repeats and the server replays instead
-		// of charging twice. A fresh workflow run gets a new execution ID, so it
-		// charges normally.
+		// Execution ID + node name + item index + a fingerprint of the request
+		// (its path and its body) gives that. n8n's "Retry On Fail" re-runs the
+		// node inside the same execution with identical input, so the key repeats
+		// and the server replays instead of charging twice. A fresh workflow run
+		// gets a new execution ID, so it charges normally.
 		//
-		// The body fingerprint is what makes repeated runs safe: "Loop Over Items"
-		// and AI Agent tool calls both execute this node several times within one
-		// execution, each time restarting itemIndex at 0. Keyed on position alone,
-		// the second run would reuse the first run's key with different text and
-		// the API would reject it (422, or 409 while the first is still in flight).
+		// The request fingerprint is what makes repeated runs safe: "Loop Over
+		// Items" and AI Agent tool calls both execute this node several times
+		// within one execution, each time restarting itemIndex at 0. Keyed on
+		// position alone, the second run would reuse the first run's key with
+		// different text and the API would reject it (422, or 409 while the first
+		// is still in flight). The path belongs in the fingerprint for the same
+		// reason the body does: Ask Follow-Up and Select Claims carry the thing
+		// they act on in the URL, so asking one question of two verifications is
+		// two identical bodies and must not be one key.
 		// The node's identity is HASHED into the key, never written into it raw.
 		// Node refuses to send a header value containing anything above U+00FF —
 		// verified: `Prüfung` and `Vérification` are accepted (Latin-1 passes),
@@ -1013,13 +1018,21 @@ export class Lenz implements INodeType {
 		const executionId = this.getExecutionId();
 		const node = this.getNode();
 		const nodeKey = bodyFingerprint({ node: node.id || node.name });
+		// The fingerprint covers the PATH as well as the body. Select Claims puts
+		// its task_id in the URL (`/verify/{task_id}/select`) and sends only the
+		// chosen texts in the body — so fingerprinting the body alone gave two
+		// paused tasks that offered the same claim text the same key, and Lenz
+		// replayed the first task's response for the second. Two different
+		// requests to two different resources cannot share an idempotency key;
+		// the path is what tells them apart.
 		const buildIdempotencyKey = (
 			operation: string,
 			itemIndex: number,
+			path: string,
 			body?: IDataObject,
 		): string =>
 			executionId
-				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint(body)}`
+				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint({ path, body })}`
 				: '';
 
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
@@ -1039,6 +1052,7 @@ export class Lenz implements INodeType {
 				const key = buildIdempotencyKey(
 					extra.idempotent.operation,
 					extra.idempotent.itemIndex,
+					path,
 					body,
 				);
 				if (key) {
@@ -1489,7 +1503,16 @@ export class Lenz implements INodeType {
 					if (language) {
 						body.language = language;
 					}
-					const reply = await lenzRequest('POST', `/ask/${verificationId}`, body);
+					// Billable, and the only one where paying twice is also visible in
+					// the product: an unkeyed retry asks again, so the question and a
+					// second answer join the conversation that Get Ask History returns
+					// and that the next follow-up reads as context. With the key, Lenz
+					// replays the first answer instead. A retry that arrives while the
+					// first question is still being answered gets a 409: there is no
+					// answer yet to replay.
+					const reply = await lenzRequest('POST', `/ask/${verificationId}`, body, {
+						idempotent: { operation, itemIndex },
+					});
 					responseData = {
 						answer: reply.content ?? '',
 					};
@@ -1553,11 +1576,19 @@ export class Lenz implements INodeType {
 
 					let page = 1;
 					let collected = 0;
+					// ONE page size for the whole walk. The server computes the
+					// offset as (page - 1) * page_size, so the size must not change
+					// between requests: it used to shrink to `limit - collected`,
+					// and with Limit 150 that asked for page 1 at size 100 (rows
+					// 1-100) then page 2 at size 50 — which is rows 51-100 again.
+					// Rows 51-100 came back twice and 101-150 never came back at
+					// all, silently. The per-item `collected >= limit` check below
+					// trims the overshoot on the last page instead.
+					const pageSize = returnAll ? MAX_PAGE_SIZE : Math.min(MAX_PAGE_SIZE, limit);
 					// Page until the server's reported total is covered (or the caller's
 					// limit is reached). A short page also stops the loop, so a shrinking
 					// result set can't spin forever.
 					while (collected < limit) {
-						const pageSize = returnAll ? MAX_PAGE_SIZE : Math.min(MAX_PAGE_SIZE, limit - collected);
 						const response = await lenzRequest('GET', '/verifications', undefined, {
 							qs: { page, page_size: pageSize },
 						});
@@ -1667,6 +1698,21 @@ export class Lenz implements INodeType {
 						pairedItem: { item: itemIndex },
 					});
 					continue;
+				}
+
+				// A NodeOperationError is one of OUR validation failures — an
+				// over-long focus, an empty batch, a missing task_id — thrown
+				// before any request was made. It must leave as the type it
+				// arrived as. Everything below this line reshapes an error into
+				// a NodeApiError, and describeApiError's fallback branch wraps
+				// whatever it is handed; routed through that, a validation error
+				// reached the user as an "API error" with no HTTP code, which is
+				// both the wrong category and the wrong advice.
+				if (error instanceof NodeOperationError) {
+					throw new NodeOperationError(this.getNode(), error.message, {
+						itemIndex,
+						description: error.description ?? undefined,
+					});
 				}
 
 				// Out of credits (HTTP 402) is a billing state, not a broken

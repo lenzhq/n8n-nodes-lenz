@@ -44,7 +44,11 @@ long time inside a webhook. It also gives up if the pipeline overruns, returning
 `status: "timeout"` rather than a verdict; see the branching rule below.
 
 **`extract`** — free, and does not check anything. It pulls the verifiable
-claims out of a block of text, as plain strings.
+claims out of a block of text, as plain strings. `text` can also be a single
+public web page URL: Lenz reads the page, or a YouTube video's transcript, and
+extracts the claims from its first 50,000 characters. A URL call typically
+takes 5-40 seconds; pages behind a login (Facebook, Instagram, Threads,
+LinkedIn) can't be read.
 
 **For a paragraph, you usually do not need it before `assess`.** `assess`
 already finds the claims in whatever text you hand it and returns one entry per

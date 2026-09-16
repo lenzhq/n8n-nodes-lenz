@@ -37,7 +37,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 | `operation` | What it does | Parameters |
 |---|---|---|
 | `assess` | Fast 3-model panel verdict (~10s), one entry per claim found in the text | `text`**\***, `language` |
-| `extract` | Pull verifiable claims out of text. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `focus`, `language` |
+| `extract` | Pull verifiable claims out of text, or out of a public web page given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `focus`, `language` |
 | `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
 
 ### `resource: "verification"` — Verification
@@ -91,7 +91,11 @@ long time inside a webhook. It also gives up if the pipeline overruns, returning
 `status: "timeout"` rather than a verdict; see the branching rule below.
 
 **`extract`** — free, and does not check anything. It pulls the verifiable
-claims out of a block of text, as plain strings.
+claims out of a block of text, as plain strings. `text` can also be a single
+public web page URL: Lenz reads the page, or a YouTube video's transcript, and
+extracts the claims from its first 50,000 characters. A URL call typically
+takes 5-40 seconds; pages behind a login (Facebook, Instagram, Threads,
+LinkedIn) can't be read.
 
 **For a paragraph, you usually do not need it before `assess`.** `assess`
 already finds the claims in whatever text you hand it and returns one entry per
