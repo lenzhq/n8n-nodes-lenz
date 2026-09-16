@@ -224,10 +224,10 @@ function describeApiError(
 	});
 }
 
-// Stable fingerprint of a request body, mixed into the Idempotency-Key so the
-// key follows the *input* and not just the item's position. FNV-1a: a verified
-// node can't reach `crypto`, and this only has to tell two bodies apart within
-// a single execution — it isn't a security boundary.
+// Stable fingerprint of a request, mixed into the Idempotency-Key so the key
+// follows the *input* and not just the item's position. FNV-1a: a verified
+// node can't reach `crypto`, and this only has to tell two requests apart
+// within a single execution — it isn't a security boundary.
 function bodyFingerprint(body?: IDataObject): string {
 	const json = body === undefined ? '' : JSON.stringify(body);
 	let hash = 0x811c9dc5;
@@ -933,17 +933,21 @@ export class Lenz implements INodeType {
 		// so the key has to be stable across retries of one logical call and
 		// distinct between genuinely separate calls.
 		//
-		// Execution ID + node name + item index + a fingerprint of the body gives
-		// that. n8n's "Retry On Fail" re-runs the node inside the same execution
-		// with identical input, so the key repeats and the server replays instead
-		// of charging twice. A fresh workflow run gets a new execution ID, so it
-		// charges normally.
+		// Execution ID + node name + item index + a fingerprint of the request
+		// (its path and its body) gives that. n8n's "Retry On Fail" re-runs the
+		// node inside the same execution with identical input, so the key repeats
+		// and the server replays instead of charging twice. A fresh workflow run
+		// gets a new execution ID, so it charges normally.
 		//
-		// The body fingerprint is what makes repeated runs safe: "Loop Over Items"
-		// and AI Agent tool calls both execute this node several times within one
-		// execution, each time restarting itemIndex at 0. Keyed on position alone,
-		// the second run would reuse the first run's key with different text and
-		// the API would reject it (422, or 409 while the first is still in flight).
+		// The request fingerprint is what makes repeated runs safe: "Loop Over
+		// Items" and AI Agent tool calls both execute this node several times
+		// within one execution, each time restarting itemIndex at 0. Keyed on
+		// position alone, the second run would reuse the first run's key with
+		// different text and the API would reject it (422, or 409 while the first
+		// is still in flight). The path belongs in the fingerprint for the same
+		// reason the body does: Ask Follow-Up and Select Claims carry the thing
+		// they act on in the URL, so asking one question of two verifications is
+		// two identical bodies and must not be one key.
 		// The node's identity is HASHED into the key, never written into it raw.
 		// Node refuses to send a header value containing anything above U+00FF —
 		// verified: `Prüfung` and `Vérification` are accepted (Latin-1 passes),
@@ -966,10 +970,11 @@ export class Lenz implements INodeType {
 		const buildIdempotencyKey = (
 			operation: string,
 			itemIndex: number,
+			path: string,
 			body?: IDataObject,
 		): string =>
 			executionId
-				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint(body)}`
+				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint({ path, body })}`
 				: '';
 
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
@@ -989,6 +994,7 @@ export class Lenz implements INodeType {
 				const key = buildIdempotencyKey(
 					extra.idempotent.operation,
 					extra.idempotent.itemIndex,
+					path,
 					body,
 				);
 				if (key) {
@@ -1341,7 +1347,16 @@ export class Lenz implements INodeType {
 					if (language) {
 						body.language = language;
 					}
-					const reply = await lenzRequest('POST', `/ask/${verificationId}`, body);
+					// Billable, and the only one where paying twice is also visible in
+					// the product: an unkeyed retry asks again, so the question and a
+					// second answer join the conversation that Get Ask History returns
+					// and that the next follow-up reads as context. With the key, Lenz
+					// replays the first answer instead. A retry that arrives while the
+					// first question is still being answered gets a 409: there is no
+					// answer yet to replay.
+					const reply = await lenzRequest('POST', `/ask/${verificationId}`, body, {
+						idempotent: { operation, itemIndex },
+					});
 					responseData = {
 						answer: reply.content ?? '',
 					};
