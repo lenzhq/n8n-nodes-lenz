@@ -29,7 +29,9 @@
         "test:hooks": "jest --config jest.hooks.config.cjs"
     },
     "files": [
-        "dist"
+        "dist",
+        "!dist/tsconfig.tsbuildinfo",
+        "!dist/package.json"
     ],
     "publishConfig": {
         "access": "public"

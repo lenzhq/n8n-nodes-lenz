@@ -1,7 +1,7 @@
 // Imported, not read off disk: the community-node lint bans `node:fs`,
 // `node:path` and `__dirname` in this package, tests included.
 import packageJson from '../../../package.json';
-import { NodeApiError } from 'n8n-workflow';
+import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 import type { IDataObject, IExecuteFunctions, IHttpRequestOptions } from 'n8n-workflow';
 
 // sleep is used for verify polling backoff; make it instant in tests.
@@ -445,7 +445,11 @@ describe('Lenz node - Verify (Deep)', () => {
 			throw new Error(`should not poll: ${options.url}`);
 		});
 		const node = new Lenz();
-		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
+		// A NodeOperationError, not a NodeApiError: the API answered fine and
+		// WE refused to proceed. Until #23 the item catch re-wrapped every
+		// validation failure as an API error with no HTTP code, and this test
+		// asserted that wrong type.
+		await expect(node.execute.call(ctx)).rejects.toThrow(NodeOperationError);
 		expect(calls).toHaveLength(1); // submit only, no status poll
 	});
 
@@ -581,7 +585,8 @@ describe('Lenz node - Submit Verify Batch', () => {
 			noCall,
 		);
 		const node = new Lenz();
-		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
+		// Our own validation, so a NodeOperationError (see #23).
+		await expect(node.execute.call(ctx)).rejects.toThrow(NodeOperationError);
 		expect(httpMock).not.toHaveBeenCalled();
 	});
 
@@ -685,7 +690,8 @@ describe('Lenz node - Extract Claims', () => {
 			noCall,
 		);
 		const node = new Lenz();
-		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
+		// Our own validation, so a NodeOperationError (see #23).
+		await expect(node.execute.call(ctx)).rejects.toThrow(NodeOperationError);
 		expect(httpMock).not.toHaveBeenCalled();
 	});
 
@@ -872,6 +878,30 @@ describe('Lenz node - stored verifications', () => {
 		);
 		expect(output).toHaveLength(150);
 		expect(calls).toHaveLength(2);
+	});
+
+	it('keeps page_size constant past 100 so a Limit never duplicates or skips rows', async () => {
+		// A server that computes the offset the way a real one does. The old
+		// code shrank page_size to `limit - collected` on the second request,
+		// so Limit 150 asked for page 2 at size 50 — which THIS computes as
+		// rows 50-99 again — and rows 100-149 were never fetched. Silently.
+		const all = Array.from({ length: 200 }, (_, i) => ({ verification_id: `v${i}` }));
+		const responder: Responder = (options) => {
+			const { page, page_size } = options.qs as { page: number; page_size: number };
+			const start = (page - 1) * page_size;
+			return { items: all.slice(start, start + page_size), total: all.length, page, page_size };
+		};
+
+		const { output, calls } = await runNode({ operation: 'listVerifications', limit: 150 }, responder);
+
+		const ids = output.map((o) => (o.json as IDataObject).verification_id);
+		expect(ids).toHaveLength(150);
+		expect(new Set(ids).size).toBe(150); // no duplicates
+		expect(ids[0]).toBe('v0');
+		expect(ids[149]).toBe('v149'); // nothing skipped
+		// Both requests used the same page_size.
+		const sizes = calls.map((c) => (c.qs as IDataObject).page_size);
+		expect(new Set(sizes).size).toBe(1);
 	});
 
 	it('returns each related verification as its own item', async () => {
@@ -1100,6 +1130,26 @@ describe('Lenz node - idempotency', () => {
 		expect(calls[0].headers?.['Idempotency-Key']).toBeUndefined();
 	});
 
+	it('gives two paused tasks with the same offered text different Select keys', async () => {
+		// Select Claims carries its task_id in the URL and only the chosen
+		// texts in the body. Fingerprinting the body alone gave these two the
+		// SAME key, so Lenz replayed the first task's response for the second
+		// (#22). The path is part of the request's identity.
+		const selectResponder: Responder = () => ({ batch_id: 'b', items: [] });
+		const a = await runNode(
+			{ operation: 'select', taskId: 'task_A', selectedClaims: ['Same claim'] },
+			selectResponder,
+		);
+		const b = await runNode(
+			{ operation: 'select', taskId: 'task_B', selectedClaims: ['Same claim'] },
+			selectResponder,
+		);
+		const keyA = a.calls[0].headers?.['Idempotency-Key'];
+		const keyB = b.calls[0].headers?.['Idempotency-Key'];
+		expect(keyA).toBeDefined();
+		expect(keyA).not.toBe(keyB);
+	});
+
 	it('keeps the submit key off the status polls of one verification', async () => {
 		const { calls } = await runNode({ operation: 'verify', claim: 'Some claim' }, (options) => {
 			if (options.url === '/verify') {
@@ -1129,10 +1179,13 @@ describe('Lenz node - idempotency', () => {
 });
 
 describe('Lenz node - error handling', () => {
-	it('throws NodeApiError for an unrecognized operation value', async () => {
+	it('throws NodeOperationError for an unrecognized operation value', async () => {
 		const { ctx } = createContext({ operation: 'not_a_real_operation' }, noCall);
 		const node = new Lenz();
-		await expect(node.execute.call(ctx)).rejects.toThrow(NodeApiError);
+		// No request was made; this is a configuration problem, not an API
+		// one. It used to surface as NodeApiError via the catch's fallback
+		// wrapping (#23).
+		await expect(node.execute.call(ctx)).rejects.toThrow(NodeOperationError);
 	});
 
 	it('routes a failure to an {error} item instead of throwing when continueOnFail is set', async () => {
