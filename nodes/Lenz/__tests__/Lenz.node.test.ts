@@ -1719,4 +1719,145 @@ describe('Lenz node - Verify poll resilience', () => {
 		expect(second.error).toBeDefined();
 		expect(second.task_id).toBeUndefined();
 	});
+
+	it('rejects a non-numeric Max Wait BEFORE the claim is submitted and charged', async () => {
+		const { ctx, calls } = createContext(
+			{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 'two minutes' },
+			polling([processing]),
+		);
+
+		await expect(new Lenz().execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+
+		// The whole point. Validated at the point of USE, this check sat after
+		// POST /verify: the claim was charged, then a bad expression threw, and
+		// the NodeOperationError rethrow built a fresh error that dropped the
+		// task_id — recreating the exact lost-verification bug the rest of this
+		// block exists to prevent. A pure parameter read has no business
+		// running after the money is spent.
+		expect(calls.filter((c) => c.method === 'POST' && c.url === '/verify')).toHaveLength(0);
+	});
+
+	it('counts unclassifiable blips consecutively, not across the whole window', async () => {
+		const blip = () => {
+			throw new Error('socket hang up');
+		};
+
+		const { output, calls } = await runNode(
+			{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 900 },
+			// Three blips, each RECOVERED by a healthy poll before the next one.
+			// Cumulatively that is past the budget of 2; consecutively it never
+			// exceeds 1, and the verification is demonstrably alive throughout.
+			// Left cumulative, this killed a healthy task on the third hiccup
+			// with ~890s of the window unspent.
+			polling([blip, processing, blip, processing, blip, processing, completed]),
+		);
+
+		expect((output[0].json as IDataObject).status).toBe('completed');
+		expect(pollCount(calls)).toBe(7);
+	});
+
+	it('names the poll failure the window ended on instead of implying the task was seen', async () => {
+		const clock = fakeClock();
+		try {
+			const { output } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 10 },
+				polling([
+					() => {
+						throw apiError(500, undefined, 'Internal server error');
+					},
+				]),
+			);
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('timeout');
+			// Never once reached the status endpoint, and says so.
+			expect(json.last_status).toBeNull();
+			// Before this, a window spent entirely on 500s came back as an
+			// ordinary timeout on the SUCCESS path: the workflow's error branch
+			// never fired, and nothing anywhere recorded that every read failed.
+			// Retrying was right; discarding what was retried was not.
+			expect(json.last_error_status).toBe(500);
+			expect(typeof json.last_error).toBe('string');
+			expect(String(json.last_error).length).toBeGreaterThan(0);
+			expect(String(json.message)).toContain('last attempt');
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it('clears the recorded poll error once a poll gets through', async () => {
+		const clock = fakeClock();
+		try {
+			const { output } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 10 },
+				polling([
+					() => {
+						throw apiError(503, { code: 'capacity' }, 'Service unavailable');
+					},
+					processing,
+				]),
+			);
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('timeout');
+			// The 503 was recovered, so reporting it as the reason the window
+			// ended would be as misleading as omitting it when it was.
+			expect(json.last_error).toBeNull();
+			expect(json.last_status).toBe('processing');
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it('waits the reopening time a 429 states rather than its own cadence', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => {
+					throw apiError(429, { retry_after: 30 }, 'Too many requests');
+				},
+				completed,
+			]),
+		);
+
+		expect((output[0].json as IDataObject).status).toBe('completed');
+		// 30s as stated, not the ladder's opening 2s. Returning on our own
+		// cadence is what tripped the limiter, so it just trips it again and
+		// burns the window on retries that cannot succeed.
+		expect(sleepMock.mock.calls[0][0]).toBe(30000);
+	});
+
+	it('reads the rate-limit body’s own spelling of the wait', async () => {
+		// A 503 states `retry_after`; the 429 rate-limit body states
+		// `reset_in_seconds`. Both are seconds and both must be honoured.
+		await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => {
+					throw apiError(
+						429,
+						{ code: 'rate_limited', reset_in_seconds: 45 },
+						'Too many requests',
+					);
+				},
+				completed,
+			]),
+		);
+
+		expect(sleepMock.mock.calls[0][0]).toBe(45000);
+	});
+
+	it('falls back to the ladder when a 429 states no wait, rather than not waiting', async () => {
+		await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => {
+					throw apiError(429, { code: 'rate_limited' }, 'Too many requests');
+				},
+				completed,
+			]),
+		);
+
+		expect(sleepMock.mock.calls[0][0]).toBe(2000);
+	});
 });

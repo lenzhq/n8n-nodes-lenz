@@ -47,15 +47,61 @@ const MAX_UNCLASSIFIED_POLL_RETRIES = 2;
  * Returns false when the deadline is spent, which is the caller's signal to
  * stop polling. Shared by the success and retry paths so the two cannot drift
  * onto different schedules.
+ *
+ * `overrideMs` lets a caller substitute a server-stated wait for the ladder —
+ * used for 429, where the limiter has told us when it reopens and our own
+ * 2/4/8s cadence would just re-trip it. Still clamped to the deadline, so a
+ * long stated wait ends the polling rather than overrunning Max Wait.
  */
-async function waitForNextPoll(pollIdx: number, deadline: number): Promise<boolean> {
+async function waitForNextPoll(
+	pollIdx: number,
+	deadline: number,
+	overrideMs?: number,
+): Promise<boolean> {
 	const remaining = deadline - Date.now();
 	if (remaining <= 0) {
 		return false;
 	}
-	const backoff = POLL_BACKOFF_MS[Math.min(pollIdx, POLL_BACKOFF_MS.length - 1)];
+	const backoff =
+		overrideMs !== undefined
+			? overrideMs
+			: POLL_BACKOFF_MS[Math.min(pollIdx, POLL_BACKOFF_MS.length - 1)];
 	await sleep(Math.min(backoff, remaining));
 	return true;
+}
+
+/**
+ * The sentence that tells a caller a paid-for verification is still out there.
+ *
+ * Shared by both throw paths in the item catch. They build different error
+ * types and sit forty lines apart, which is exactly how two copies of one
+ * sentence end up telling a user two different things about their money.
+ */
+function submittedReceipt(taskId: string): string {
+	return (
+		`A verification for this item was submitted and charged before this failed — ` +
+		`its task ID is ${taskId}. It may still be running; fetch the result with ` +
+		`Get Verify Status rather than resubmitting.`
+	);
+}
+
+/**
+ * The wait a rate-limited response asked for, in milliseconds, or undefined.
+ *
+ * Two spellings because the API uses two: a 503 states `retry_after`, while the
+ * 429 rate-limit body states `reset_in_seconds`. Both are seconds. A value that
+ * is absent, non-numeric or non-positive returns undefined so the caller falls
+ * back to its own backoff — a stated wait of 0 is not a reason to hammer.
+ */
+function statedRetryAfterMs(error: unknown): number | undefined {
+	const body = responseBodyOf(error);
+	for (const raw of [body.retry_after, body.reset_in_seconds]) {
+		const seconds = Number(raw);
+		if (Number.isFinite(seconds) && seconds > 0) {
+			return Math.ceil(seconds) * 1000;
+		}
+	}
+	return undefined;
 }
 
 // Server-side cap on POST /verify/batch and POST /verify/{task_id}/select.
@@ -1117,6 +1163,42 @@ export class Lenz implements INodeType {
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
 					const depth = this.getNodeParameter('depth', itemIndex, 'standard') as string;
 
+					// Read and validated BEFORE the submit, not at the point of use.
+					// This is a pure parameter read that depends on nothing in the
+					// response, and validating it after `POST /verify` would recreate
+					// the exact bug the poll loop below exists to fix: the claim is
+					// charged, then a bad expression throws, and the task_id goes out
+					// with an error that has nowhere to carry it. Rejecting a
+					// non-numeric Max Wait before any money is spent costs the caller
+					// nothing. Only read when it is actually consumed — the field is
+					// hidden unless Wait for Completion is on, and a stale value behind
+					// a hidden field must not fail a submit-only run.
+					let waitSeconds = 0;
+					if (waitForCompletion) {
+						// The widget's minValue/maxValue are a UI hint and an
+						// expression walks straight past them, so the contract is
+						// enforced here too. `usableAsTool` means an LLM can supply
+						// this number directly; unclamped, `={{ 86400 }}` holds the
+						// execution open for a day. A non-numeric expression is worse
+						// than a wrong number: NaN makes the while-condition false on
+						// entry, so the node would report a timeout on a claim it
+						// never polled once, having already been charged for it.
+						const requestedWait = Number(
+							this.getNodeParameter('maxWaitSeconds', itemIndex, POLL_TIMEOUT_MS / 1000),
+						);
+						if (!Number.isFinite(requestedWait)) {
+							throw new NodeOperationError(
+								this.getNode(),
+								'Max Wait (Seconds) must be a number of seconds',
+								{ itemIndex },
+							);
+						}
+						waitSeconds = Math.min(
+							MAX_WAIT_CEILING_SECONDS,
+							Math.max(MAX_WAIT_FLOOR_SECONDS, requestedWait),
+						);
+					}
+
 					const submitBody: IDataObject = { text: claim };
 					if (language) {
 						submitBody.language = language;
@@ -1162,33 +1244,17 @@ export class Lenz implements INodeType {
 							message: 'Submitted. Poll this task_id with the Get Verify Status operation, or wait for the webhook.',
 						};
 					} else {
-						// The widget's minValue/maxValue are a UI hint and an
-						// expression walks straight past them, so the contract is
-						// enforced here too. `usableAsTool` means an LLM can supply
-						// this number directly; unclamped, `={{ 86400 }}` holds the
-						// execution open for a day. A non-numeric expression is worse
-						// than a wrong number: NaN makes the while-condition false on
-						// entry, so the node would report a timeout on a claim it
-						// never polled once, having already been charged for it.
-						const requestedWait = Number(
-							this.getNodeParameter('maxWaitSeconds', itemIndex, POLL_TIMEOUT_MS / 1000),
-						);
-						if (!Number.isFinite(requestedWait)) {
-							throw new NodeOperationError(
-								this.getNode(),
-								'Max Wait (Seconds) must be a number of seconds',
-								{ itemIndex },
-							);
-						}
-						const waitSeconds = Math.min(
-							MAX_WAIT_CEILING_SECONDS,
-							Math.max(MAX_WAIT_FLOOR_SECONDS, requestedWait),
-						);
+						// waitSeconds was read and validated before the submit above.
 						const deadline = Date.now() + waitSeconds * 1000;
 						let terminal: IDataObject | undefined;
 						let lastObservedStatus = '';
 						let pollIdx = 0;
 						let unclassifiedRetries = 0;
+						// The last poll failure that was retried rather than thrown.
+						// Kept so a deadline reached entirely on failed polls can say
+						// so, instead of reporting a bare timeout that implies the
+						// task was observed running.
+						let lastPollError: { message: string; status: number | null } | undefined;
 						while (Date.now() < deadline) {
 							let status: IDataObject;
 							try {
@@ -1226,15 +1292,37 @@ export class Lenz implements INodeType {
 										message: (pollError as Error).message,
 									});
 								}
+								// Remember it. If the deadline runs out having seen
+								// nothing but failures, the timeout result reports this
+								// instead of implying the task was observed running.
+								lastPollError = {
+									message: (pollError as Error).message,
+									status: code ?? null,
+								};
 								if (code === undefined) {
 									unclassifiedRetries += 1;
 								}
-								if (!(await waitForNextPoll(pollIdx, deadline))) {
+								// A 429 has told us when the limiter reopens. Our own
+								// 2/4/8s ladder is what tripped it, so returning on that
+								// ladder just trips it again and burns the whole window
+								// on retries that cannot succeed. waitForNextPoll still
+								// clamps this to the deadline.
+								const statedWait =
+									code === 429 ? statedRetryAfterMs(pollError) : undefined;
+								if (!(await waitForNextPoll(pollIdx, deadline, statedWait))) {
 									break;
 								}
 								pollIdx += 1;
 								continue;
 							}
+							// A poll got through, so whatever went wrong before it is
+							// over. The budget is for CONSECUTIVE unclassifiable
+							// failures — left cumulative it counts blips across the
+							// whole window, so three unrelated socket hiccups minutes
+							// apart, each followed by a healthy response, would kill a
+							// perfectly live verification with most of Max Wait unused.
+							unclassifiedRetries = 0;
+							lastPollError = undefined;
 							const state = status.status as string;
 							lastObservedStatus = state || lastObservedStatus;
 							if (state === 'completed' || state === 'needs_input' || state === 'failed') {
@@ -1266,10 +1354,30 @@ export class Lenz implements INodeType {
 								// would be inventing a fact. `last_status` says how much
 								// the node actually knows.
 								last_status: lastObservedStatus || null,
+								// The poll failure the deadline expired on, if it did.
+								// Without this a window spent entirely on 500s came back
+								// as an ordinary timeout on the SUCCESS path — the error
+								// branch never fired, and nothing anywhere said the node
+								// had not managed to reach the status endpoint once. The
+								// retry is the right behaviour; silently discarding what
+								// it was retrying is not.
+								last_error: lastPollError?.message ?? null,
+								last_error_status: lastPollError?.status ?? null,
 								message:
 									'The verification did not complete within Max Wait (task_id: ' +
 									taskId +
-									'). It may still be running server-side — the credits were spent at submit either way, so fetch the result later with Get Verify Status rather than resubmitting.',
+									'). ' +
+									// Deliberately "the last attempt" and not "every
+									// attempt": lastPollError is cleared by a successful
+									// poll, so it being set means the FINAL read failed,
+									// not that they all did. `last_status` is what says
+									// whether the task was ever observed at all.
+									(lastPollError
+										? 'The last attempt to read its status failed with: ' +
+											lastPollError.message +
+											'. The task itself may be unaffected — '
+										: 'It may still be running server-side — ') +
+									'the credits were spent at submit either way, so fetch the result later with Get Verify Status rather than resubmitting.',
 							};
 						} else {
 							responseData = mapVerifyStatus(terminal, taskId, includeAudit);
@@ -1709,9 +1817,19 @@ export class Lenz implements INodeType {
 				// reached the user as an "API error" with no HTTP code, which is
 				// both the wrong category and the wrong advice.
 				if (error instanceof NodeOperationError) {
+					// The receipt rides this path too. Every validation the node
+					// performs now runs before the submit, so `pendingTaskId` should
+					// always be empty here — but "should" is what the poll-loop bug
+					// was built on. If a validation is ever added below the submit,
+					// this is what stops it silently repeating that bug: the rethrow
+					// constructs a FRESH error, so anything not copied across is
+					// lost, and the task id is the one thing that cannot be
+					// reconstructed afterwards.
+					const opReceipt = pendingTaskId ? submittedReceipt(pendingTaskId) : '';
 					throw new NodeOperationError(this.getNode(), error.message, {
 						itemIndex,
-						description: error.description ?? undefined,
+						description:
+							[error.description ?? '', opReceipt].filter(Boolean).join(' ') || undefined,
 					});
 				}
 
@@ -1756,9 +1874,7 @@ export class Lenz implements INodeType {
 				// vanish behind our own sentence.
 				const existingDescription =
 					error instanceof NodeApiError ? (error.description ?? '') : '';
-				const receipt = pendingTaskId
-					? `A verification for this item was submitted and charged before this failed — its task ID is ${pendingTaskId}. It may still be running; fetch the result with Get Verify Status rather than resubmitting.`
-					: '';
+				const receipt = pendingTaskId ? submittedReceipt(pendingTaskId) : '';
 				throw describeApiError(this.getNode(), error, itemIndex, {
 					message: (error as Error).message,
 					...(receipt
