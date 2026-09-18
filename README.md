@@ -87,6 +87,7 @@ Built against `n8n-workflow` (n8n API version 1) and tested against n8n v2.30.4.
 ## Usage
 
 - **Verify (Deep) takes ~90 seconds** — it's the full multi-model pipeline, not an instant call. The node blocks/polls until the result is ready, so no separate polling setup is needed on your end.
+- **If it outlasts Max Wait (Seconds)**, the node returns `status: "timeout"` with the `task_id` and `passed: null` instead of a verdict. Nothing is lost — giving up does not cancel anything, the verification keeps running server-side, and the credits were spent at submit either way. Collect it later with **Get Verify Status**, or raise **Max Wait (Seconds)** (default 120). A poll that fails with a 5xx, a 429 or a 408/425 is retried for as long as the window lasts rather than failing the item; a 429 waits the reopening time the API states instead of returning on the node's own cadence. A failure carrying no HTTP status at all — a DNS or TLS problem, say — is different: it could equally be a bug or a bad credential, so it gets two retries and is then surfaced as the error it is. If the window ends on a failed poll, the `timeout` result names it in `last_error` and `last_error_status`.
 - **Low depth drops a debate round, not just sources.** As well as searching fewer sources and skipping the recovery fetch tiers, *Low* stops the debate after the opening arguments — so with **Include Audit Trail** on, `audit.debate_pro.rebuttal` and `audit.debate_con.rebuttal` come back as empty strings. Every step that does run uses the same models, so Low is a volume lever rather than a model downgrade — but it is one round of argument fewer, not merely a narrower search.
 - **You are charged for the Depth you asked for, not the one you got.** A *Low* request that Lenz can answer from an existing *standard* verdict still costs 5 — and the `depth` field on the result reads `standard`, because it describes the evidence behind the verdict rather than the request. Seeing `standard` come back from a *Low* request is correct, not a bug.
 - To feed data from a previous node instead of a fixed value, toggle a field to **Expression** and reference it, e.g. `{{ $json.output }}`.
@@ -108,8 +109,11 @@ A simple "fact-check gate" pattern — verify an LLM's output before acting on i
 
 1. Add an **LLM node** (or any node producing text) upstream.
 2. Add the **Lenz node**, set Operation to **Verify (Deep)**, and set the Claim field to an expression referencing the upstream output, e.g. `{{ $json.text }}`.
-3. Add an **IF node** after Lenz with the condition `{{ $json.passed }}` **is true**.
-4. Wire the true branch to continue the workflow normally, and the false branch to whatever your "needs review" path is (Slack alert, email, a manual-approval step, etc.).
+3. Add an **IF node** after Lenz with the condition `{{ $json.status }}` **equals** `completed`. Send the false branch wherever unfinished work should go — a timeout, a `failed` pipeline or a `needs_input` interrupt is not a verdict, and its `passed` is `null`.
+4. After that, add a second **IF node** with the condition `{{ $json.passed }}` **is true**.
+5. Wire its true branch to continue the workflow normally, and its false branch to whatever your "needs review" path is (Slack alert, email, a manual-approval step, etc.).
+
+> **Check `status` before `passed`.** `passed` only means something once a verdict exists. A timeout, a `failed` pipeline or a `needs_input` interrupt has no verdict, and `passed` is `null` or absent — which an IF reads as false. Branching straight on `passed` therefore reports "this claim did not pass" for a claim nobody ever checked, and a provider outage becomes a debunking.
 
 For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~10s instead of ~90s.
 
