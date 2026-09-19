@@ -1951,21 +1951,77 @@ describe('Lenz node - Verify poll resilience', () => {
 		}
 	});
 
-	it('clamps a stated poll wait to what is left of Max Wait', async () => {
-		const clock = fakeClock();
+	// Like fakeClock, but the mocked sleep ADVANCES it by the slept amount, so a
+	// clamped sleep really does spend the rest of the window. fakeClock steps a
+	// fixed 1s per read whatever was slept, which cannot tell "slept 60s then
+	// read once more" from "read ten times" — and that is the difference under
+	// test here.
+	function sleepingClock(readCostMs = 100) {
+		let t = 1_000_000;
+		const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => {
+			t += readCostMs;
+			return t;
+		});
+		sleepMock.mockImplementation(async (ms: number) => {
+			t += ms;
+		});
+		return {
+			restore() {
+				nowSpy.mockRestore();
+				sleepMock.mockImplementation(async () => {});
+			},
+		};
+	}
+
+	it('clamps a stated poll wait to what is left of Max Wait, then reads once more', async () => {
+		const clock = sleepingClock();
 		try {
-			const { output } = await runNode(
+			const { output, calls } = await runNode(
 				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 10 },
 				polling([
 					() => ({ status: 'processing', progress: { step: 'research', poll_after_seconds: 60 } }),
 				]),
 			);
 			// 60s stated, but only ~10s of window: the sleep is the remainder,
-			// never the full 60. Then the deadline ends it as a timeout.
+			// never the full 60.
 			expect(sleepMock.mock.calls[0][0]).toBeLessThanOrEqual(10000);
 			expect((output[0].json as IDataObject).status).toBe('timeout');
+			// And every sleep is FOLLOWED by a read — including the last one.
+			// Under the old `while (Date.now() < deadline)` the final sleep was
+			// followed by the loop exiting, so polls equalled sleeps and a
+			// verdict that arrived during that sleep was never looked at. Now
+			// waitForNextPoll declines to sleep once the window is spent, so
+			// the loop ends on a read, not a wait: polls = sleeps + 1.
+			// (Not "exactly 2": sleep is mocked instant and the fake clock
+			// steps 1s per read, so how many fit is a property of the harness,
+			// not of the code. The +1 is the property of the code.)
+			expect(pollCount(calls)).toBe(sleepMock.mock.calls.length + 1);
+			// With a clock the sleep actually moves, that is concretely: one
+			// read, one clamped sleep that spends the window, one final read.
+			expect(pollCount(calls)).toBe(2);
 		} finally {
-			clock.mockRestore();
+			clock.restore();
+		}
+	});
+
+	it('still finds a verdict that arrived during the final clamped sleep', async () => {
+		const clock = sleepingClock();
+		try {
+			const { output, calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 10 },
+				polling([
+					() => ({ status: 'processing', progress: { step: 'research', poll_after_seconds: 60 } }),
+					completed,
+				]),
+			);
+			// The whole point of the final read. Without it this run was one
+			// poll then `timeout`, telling the user credits were spent and to
+			// come back later — for a verdict that was sitting there before
+			// the window closed. Under the ladder the same task was found.
+			expect((output[0].json as IDataObject).status).toBe('completed');
+			expect(pollCount(calls)).toBe(2);
+		} finally {
+			clock.restore();
 		}
 	});
 });

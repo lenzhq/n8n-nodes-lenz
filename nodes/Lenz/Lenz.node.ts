@@ -1307,7 +1307,18 @@ export class Lenz implements INodeType {
 						// so, instead of reporting a bare timeout that implies the
 						// task was observed running.
 						let lastPollError: { message: string; status: number | null } | undefined;
-						while (Date.now() < deadline) {
+						// The window is enforced by waitForNextPoll, not by the loop
+						// condition. It used to be `while (Date.now() < deadline)`,
+						// which meant a sleep clamped to the deadline was followed by
+						// the loop EXITING, never by another read — so a verification
+						// that completed during that last sleep came back as a
+						// timeout. With the ladder the unobserved tail was at most 8s;
+						// a stated poll_after_seconds can be a minute, which made it a
+						// minute. Now waitForNextPoll refuses to sleep once the window
+						// is spent, so every sleep — clamped or not — is followed by
+						// one more poll, and the final read lands at the deadline
+						// rather than being skipped.
+						while (true) {
 							let status: IDataObject;
 							try {
 								status = await lenzRequest('GET', `/verify/status/${taskId}`);
