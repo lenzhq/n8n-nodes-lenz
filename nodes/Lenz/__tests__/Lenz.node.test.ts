@@ -1992,12 +1992,11 @@ describe('Lenz node - Verify poll resilience', () => {
 			// verdict that arrived during that sleep was never looked at. Now
 			// waitForNextPoll declines to sleep once the window is spent, so
 			// the loop ends on a read, not a wait: polls = sleeps + 1.
-			// (Not "exactly 2": sleep is mocked instant and the fake clock
-			// steps 1s per read, so how many fit is a property of the harness,
-			// not of the code. The +1 is the property of the code.)
 			expect(pollCount(calls)).toBe(sleepMock.mock.calls.length + 1);
-			// With a clock the sleep actually moves, that is concretely: one
-			// read, one clamped sleep that spends the window, one final read.
+			// And because sleepingClock moves by the slept amount, that is
+			// concretely one read, one clamped sleep that spends the window,
+			// one final read. This is the assertion that pins the fix — under
+			// the old loop it is 1.
 			expect(pollCount(calls)).toBe(2);
 		} finally {
 			clock.restore();

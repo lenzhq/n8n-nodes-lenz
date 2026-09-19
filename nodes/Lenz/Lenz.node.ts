@@ -485,10 +485,15 @@ function mapProgress(progress: unknown): IDataObject {
 // undefined to keep the node's own backoff.
 //
 // It rides in the body rather than a Retry-After header on purpose: a
-// Retry-After on a 200 is off-spec and a proxy may strip it. Out-of-range is
-// treated as absent, per the API's own guidance — a stated 0 would be a hot
-// loop and a stated hour would outrun Max Wait, and neither is a reason to
-// abandon a cadence that works.
+// Retry-After on a 200 is off-spec and a proxy may strip it.
+//
+// Out-of-range is treated as ABSENT, not clamped. That is the API owner's own
+// instruction, in lenzhq/n8n-nodes-lenz#37: "Treat an out-of-range value as
+// absent and keep your own backoff." A stated 0 would be a hot loop and a
+// stated hour would outrun Max Wait; falling back to the ladder over-polls
+// rather than under-polls, which is the failure mode that cannot lose a
+// verdict. The 429 path (statedRetryAfterMs) deliberately has no ceiling: a
+// limiter stating 90s means 90s, and sleeping less just re-trips it.
 const MAX_STATED_POLL_WAIT_SECONDS = 60;
 
 function statedPollAfterMs(progress: unknown): number | undefined {
