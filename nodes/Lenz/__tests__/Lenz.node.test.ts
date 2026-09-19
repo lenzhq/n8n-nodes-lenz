@@ -511,14 +511,71 @@ describe('Lenz node - Get Verify Status', () => {
 	});
 
 	it('reports an in-flight task as processing with its progress', async () => {
+		// The real shape. This fixture used to mock `step: 'Debating...'`, a
+		// value the server never emitted — real metas were bare identifiers,
+		// and the API's own synthetic branches said 'Starting...'/'Framing...'.
+		// Also fixed pointless: it asserted the raw object passed through,
+		// which is the behaviour this block now exists to forbid.
 		const responder: Responder = () => ({
 			status: 'processing',
-			progress: { step: 'Debating...' },
+			progress: { step: 'debate', index: 3, total: 5, elapsed_seconds: 42, poll_after_seconds: 5 },
 		});
 		const { output } = await runNode({ operation: 'verifyStatus', taskId: 'task_9' }, responder);
 		const json = output[0].json as IDataObject;
 		expect(json.status).toBe('processing');
-		expect(json.progress).toEqual({ step: 'Debating...' });
+		expect(json.progress).toEqual({
+			step: 'debate',
+			index: 3,
+			total: 5,
+			elapsed_seconds: 42,
+			poll_after_seconds: 5,
+		});
+	});
+
+	it('forwards only the whitelisted progress fields, never the evidence pool or cost', async () => {
+		// What the endpoint used to forward verbatim, and what the node used to
+		// spread onto the item: the accumulated evidence pool with untruncated
+		// source quotes, and Lenz's own per-step EUR spend. Neither was ever
+		// contract. Whatever the API puts in `progress` next lands here too,
+		// until someone adds it to PROGRESS_FIELDS on purpose.
+		const responder: Responder = () => ({
+			status: 'processing',
+			progress: {
+				step: 'research',
+				index: 2,
+				total: 5,
+				content: { sources: [{ quote: 'a long untruncated quote' }], debate: {} },
+				step_stats: { research: { cost_eur: 0.0412 } },
+				anything_new: 'must not pass either',
+			},
+		});
+		const { output } = await runNode({ operation: 'verifyStatus', taskId: 'task_9' }, responder);
+		const progress = (output[0].json as IDataObject).progress as IDataObject;
+		expect(progress).toEqual({ step: 'research', index: 2, total: 5 });
+		expect(progress).not.toHaveProperty('content');
+		expect(progress).not.toHaveProperty('step_stats');
+		expect(progress).not.toHaveProperty('anything_new');
+	});
+
+	it('leaves an absent progress field absent rather than null', async () => {
+		// A workflow branching on `progress.index` should find it missing, not
+		// find a null that reads like a value. The old shape had only `step`.
+		const responder: Responder = () => ({
+			status: 'processing',
+			progress: { step: 'framing' },
+		});
+		const { output } = await runNode({ operation: 'verifyStatus', taskId: 'task_9' }, responder);
+		const progress = (output[0].json as IDataObject).progress as IDataObject;
+		expect(progress).toEqual({ step: 'framing' });
+		expect(progress).not.toHaveProperty('index');
+	});
+
+	it('tolerates a progress that is missing or not an object', async () => {
+		for (const progress of [undefined, null, 'research', 42, ['step']]) {
+			const responder: Responder = () => ({ status: 'processing', progress });
+			const { output } = await runNode({ operation: 'verifyStatus', taskId: 'task_9' }, responder);
+			expect((output[0].json as IDataObject).progress).toEqual({});
+		}
 	});
 
 	it('skips an empty task ID', async () => {
@@ -1859,5 +1916,111 @@ describe('Lenz node - Verify poll resilience', () => {
 		);
 
 		expect(sleepMock.mock.calls[0][0]).toBe(2000);
+	});
+
+	it('waits the poll_after_seconds a processing response states', async () => {
+		await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			polling([
+				() => ({
+					status: 'processing',
+					progress: { step: 'research', index: 2, total: 5, poll_after_seconds: 15 },
+				}),
+				completed,
+			]),
+		);
+
+		// The server knows which stage it is in and how long it runs; the
+		// 2/4/8s ladder does not. 15s as stated, not the ladder's opening 2s.
+		expect(sleepMock.mock.calls[0][0]).toBe(15000);
+	});
+
+	it('keeps its own cadence when poll_after_seconds is out of range', async () => {
+		// Per the API's own guidance: out-of-range is absent. 0 would be a hot
+		// loop, an hour would outrun Max Wait, and a string is nothing at all.
+		for (const bad of [0, -5, 3600, 'soon', null]) {
+			sleepMock.mockClear();
+			await runNode(
+				{ operation: 'verify', claim: 'Some claim' },
+				polling([
+					() => ({ status: 'processing', progress: { step: 'research', poll_after_seconds: bad } }),
+					completed,
+				]),
+			);
+			expect(sleepMock.mock.calls[0][0]).toBe(2000);
+		}
+	});
+
+	// Like fakeClock, but the mocked sleep ADVANCES it by the slept amount, so a
+	// clamped sleep really does spend the rest of the window. fakeClock steps a
+	// fixed 1s per read whatever was slept, which cannot tell "slept 60s then
+	// read once more" from "read ten times" — and that is the difference under
+	// test here.
+	function sleepingClock(readCostMs = 100) {
+		let t = 1_000_000;
+		const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => {
+			t += readCostMs;
+			return t;
+		});
+		sleepMock.mockImplementation(async (ms: number) => {
+			t += ms;
+		});
+		return {
+			restore() {
+				nowSpy.mockRestore();
+				sleepMock.mockImplementation(async () => {});
+			},
+		};
+	}
+
+	it('clamps a stated poll wait to what is left of Max Wait, then reads once more', async () => {
+		const clock = sleepingClock();
+		try {
+			const { output, calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 10 },
+				polling([
+					() => ({ status: 'processing', progress: { step: 'research', poll_after_seconds: 60 } }),
+				]),
+			);
+			// 60s stated, but only ~10s of window: the sleep is the remainder,
+			// never the full 60.
+			expect(sleepMock.mock.calls[0][0]).toBeLessThanOrEqual(10000);
+			expect((output[0].json as IDataObject).status).toBe('timeout');
+			// And every sleep is FOLLOWED by a read — including the last one.
+			// Under the old `while (Date.now() < deadline)` the final sleep was
+			// followed by the loop exiting, so polls equalled sleeps and a
+			// verdict that arrived during that sleep was never looked at. Now
+			// waitForNextPoll declines to sleep once the window is spent, so
+			// the loop ends on a read, not a wait: polls = sleeps + 1.
+			expect(pollCount(calls)).toBe(sleepMock.mock.calls.length + 1);
+			// And because sleepingClock moves by the slept amount, that is
+			// concretely one read, one clamped sleep that spends the window,
+			// one final read. This is the assertion that pins the fix — under
+			// the old loop it is 1.
+			expect(pollCount(calls)).toBe(2);
+		} finally {
+			clock.restore();
+		}
+	});
+
+	it('still finds a verdict that arrived during the final clamped sleep', async () => {
+		const clock = sleepingClock();
+		try {
+			const { output, calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 10 },
+				polling([
+					() => ({ status: 'processing', progress: { step: 'research', poll_after_seconds: 60 } }),
+					completed,
+				]),
+			);
+			// The whole point of the final read. Without it this run was one
+			// poll then `timeout`, telling the user credits were spent and to
+			// come back later — for a verdict that was sitting there before
+			// the window closed. Under the ladder the same task was found.
+			expect((output[0].json as IDataObject).status).toBe('completed');
+			expect(pollCount(calls)).toBe(2);
+		} finally {
+			clock.restore();
+		}
 	});
 });

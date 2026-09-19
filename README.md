@@ -155,7 +155,7 @@ Verify pauses rather than guessing when the text isn't a single unambiguous clai
                                     {{ $json.claims[0].text }}
 ```
 
-A paused task expires **10 minutes** after it pauses, and Select Claims only accepts text that was actually offered — so copy the claim text verbatim rather than retyping it.
+A paused task stays open for **24 hours from submission** (not 10 minutes, as earlier versions of this README said — resubmitting inside that window pays again for a check Select Claims would still have completed), and Select Claims only accepts text that was actually offered — so copy the claim text verbatim rather than retyping it.
 
 ### When a verification fails
 

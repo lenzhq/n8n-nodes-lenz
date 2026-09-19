@@ -444,8 +444,65 @@ function mapVerifyStatus(status: IDataObject, taskId: string, includeAudit: bool
 		status: 'processing',
 		passed: null,
 		task_id: taskId,
-		progress: status.progress ?? {},
+		progress: mapProgress(status.progress),
 	};
+}
+
+// The progress fields a workflow may see, and nothing else.
+//
+// This used to spread `status.progress` through verbatim. The API endpoint was
+// inherited from the consumer progress page and nothing shaped it, so what
+// came through included `content` — the accumulated evidence pool with full
+// untruncated source quotes and every panelist's reasoning — and
+// `step_stats`, Lenz's own per-step cost in EUR. Neither was ever part of the
+// contract, and both landed on customer canvases as mappable fields.
+//
+// A whitelist is the fix that survives the next upstream change: whatever the
+// API adds to `progress` from here on, it does not reach a workflow until
+// someone adds it here on purpose. zapier-lenz already forwards its fields
+// this way, which is why it never had the exposure.
+//
+// Tolerates both shapes the API has emitted: the current
+// `{step, index, total, elapsed_seconds, poll_after_seconds}`, and the older
+// one where `step` was the only field worth having. Absent fields are absent,
+// not null — a workflow branching on `progress.index` should see it missing
+// rather than find a null that looks like a value.
+const PROGRESS_FIELDS = ['step', 'index', 'total', 'elapsed_seconds', 'poll_after_seconds'] as const;
+
+function mapProgress(progress: unknown): IDataObject {
+	if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return {};
+	const source = progress as IDataObject;
+	const mapped: IDataObject = {};
+	for (const key of PROGRESS_FIELDS) {
+		if (source[key] !== undefined) {
+			mapped[key] = source[key];
+		}
+	}
+	return mapped;
+}
+
+// The wait a `processing` response asks for before the next poll, in ms, or
+// undefined to keep the node's own backoff.
+//
+// It rides in the body rather than a Retry-After header on purpose: a
+// Retry-After on a 200 is off-spec and a proxy may strip it.
+//
+// Out-of-range is treated as ABSENT, not clamped. That is the API owner's own
+// instruction, in lenzhq/n8n-nodes-lenz#37: "Treat an out-of-range value as
+// absent and keep your own backoff." A stated 0 would be a hot loop and a
+// stated hour would outrun Max Wait; falling back to the ladder over-polls
+// rather than under-polls, which is the failure mode that cannot lose a
+// verdict. The 429 path (statedRetryAfterMs) deliberately has no ceiling: a
+// limiter stating 90s means 90s, and sleeping less just re-trips it.
+const MAX_STATED_POLL_WAIT_SECONDS = 60;
+
+function statedPollAfterMs(progress: unknown): number | undefined {
+	if (!progress || typeof progress !== 'object') return undefined;
+	const seconds = Number((progress as IDataObject).poll_after_seconds);
+	if (!Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_STATED_POLL_WAIT_SECONDS) {
+		return undefined;
+	}
+	return Math.ceil(seconds) * 1000;
 }
 
 export class Lenz implements INodeType {
@@ -866,7 +923,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['select'] },
 				},
-				description: 'Claim texts copied verbatim from the paused task\'s "claims" or "candidates" list. Anything that was not offered is rejected, and the task expires 10 minutes after it pauses.',
+				description: 'Claim texts copied verbatim from the paused task\'s "claims" or "candidates" list. Anything that was not offered is rejected, and a paused task stays open for 24 hours from submission.',
 			},
 			{
 				displayName: 'Wait for Completion',
@@ -1255,7 +1312,18 @@ export class Lenz implements INodeType {
 						// so, instead of reporting a bare timeout that implies the
 						// task was observed running.
 						let lastPollError: { message: string; status: number | null } | undefined;
-						while (Date.now() < deadline) {
+						// The window is enforced by waitForNextPoll, not by the loop
+						// condition. It used to be `while (Date.now() < deadline)`,
+						// which meant a sleep clamped to the deadline was followed by
+						// the loop EXITING, never by another read — so a verification
+						// that completed during that last sleep came back as a
+						// timeout. With the ladder the unobserved tail was at most 8s;
+						// a stated poll_after_seconds can be a minute, which made it a
+						// minute. Now waitForNextPoll refuses to sleep once the window
+						// is spent, so every sleep — clamped or not — is followed by
+						// one more poll, and the final read lands at the deadline
+						// rather than being skipped.
+						while (true) {
 							let status: IDataObject;
 							try {
 								status = await lenzRequest('GET', `/verify/status/${taskId}`);
@@ -1329,7 +1397,13 @@ export class Lenz implements INodeType {
 								terminal = status;
 								break;
 							}
-							if (!(await waitForNextPoll(pollIdx, deadline))) {
+							// A processing response may say when to come back. The
+							// server knows which stage it is in and how long that
+							// stage runs; our ladder does not. Same override path the
+							// 429 handling uses, so it is clamped to the deadline the
+							// same way.
+							const statedPoll = statedPollAfterMs(status.progress);
+							if (!(await waitForNextPoll(pollIdx, deadline, statedPoll))) {
 								break;
 							}
 							pollIdx += 1;
