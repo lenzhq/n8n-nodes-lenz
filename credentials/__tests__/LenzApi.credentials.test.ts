@@ -1,5 +1,5 @@
 import { LenzApi } from '../LenzApi.credentials';
-import { Lenz } from '../../nodes/Lenz/Lenz.node';
+import { BASE_URL, Lenz } from '../../nodes/Lenz/Lenz.node';
 
 // The credential had no test at all until the coverage gate went in: nothing
 // imported it, so it read 0% and was invisible in any report that only covers
@@ -30,7 +30,11 @@ describe('Lenz API credential', () => {
 	it('tests the credential against a real endpoint that needs auth', () => {
 		// The test request has to be one that fails without a valid key,
 		// otherwise "Test" passes for a wrong key and the user finds out later.
-		expect(credential.test.request.baseURL).toBe('https://lenz.io/api/v1');
+		// Asserted against the node's own constant, not a third copy of the
+		// string. Hardcoded here, a move to a new host would fix every node
+		// request and quietly leave the credential probing the old one — the
+		// Test button failing, or worse succeeding, against a stale host.
+		expect(credential.test.request.baseURL).toBe(BASE_URL);
 		expect(credential.test.request.url).toBe('/me/usage');
 		expect(credential.test.request.method).toBe('GET');
 	});
@@ -44,7 +48,11 @@ describe('Lenz API credential', () => {
 		expect(credential.name).toBe('lenzApi');
 	});
 
-	it('points at documentation a user can actually reach', () => {
-		expect(credential.documentationUrl).toMatch(/^https:\/\//);
+	it('points at the credentials documentation page', () => {
+		// Named for what it checks. A bare /^https:\/\// would pass for a
+		// typo'd host or an empty path, so it would read as a reachability
+		// check while guaranteeing only a scheme. Pinning the value at least
+		// catches an accidental edit; nothing here proves the page resolves.
+		expect(credential.documentationUrl).toBe('https://lenz.io/api-credentials');
 	});
 });

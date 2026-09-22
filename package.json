@@ -25,7 +25,7 @@
         "prepublishOnly": "n8n-node prerelease",
         "prompt:build": "node scripts/generate-workflow-prompt.mjs",
         "prompt:check": "node scripts/generate-workflow-prompt.mjs --check",
-        "test": "jest",
+        "test": "jest --coverage",
         "test:hooks": "jest --config jest.hooks.config.cjs"
     },
     "files": [
