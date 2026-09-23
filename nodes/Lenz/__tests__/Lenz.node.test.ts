@@ -2139,6 +2139,44 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		expect(json.error_description).toContain('Retry later');
 	});
 
+
+	it('carries limit and upgrade_url so a workflow can tell which cap it hit', async () => {
+		// Without these, a 45-second burst limit and a nine-hour daily cap are
+		// indistinguishable on the wire: same status_code, same code, and a
+		// retry_after differing only in magnitude. The judgement about which is
+		// which stays the caller's — branch on `retry_after > 300` — but the
+		// facts the API stated should not be locked inside English prose.
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(429, dailyCap);
+			},
+			true, // continueOnFail
+		);
+
+		const json = output[0].json as IDataObject;
+		expect(json.limit).toBe(1000);
+		expect(json.upgrade_url).toBe('https://lenz.io/plans');
+		expect(json.retry_after).toBe(32400);
+	});
+
+	it('does not run two sentences together when detail lacks punctuation', async () => {
+		// `detail` is free text. "Rate limit exceeded" with no full stop used to
+		// render as "Lenz: Rate limit exceeded Resets in ~9 hours."
+		const err = await expectRateLimitError({
+			detail: 'Rate limit exceeded',
+			code: 'rate_limited',
+			reset_in_seconds: 32400,
+		});
+		expect(err.message).toContain('Rate limit exceeded. Resets in');
+		expect(err.message).not.toContain('exceeded Resets');
+	});
+
+	it('does not double the full stop when detail already has one', async () => {
+		const err = await expectRateLimitError(burst);
+		expect(err.message).not.toContain('..');
+	});
+
 	it('leaves a 402 without a retry_after, since topping up is not a wait', async () => {
 		const { output } = await runNode(
 			{ operation: 'verify', claim: 'A claim' },

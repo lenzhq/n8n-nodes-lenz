@@ -177,14 +177,18 @@ So the Wait node has a number to read, the error output carries the refusal as f
 
 | Field | What it says |
 |---|---|
-| `retry_after` | Seconds to wait before submitting again — point the Wait node's duration at `{{ $json.retry_after }}`. Present on **429** and **503** only; a 402 has nothing to wait for, so it is absent rather than zero |
+| `retry_after` | Seconds until the refusal clears. Present on **429** and **503** only; a 402 has nothing to wait for, so it is absent rather than zero. Safe to point a Wait node at for a 503, but **check the magnitude first on a 429** — see [Rate limits](#rate-limits-http-429), where it can be most of a day |
 | `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `rate_limited`, `no_credits` |
 | `status_code` | The HTTP status, e.g. `429`, `503` |
 | `cost` | Credits the refused call needed, present only on an out-of-credits refusal |
 | `credits_remaining` | Credits the account holds — `0` is a real value and is reported, not dropped |
 | `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing, capacity or rate-limit refusal |
+| `limit` | The cap that was hit, present only on a rate-limit refusal |
+| `upgrade_url` | Where that cap is raised, present on rate-limit and out-of-credits refusals |
 
 `cost` and `credits_remaining` let an **IF** node tell a shortfall from an empty balance without reading the prose: `{{ $json.credits_remaining }}` above zero is one top-up away, zero is a plan decision.
+
+`error` keeps the raw message it always carried, so existing workflows reading it are unaffected.
 
 ### Rate limits (HTTP 429)
 
@@ -195,9 +199,9 @@ How long that is decides what to do with it, and the node's message says which:
 - **A short reset** (roughly five minutes or less) is the Wait-node loop described above — error output into a **Wait** node set to `{{ $json.retry_after }}`, looped back.
 - **The daily cap** resets at midnight UTC, so `retry_after` can be tens of thousands of seconds. A Wait node would hold the execution open for most of a day, which is worse than failing: re-run the workflow after the reset, schedule it for then, or raise the cap.
 
-Note that the wait is read from the response body, not from the `Retry-After` header. The API sends the header, but n8n wraps every failed request in a `NodeApiError` that keeps the parsed body and discards the response object, so by the time the node sees the error the header is gone.
+Branch on the magnitude rather than reading the prose: `{{ $json.retry_after > 300 }}` separates "wait and loop" from "come back later". `limit` and `upgrade_url` come through as fields too.
 
-`error` keeps the raw message it always carried, so existing workflows reading it are unaffected.
+Note that the wait is read from the response body, not from the `Retry-After` header. The API sends the header, but n8n wraps every failed request in a `NodeApiError` that keeps the parsed body and discards the response object, so by the time the node sees the error the header is gone.
 
 ## Resources
 

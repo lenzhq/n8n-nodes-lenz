@@ -86,12 +86,17 @@ function submittedReceipt(taskId: string): string {
 }
 
 /**
- * The wait a rate-limited response asked for, in milliseconds, or undefined.
+ * The wait a refusal asked for, in SECONDS, or undefined.
+ *
+ * The name carries the unit because the two are one keystroke apart and the ms
+ * wrapper below is the only other caller. Wiring this into a sleep that expects
+ * milliseconds turns a stated 45-second reset into a 45ms one and hammers the
+ * limiter for the whole window.
  *
  * Two spellings because the API uses two: a 503 states `retry_after`, while the
- * 429 rate-limit body states `reset_in_seconds`. Both are seconds. A value that
- * is absent, non-numeric or non-positive returns undefined so the caller falls
- * back to its own backoff — a stated wait of 0 is not a reason to hammer.
+ * 429 rate-limit body states `reset_in_seconds`. A value that is absent,
+ * non-numeric or non-positive returns undefined so the caller falls back to its
+ * own backoff — a stated wait of 0 is not a reason to hammer.
  */
 function statedWaitSeconds(body: IDataObject): number | undefined {
 	// Two spellings, one meaning: a 503 states `retry_after`, the 429
@@ -112,6 +117,7 @@ function statedWaitSeconds(body: IDataObject): number | undefined {
 	return undefined;
 }
 
+/** The same wait in MILLISECONDS, for the poll loop's backoff override. */
 function statedRetryAfterMs(error: unknown): number | undefined {
 	const seconds = statedWaitSeconds(responseBodyOf(error));
 	return seconds === undefined ? undefined : seconds * 1000;
@@ -159,9 +165,13 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 					? `${Math.round(wait / 60)} minutes`
 					: `${Math.round(wait / 3600)} hours`;
 
-	const message = readable
-		? `Lenz: ${detail} Resets in ~${readable}.`
-		: `Lenz: ${detail}`;
+	// `detail` is free text from the server and may or may not end in terminal
+	// punctuation — "Daily extract cap reached." and "Rate limit exceeded" are
+	// both plausible. Appending blind runs two sentences together in the
+	// node's headline. quotaMessageFor and capacityMessageFor dodge this by
+	// never appending after `detail`.
+	const sentence = /[.!?]$/.test(detail.trim()) ? detail.trim() : `${detail.trim()}.`;
+	const message = readable ? `Lenz: ${sentence} Resets in ~${readable}.` : `Lenz: ${sentence}`;
 
 	let description = `Rate limited (HTTP 429). Nothing was charged`;
 	description += limit === undefined ? '. ' : `, and the cap is ${limit} calls. `;
@@ -1951,6 +1961,25 @@ export class Lenz implements INodeType {
 					}
 					if (typeof body.credits_remaining === 'number') {
 						json.credits_remaining = body.credits_remaining;
+					}
+					// Rate-limit facts, carried as fields rather than left in the
+					// prose. Without them a 45-second burst limit and a nine-hour
+					// daily cap are indistinguishable to a workflow: same
+					// status_code, same code, and a retry_after that differs only
+					// in magnitude. `limit` names which cap was hit and
+					// `upgrade_url` is where it is raised.
+					//
+					// Branch on the magnitude itself — `{{ $json.retry_after > 300 }}`
+					// — to tell "wait and loop" from "come back tomorrow". The
+					// threshold is deliberately NOT emitted as a boolean: it is
+					// this node's judgement about Wait nodes, not a fact the API
+					// stated, and baking it into the output would freeze it into
+					// the contract.
+					if (typeof body.limit === 'number') {
+						json.limit = body.limit;
+					}
+					if (typeof body.upgrade_url === 'string' && body.upgrade_url) {
+						json.upgrade_url = body.upgrade_url;
 					}
 					const typed =
 						quotaMessageFor(error) ?? capacityMessageFor(error) ?? rateLimitMessageFor(error);
