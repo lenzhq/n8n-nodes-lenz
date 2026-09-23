@@ -2083,8 +2083,15 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		// The 503 advice copied verbatim would park an execution until
 		// midnight UTC, which is worse than failing.
 		const err = await expectRateLimitError(dailyCap);
-		expect(err.description).toContain('too long for a Wait node');
+		// Asserted on what the advice tells the user to DO, not on a phrase.
+		// The earlier wording claimed a Wait node "holds the execution open",
+		// which overstated n8n's internals — it offloads long waits — so the
+		// reason changed while the advice did not.
+		expect(err.description).toContain('too long to wait inside a workflow');
+		expect(err.description).toContain('Re-run the workflow after the reset');
 		expect(err.description).toContain('https://lenz.io/plans');
+		// And it must not send them to the Wait-node loop.
+		expect(err.description).not.toContain('Wait node set');
 	});
 
 	it('DOES prescribe the Wait-node loop for a short burst limit', async () => {
@@ -2140,6 +2147,46 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 	});
 
 
+	it('does NOT put a day-long cap reset in retry_after, so old workflows still fail fast', async () => {
+		// The regression this split exists to prevent. A workflow already wired
+		// to the documented pattern (error output -> Wait `{{ $json.retry_after }}`
+		// -> loop) got `undefined` here before 429 handling existed, and failed
+		// fast. Emitting 32400 would have made it park for nine hours with no
+		// warning and nothing to branch on — and docs cannot reach a workflow
+		// already saved on someone's instance.
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(429, dailyCap);
+			},
+			true, // continueOnFail
+		);
+
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('retry_after');
+		expect(json.resets_in_seconds).toBe(32400);
+	});
+
+	it('does not blame the user plan for a 429 that never reached Lenz', async () => {
+		// A CDN, WAF or egress throttle answers 429 with no JSON body. Reporting
+		// that as "raise your Lenz cap", with a billing link, names the wrong
+		// cause and sells a fix for a problem they do not have.
+		const err = await expectRateLimitError({});
+		expect(err.message).toContain('before it reached Lenz');
+		expect(err.description).not.toContain('stated limit');
+		expect(err.httpCode).toBe('429');
+	});
+
+	it('does not render an empty detail as a bare full stop', async () => {
+		const err = await expectRateLimitError({
+			detail: '',
+			code: 'rate_limited',
+			reset_in_seconds: 45,
+		});
+		expect(err.message).not.toContain('Lenz: .');
+		expect(err.message).toContain('Rate limit reached');
+	});
+
 	it('carries limit and upgrade_url so a workflow can tell which cap it hit', async () => {
 		// Without these, a 45-second burst limit and a nine-hour daily cap are
 		// indistinguishable on the wire: same status_code, same code, and a
@@ -2157,7 +2204,7 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		const json = output[0].json as IDataObject;
 		expect(json.limit).toBe(1000);
 		expect(json.upgrade_url).toBe('https://lenz.io/plans');
-		expect(json.retry_after).toBe(32400);
+		expect(json.resets_in_seconds).toBe(32400);
 	});
 
 	it('does not run two sentences together when detail lacks punctuation', async () => {

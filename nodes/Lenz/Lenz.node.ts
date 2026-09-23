@@ -123,6 +123,17 @@ function statedRetryAfterMs(error: unknown): number | undefined {
 	return seconds === undefined ? undefined : seconds * 1000;
 }
 
+/**
+ * Bound a stated wait to something a poll loop can afford to honour.
+ *
+ * Declared beside its only caller's intent rather than inline: the ceiling is
+ * the point, not an implementation detail. See MAX_STATED_POLL_WAIT_SECONDS.
+ */
+function cappedPollWaitMs(ms: number | undefined): number | undefined {
+	if (ms === undefined) return undefined;
+	return Math.min(ms, MAX_STATED_POLL_WAIT_SECONDS * 1000);
+}
+
 // Above this, telling someone to park a workflow in a Wait node is bad advice
 // rather than good advice with a long number in it. The /extract daily cap
 // resets at 00:00 UTC, so `reset_in_seconds` can be into the tens of
@@ -149,9 +160,19 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 	if (statusCodeOf(error) !== 429) return undefined;
 
 	const body = responseBodyOf(error);
-	const detail = typeof body.detail === 'string' ? body.detail : 'Rate limit reached.';
+	// Is this Lenz's own rate limiter, or something in front of it? A CDN, a
+	// WAF, a reverse proxy or an egress throttle all answer 429 with no JSON
+	// body at all. Telling that user their Lenz plan is too small — and
+	// pointing them at a billing page — names the wrong cause and sells them a
+	// fix for a problem they do not have. capacityMessageFor already gates on
+	// its typed code for the same reason; this one used to take any 429.
+	const isLenzLimit = body.code === 'rate_limited';
+	const rawDetail = typeof body.detail === 'string' ? body.detail.trim() : '';
+	const detail =
+		rawDetail ||
+		(isLenzLimit ? 'Rate limit reached.' : 'The request was rate limited before it reached Lenz.');
 	const wait = statedWaitSeconds(body);
-	const limit = typeof body.limit === 'number' ? body.limit : undefined;
+	const limit = isLenzLimit && typeof body.limit === 'number' ? body.limit : undefined;
 	const upgradeUrl = typeof body.upgrade_url === 'string' ? body.upgrade_url : PLANS_URL;
 
 	// Minutes and hours, not four- or five-digit seconds. `reset_in_seconds`
@@ -168,13 +189,17 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 	// `detail` is free text from the server and may or may not end in terminal
 	// punctuation — "Daily extract cap reached." and "Rate limit exceeded" are
 	// both plausible. Appending blind runs two sentences together in the
-	// node's headline. quotaMessageFor and capacityMessageFor dodge this by
-	// never appending after `detail`.
-	const sentence = /[.!?]$/.test(detail.trim()) ? detail.trim() : `${detail.trim()}.`;
+	// node's headline. (An empty-string detail is handled above, by falling
+	// back rather than trusting typeof: `typeof '' === 'string'` is true, and
+	// it rendered a headline of "Lenz: .")
+	const sentence = /[.!?]$/.test(detail) ? detail : `${detail}.`;
 	const message = readable ? `Lenz: ${sentence} Resets in ~${readable}.` : `Lenz: ${sentence}`;
 
 	let description = `Rate limited (HTTP 429). Nothing was charged`;
-	description += limit === undefined ? '. ' : `, and the cap is ${limit} calls. `;
+	// `limit` without its window is ambiguous — 60 could be per minute or in
+	// total, and the API does not say which — so it is reported as the stated
+	// value rather than described as an allowance.
+	description += limit === undefined ? '. ' : `, and the stated limit is ${limit}. `;
 	if (wait !== undefined && wait <= WAIT_NODE_VIABLE_SECONDS) {
 		description +=
 			`Wait ~${readable} and submit again: send this node's error output into a Wait node ` +
@@ -183,7 +208,8 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 		// The honest version. A Wait node here would hold the execution open
 		// for the rest of the day, which is worse than simply failing.
 		description +=
-			`That is too long for a Wait node — it would hold this execution open the whole time. ` +
+			`That is too long to wait inside a workflow: the execution stays pending for hours, ` +
+			`where an execution timeout or a Cloud duration limit can cancel it before the cap clears. ` +
 			`Re-run the workflow after the reset, schedule it for then, or raise the cap: ${upgradeUrl}`;
 	} else {
 		description += `Retry later, or raise the cap: ${upgradeUrl}`;
@@ -276,7 +302,11 @@ function quotaMessageFor(error: unknown): { message: string; description: string
 	if (statusCodeOf(error) !== 402) return undefined;
 
 	const body = responseBodyOf(error);
-	const detail = typeof body.detail === 'string' ? body.detail : 'No remaining Lenz credits.';
+	// Truthiness on the trimmed value, not typeof: `typeof '' === 'string'`, so
+	// an empty detail passed straight through and produced a headline of
+	// "Lenz: ".
+	const detail =
+		(typeof body.detail === 'string' ? body.detail.trim() : '') || 'No remaining Lenz credits.';
 	const upgradeUrl = typeof body.upgrade_url === 'string' ? body.upgrade_url : PLANS_URL;
 
 	// `cost` and `credits_remaining` are in CREDITS; `remaining` is in the
@@ -580,8 +610,17 @@ function mapProgress(progress: unknown): IDataObject {
 // absent and keep your own backoff." A stated 0 would be a hot loop and a
 // stated hour would outrun Max Wait; falling back to the ladder over-polls
 // rather than under-polls, which is the failure mode that cannot lose a
-// verdict. The 429 path (statedRetryAfterMs) deliberately has no ceiling: a
-// limiter stating 90s means 90s, and sleeping less just re-trips it.
+// verdict.
+//
+// The same ceiling now bounds a poll 429. It used to have none, on the
+// reasoning that "a limiter stating 90s means 90s" — which held only while
+// 429 waits were assumed to be seconds. They are not: the /extract daily cap
+// states `reset_in_seconds` up to a full day. Unbounded, one 429 on the first
+// poll of an already-charged Verify slept the entire remaining Max Wait in a
+// single sleep, polled once at the deadline, and reported `timeout` for a
+// verification that had finished minutes in. Respecting a limiter is not worth
+// losing the thing the caller paid for; over-polling a limiter that answers
+// 429 costs nothing, because a 429 is retried rather than thrown.
 const MAX_STATED_POLL_WAIT_SECONDS = 60;
 
 function statedPollAfterMs(progress: unknown): number | undefined {
@@ -1461,10 +1500,15 @@ export class Lenz implements INodeType {
 								// A 429 has told us when the limiter reopens. Our own
 								// 2/4/8s ladder is what tripped it, so returning on that
 								// ladder just trips it again and burns the whole window
-								// on retries that cannot succeed. waitForNextPoll still
-								// clamps this to the deadline.
+								// on retries that cannot succeed.
+								//
+								// Capped at MAX_STATED_POLL_WAIT_SECONDS: a daily-cap
+								// 429 states a reset hours away, and sleeping that
+								// inside the poll loop abandons a verification the
+								// caller has already been charged for. waitForNextPoll
+								// clamps to the deadline on top of this.
 								const statedWait =
-									code === 429 ? statedRetryAfterMs(pollError) : undefined;
+									code === 429 ? cappedPollWaitMs(statedRetryAfterMs(pollError)) : undefined;
 								if (!(await waitForNextPoll(pollIdx, deadline, statedWait))) {
 									break;
 								}
@@ -1944,9 +1988,25 @@ export class Lenz implements INodeType {
 					// `body.retry_after` alone — a key a 429 does not carry, so
 					// the documented Wait-node recovery got `undefined` on the
 					// one refusal a free, daily-capped operation produces most.
-					const retryAfter = statedWaitSeconds(body);
-					if (retryAfter !== undefined) {
-						json.retry_after = retryAfter;
+					//
+					// `retry_after` keeps its documented meaning: a wait you can
+					// actually put in a Wait node. A daily-cap reset hours away
+					// is NOT that, and emitting it here would silently change
+					// what deployed workflows do — one already wired to the
+					// documented pattern got `undefined` on a 429 and failed
+					// fast, and would now park for most of a day with no
+					// warning and nothing to branch on. Docs cannot reach a
+					// workflow already saved on someone's instance; the field
+					// shape can. A long reset travels as `resets_in_seconds`
+					// instead, so the information is still there for anyone who
+					// wants it and absent for anyone who would misuse it.
+					const statedWait = statedWaitSeconds(body);
+					if (statedWait !== undefined) {
+						if (statedWait <= WAIT_NODE_VIABLE_SECONDS) {
+							json.retry_after = statedWait;
+						} else {
+							json.resets_in_seconds = statedWait;
+						}
 					}
 					// The same two numbers the 402 message quotes, carried as
 					// fields rather than prose. A workflow that tops up

@@ -247,18 +247,17 @@ error output into a **Wait** node set to `{{ $json.retry_after }}` seconds, then
 loop back into the Lenz node. Only add this to unattended/scheduled workflows;
 for an interactive one, let it fail.
 
-**Rate limits are NOT the same shape, and the Wait loop above is wrong for
-them.** A refusal can also be HTTP 429 — `extract` is free and capped per
-account per day, so it is the one a busy workflow meets. It populates the same
-`retry_after` field, but the value is however long until the cap resets, which
-for the daily cap is up to a full day. Wiring `{{ $json.retry_after }}` into a
-Wait node unconditionally therefore parks the execution for hours.
+**Rate limits are a different shape.** A refusal can also be HTTP 429 —
+`extract` is free and capped per account per day, so it is the one a busy
+workflow meets. A short rate limit sets `retry_after` and the Wait loop above
+is correct for it. A daily cap does NOT set `retry_after`: it sets
+`resets_in_seconds`, which can be most of a day, precisely so that a Wait node
+wired to `{{ $json.retry_after }}` cannot silently park the execution for
+hours.
 
-If you build a recovery loop at all, guard it on the magnitude: an **IF** node
-on `{{ $json.retry_after > 300 }}` — the true branch means come back later
-(fail the run, or schedule it), the false branch is the Wait-and-loop above.
-For a scheduled workflow the simplest correct answer to a daily cap is to let
-the run fail and let the schedule retry it, not to hold an execution open.
+So do not wire a Wait node to `resets_in_seconds`. For a scheduled workflow the
+correct answer to a daily cap is to let the run fail and let the schedule retry
+it later. Add an error branch for it only if the user asked for one.
 
 ## Workflow JSON shape
 

@@ -177,14 +177,17 @@ So the Wait node has a number to read, the error output carries the refusal as f
 
 | Field | What it says |
 |---|---|
-| `retry_after` | Seconds until the refusal clears. Present on **429** and **503** only; a 402 has nothing to wait for, so it is absent rather than zero. Safe to point a Wait node at for a 503, but **check the magnitude first on a 429** — see [Rate limits](#rate-limits-http-429), where it can be most of a day |
+| `retry_after` | Seconds to wait before submitting again — safe to point a Wait node's duration at. Emitted only when the wait is short enough to be worth waiting (a 503, or a short rate limit); a long cap reset comes back as `resets_in_seconds` instead, and a 402 has nothing to wait for |
 | `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `rate_limited`, `no_credits` |
 | `status_code` | The HTTP status, e.g. `429`, `503` |
 | `cost` | Credits the refused call needed, present only on an out-of-credits refusal |
 | `credits_remaining` | Credits the account holds — `0` is a real value and is reported, not dropped |
 | `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing, capacity or rate-limit refusal |
-| `limit` | The cap that was hit, present only on a rate-limit refusal |
-| `upgrade_url` | Where that cap is raised, present on rate-limit and out-of-credits refusals |
+| `resets_in_seconds` | Seconds until a rate limit clears, when that is too long to sit in a Wait node — see [Rate limits](#rate-limits-http-429) |
+| `limit` | The limit the API stated, on a Lenz rate-limit refusal |
+| `upgrade_url` | Where that limit is raised |
+
+Each of these is emitted when the API's response carries it, so treat the "when" column as what today's API does rather than as a guarantee.
 
 `cost` and `credits_remaining` let an **IF** node tell a shortfall from an empty balance without reading the prose: `{{ $json.credits_remaining }}` above zero is one top-up away, zero is a plan decision.
 
@@ -196,10 +199,10 @@ So the Wait node has a number to read, the error output carries the refusal as f
 
 How long that is decides what to do with it, and the node's message says which:
 
-- **A short reset** (roughly five minutes or less) is the Wait-node loop described above — error output into a **Wait** node set to `{{ $json.retry_after }}`, looped back.
-- **The daily cap** resets at midnight UTC, so `retry_after` can be tens of thousands of seconds. A Wait node would hold the execution open for most of a day, which is worse than failing: re-run the workflow after the reset, schedule it for then, or raise the cap.
+- **A short reset** (roughly five minutes or less) arrives as `retry_after`, and is the Wait-node loop described above — error output into a **Wait** node set to `{{ $json.retry_after }}`, looped back.
+- **The daily cap** resets at midnight UTC, so the wait can be tens of thousands of seconds. That arrives as **`resets_in_seconds`**, and deliberately *not* as `retry_after`: waiting it out inside a workflow leaves the execution pending for hours, where an execution timeout or a Cloud duration limit can cancel it before the cap clears. Re-run the workflow after the reset, schedule it for then, or raise the cap.
 
-Branch on the magnitude rather than reading the prose: `{{ $json.retry_after > 300 }}` separates "wait and loop" from "come back later". `limit` and `upgrade_url` come through as fields too.
+Splitting the two keys is what keeps `retry_after` meaning what this table says it means — a duration you can hand to a Wait node. A workflow already built on the documented pattern therefore keeps failing fast on a daily cap instead of silently parking for the rest of the day. To handle the long case, read `resets_in_seconds` explicitly.
 
 Note that the wait is read from the response body, not from the `Retry-After` header. The API sends the header, but n8n wraps every failed request in a `NodeApiError` that keeps the parsed body and discards the response object, so by the time the node sees the error the header is gone.
 
