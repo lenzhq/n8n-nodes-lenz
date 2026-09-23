@@ -2024,3 +2024,132 @@ describe('Lenz node - Verify poll resilience', () => {
 		}
 	});
 });
+
+describe('Lenz node - rate limit (HTTP 429)', () => {
+	// The /extract daily cap, and any other rate limit. Extract Claims is free
+	// and capped per account per day, so this is the refusal a busy workflow
+	// meets most — and the one the node had no typed handling for at all: it
+	// arrived as n8n's stock "Request failed with status code 429", and the
+	// error output carried no `retry_after`, because the branch read
+	// `body.retry_after` and a 429 states `reset_in_seconds` instead.
+	//
+	// The real body shape, per the API: { detail, code, limit,
+	// reset_in_seconds, upgrade_url }.
+	const dailyCap = {
+		detail: 'Daily extract cap reached.',
+		code: 'rate_limited',
+		limit: 1000,
+		reset_in_seconds: 32400,
+		upgrade_url: 'https://lenz.io/plans',
+	};
+
+	const burst = {
+		detail: 'Too many requests.',
+		code: 'rate_limited',
+		limit: 60,
+		reset_in_seconds: 45,
+	};
+
+	async function expectRateLimitError(body: Record<string, unknown>) {
+		const { ctx } = createContext({ operation: 'extract', text: 'Some text' }, () => {
+			throw apiError(429, body);
+		});
+		const err = await new Lenz().execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(err).toBeInstanceOf(NodeApiError);
+		return err as NodeApiError;
+	}
+
+	it('names the cap, the reset and that nothing was charged', async () => {
+		const err = await expectRateLimitError(dailyCap);
+		expect(err.message).toContain('Daily extract cap reached');
+		expect(err.description).toContain('Nothing was charged');
+		expect(err.description).toContain('1000');
+		expect(err.httpCode).toBe('429');
+		// Not n8n's stock wording, which named none of the above.
+		expect(err.message).not.toContain('Request failed with status code');
+	});
+
+	it('reports a long reset in hours, not five digits of seconds', async () => {
+		const err = await expectRateLimitError(dailyCap);
+		// 32400s is 9 hours. Nobody reads that as a number of seconds.
+		expect(err.message).toContain('9 hours');
+		expect(err.message).not.toContain('32400');
+	});
+
+	it('does NOT prescribe a Wait node for a reset that lasts most of a day', async () => {
+		// The 503 advice copied verbatim would park an execution until
+		// midnight UTC, which is worse than failing.
+		const err = await expectRateLimitError(dailyCap);
+		expect(err.description).toContain('too long for a Wait node');
+		expect(err.description).toContain('https://lenz.io/plans');
+	});
+
+	it('DOES prescribe the Wait-node loop for a short burst limit', async () => {
+		const err = await expectRateLimitError(burst);
+		expect(err.message).toContain('45s');
+		expect(err.description).toContain('Wait node');
+		expect(err.description).toContain('retry_after');
+	});
+
+	it('carries retry_after on the error output, read from reset_in_seconds', async () => {
+		// The headline bug: the documented Wait-node recovery fed the Wait node
+		// `undefined`, because the error output only ever read `retry_after`.
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(429, burst);
+			},
+			true, // continueOnFail
+		);
+
+		const json = output[0].json as IDataObject;
+		expect(json.retry_after).toBe(45);
+		expect(json.status_code).toBe(429);
+		expect(json.code).toBe('rate_limited');
+		expect(json.error_message).toContain('Too many requests');
+		expect(json.error_description).toContain('Nothing was charged');
+	});
+
+	it('still carries the 503 spelling, so capacity refusals are unaffected', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'A claim' },
+			() => {
+				throw apiError(503, { code: 'capacity', retry_after: 90 });
+			},
+			true, // continueOnFail
+		);
+		expect((output[0].json as IDataObject).retry_after).toBe(90);
+	});
+
+	it('omits retry_after when the body states no wait, rather than inventing one', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(429, { detail: 'Slow down.', code: 'rate_limited' });
+			},
+			true, // continueOnFail
+		);
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('retry_after');
+		// A Wait node reading an absent key gets nothing, which is honest; a
+		// fabricated 0 would loop instantly and re-trip the limiter.
+		expect(json.error_description).toContain('Retry later');
+	});
+
+	it('leaves a 402 without a retry_after, since topping up is not a wait', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'A claim' },
+			() => {
+				throw apiError(402, { detail: 'No credits.', cost: 10, credits_remaining: 4 });
+			},
+			true, // continueOnFail
+		);
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('retry_after');
+		expect(json.cost).toBe(10);
+		expect(json.credits_remaining).toBe(4);
+	});
+});

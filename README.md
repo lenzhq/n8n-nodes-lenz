@@ -177,14 +177,25 @@ So the Wait node has a number to read, the error output carries the refusal as f
 
 | Field | What it says |
 |---|---|
-| `retry_after` | Seconds to wait before submitting again — point the Wait node's duration at `{{ $json.retry_after }}` |
-| `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `no_credits` |
-| `status_code` | The HTTP status, e.g. `503` |
+| `retry_after` | Seconds to wait before submitting again — point the Wait node's duration at `{{ $json.retry_after }}`. Present on **429** and **503** only; a 402 has nothing to wait for, so it is absent rather than zero |
+| `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `rate_limited`, `no_credits` |
+| `status_code` | The HTTP status, e.g. `429`, `503` |
 | `cost` | Credits the refused call needed, present only on an out-of-credits refusal |
 | `credits_remaining` | Credits the account holds — `0` is a real value and is reported, not dropped |
-| `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing or capacity refusal |
+| `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing, capacity or rate-limit refusal |
 
 `cost` and `credits_remaining` let an **IF** node tell a shortfall from an empty balance without reading the prose: `{{ $json.credits_remaining }}` above zero is one top-up away, zero is a plan decision.
+
+### Rate limits (HTTP 429)
+
+**Extract Claims** is free and capped per account per day (resetting 00:00 UTC), so a 429 is the refusal a busy workflow is most likely to meet. Nothing is charged for a refused call. The body states `reset_in_seconds`, which the node reports as `retry_after`.
+
+How long that is decides what to do with it, and the node's message says which:
+
+- **A short reset** (roughly five minutes or less) is the Wait-node loop described above — error output into a **Wait** node set to `{{ $json.retry_after }}`, looped back.
+- **The daily cap** resets at midnight UTC, so `retry_after` can be tens of thousands of seconds. A Wait node would hold the execution open for most of a day, which is worse than failing: re-run the workflow after the reset, schedule it for then, or raise the cap.
+
+Note that the wait is read from the response body, not from the `Retry-After` header. The API sends the header, but n8n wraps every failed request in a `NodeApiError` that keeps the parsed body and discards the response object, so by the time the node sees the error the header is gone.
 
 `error` keeps the raw message it always carried, so existing workflows reading it are unaffected.
 

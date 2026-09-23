@@ -93,15 +93,93 @@ function submittedReceipt(taskId: string): string {
  * is absent, non-numeric or non-positive returns undefined so the caller falls
  * back to its own backoff — a stated wait of 0 is not a reason to hammer.
  */
-function statedRetryAfterMs(error: unknown): number | undefined {
-	const body = responseBodyOf(error);
+function statedWaitSeconds(body: IDataObject): number | undefined {
+	// Two spellings, one meaning: a 503 states `retry_after`, the 429
+	// rate-limit body states `reset_in_seconds`. Read from the BODY and never
+	// from a header — the API sends `Retry-After` on a 429, but by the time the
+	// error reaches this node the header is gone. n8n's
+	// httpRequestWithAuthentication wraps every failure in a NodeApiError, and
+	// that constructor keeps the parsed body (on `context.data`) and the status
+	// while discarding `response` entirely. Verified against n8n-workflow:
+	// walking the caught error finds no header anywhere on it. A header
+	// fallback here would be code that can never run.
 	for (const raw of [body.retry_after, body.reset_in_seconds]) {
 		const seconds = Number(raw);
 		if (Number.isFinite(seconds) && seconds > 0) {
-			return Math.ceil(seconds) * 1000;
+			return Math.ceil(seconds);
 		}
 	}
 	return undefined;
+}
+
+function statedRetryAfterMs(error: unknown): number | undefined {
+	const seconds = statedWaitSeconds(responseBodyOf(error));
+	return seconds === undefined ? undefined : seconds * 1000;
+}
+
+// Above this, telling someone to park a workflow in a Wait node is bad advice
+// rather than good advice with a long number in it. The /extract daily cap
+// resets at 00:00 UTC, so `reset_in_seconds` can be into the tens of
+// thousands; a Wait node set to that holds an execution open for most of a
+// day. Under it — a burst limit clearing in seconds or minutes — the Wait-node
+// loop is exactly right, which is why the threshold exists rather than a flat
+// rule either way.
+const WAIT_NODE_VIABLE_SECONDS = 300;
+
+/**
+ * Build the user-facing text for a rate-limit rejection, or undefined if this
+ * error isn't one.
+ *
+ * HTTP 429, body `{ detail, code, limit, reset_in_seconds, upgrade_url }`. The
+ * one users actually meet is the /extract daily cap: Extract Claims is free
+ * and capped per account per day, so it is the refusal most workflows will hit
+ * and the only one here that costs nothing to have triggered.
+ *
+ * Deliberately NOT worded like the 503. Both are "come back later", but a 503
+ * clears in ~90s and a daily cap clears at midnight UTC, so the same advice
+ * would be right in one case and absurd in the other.
+ */
+function rateLimitMessageFor(error: unknown): { message: string; description: string } | undefined {
+	if (statusCodeOf(error) !== 429) return undefined;
+
+	const body = responseBodyOf(error);
+	const detail = typeof body.detail === 'string' ? body.detail : 'Rate limit reached.';
+	const wait = statedWaitSeconds(body);
+	const limit = typeof body.limit === 'number' ? body.limit : undefined;
+	const upgradeUrl = typeof body.upgrade_url === 'string' ? body.upgrade_url : PLANS_URL;
+
+	// Minutes and hours, not four- or five-digit seconds. `reset_in_seconds`
+	// for a daily cap is a number nobody can read at a glance.
+	const readable =
+		wait === undefined
+			? undefined
+			: wait < 120
+				? `${wait}s`
+				: wait < 7200
+					? `${Math.round(wait / 60)} minutes`
+					: `${Math.round(wait / 3600)} hours`;
+
+	const message = readable
+		? `Lenz: ${detail} Resets in ~${readable}.`
+		: `Lenz: ${detail}`;
+
+	let description = `Rate limited (HTTP 429). Nothing was charged`;
+	description += limit === undefined ? '. ' : `, and the cap is ${limit} calls. `;
+	if (wait !== undefined && wait <= WAIT_NODE_VIABLE_SECONDS) {
+		description +=
+			`Wait ~${readable} and submit again: send this node's error output into a Wait node ` +
+			`set to {{ $json.retry_after }} and loop it back.`;
+	} else if (wait !== undefined) {
+		// The honest version. A Wait node here would hold the execution open
+		// for the rest of the day, which is worse than simply failing.
+		description +=
+			`That is too long for a Wait node — it would hold this execution open the whole time. ` +
+			`Re-run the workflow after the reset, schedule it for then, or raise the cap: ${upgradeUrl}`;
+	} else {
+		description += `Retry later, or raise the cap: ${upgradeUrl}`;
+	}
+
+	return { message, description };
 }
 
 // Server-side cap on POST /verify/batch and POST /verify/{task_id}/select.
@@ -1852,9 +1930,13 @@ export class Lenz implements INodeType {
 					if (typeof body.code === 'string' && body.code) {
 						json.code = body.code;
 					}
-					const retryAfter = Number(body.retry_after);
-					if (Number.isFinite(retryAfter) && retryAfter > 0) {
-						json.retry_after = Math.ceil(retryAfter);
+					// Both spellings, via the shared parser. This used to read
+					// `body.retry_after` alone — a key a 429 does not carry, so
+					// the documented Wait-node recovery got `undefined` on the
+					// one refusal a free, daily-capped operation produces most.
+					const retryAfter = statedWaitSeconds(body);
+					if (retryAfter !== undefined) {
+						json.retry_after = retryAfter;
 					}
 					// The same two numbers the 402 message quotes, carried as
 					// fields rather than prose. A workflow that tops up
@@ -1870,7 +1952,8 @@ export class Lenz implements INodeType {
 					if (typeof body.credits_remaining === 'number') {
 						json.credits_remaining = body.credits_remaining;
 					}
-					const typed = quotaMessageFor(error) ?? capacityMessageFor(error);
+					const typed =
+						quotaMessageFor(error) ?? capacityMessageFor(error) ?? rateLimitMessageFor(error);
 					if (typed) {
 						json.error_message = typed.message;
 						json.error_description = typed.description;
@@ -1931,6 +2014,15 @@ export class Lenz implements INodeType {
 				const capacity = capacityMessageFor(error);
 				if (capacity) {
 					throw describeApiError(this.getNode(), error, itemIndex, capacity, '503');
+				}
+
+				// Rate limited (HTTP 429). Left to n8n's stock text this read
+				// "Request failed with status code 429", which names neither
+				// the cap that was hit, nor when it clears, nor the fact that
+				// nothing was charged for the refusal.
+				const rateLimit = rateLimitMessageFor(error);
+				if (rateLimit) {
+					throw describeApiError(this.getNode(), error, itemIndex, rateLimit, '429');
 				}
 
 				// Pass the ORIGINAL error object through. NodeApiError derives
