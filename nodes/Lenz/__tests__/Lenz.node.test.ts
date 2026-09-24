@@ -2023,6 +2023,50 @@ describe('Lenz node - Verify poll resilience', () => {
 			clock.restore();
 		}
 	});
+
+	// A poll 429 carrying a daily-cap reset. The status endpoint can answer with
+	// the same limiter body the /extract cap uses, and `reset_in_seconds` there
+	// runs to hours. The loop honours a stated 429 wait so as not to re-trip a
+	// limiter on its own 2/4/8s ladder — but uncapped, "honour" meant sleeping
+	// the whole remaining Max Wait in one go on a verification already charged.
+	const dailyCapPoll = () => {
+		throw apiError(429, { detail: 'Rate limited.', code: 'rate_limited', reset_in_seconds: 32400 });
+	};
+
+	it('caps a stated poll 429 wait instead of sleeping away the window', async () => {
+		const clock = sleepingClock();
+		try {
+			await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 900 },
+				polling([dailyCapPoll, completed]),
+			);
+			// 60s, not ~900s. Uncapped, this sleep was min(32400s, remaining),
+			// i.e. the entire Max Wait: a verdict ready a minute in was not seen
+			// for fifteen.
+			expect(sleepMock.mock.calls[0][0]).toBe(60000);
+		} finally {
+			clock.restore();
+		}
+	});
+
+	it('keeps polling through a persistent 429 and still finds the verdict', async () => {
+		const clock = sleepingClock();
+		try {
+			const { output, calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 900 },
+				polling([dailyCapPoll, dailyCapPoll, dailyCapPoll, completed]),
+			);
+			// The sharper failure. Uncapped, the first 429 slept the whole window,
+			// the single final read landed on the SECOND 429, the deadline was
+			// spent, and the result was `timeout` — telling the caller to fetch
+			// later a verdict the node could have returned. Capped, it reads
+			// every minute and gets there.
+			expect((output[0].json as IDataObject).status).toBe('completed');
+			expect(pollCount(calls)).toBe(4);
+		} finally {
+			clock.restore();
+		}
+	});
 });
 
 describe('Lenz node - rate limit (HTTP 429)', () => {
