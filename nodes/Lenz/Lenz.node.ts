@@ -333,19 +333,12 @@ function mapCitations(sources: unknown): IDataObject[] {
 		}));
 }
 
-// A needs_input interrupt is resolvable for the two framing reasons (via the
-// Select Claims operation) but not for duplicate_found, which has no offered
-// claim set — so each reason gets its own next step rather than one generic
-// "rephrase and re-run".
+// The one needs_input reason is multi_claim, resolved with the Select Claims
+// operation. Any other reason gets a generic message rather than a next step
+// the API may not honour.
 function needsInputMessage(reason?: string): string {
 	if (reason === 'multi_claim') {
 		return 'The text contains several distinct claims. Pick one or more of "claims" and run the Select Claims operation with this task ID.';
-	}
-	if (reason === 'clarification_required') {
-		return 'This claim is ambiguous. Pick one of the readings in "candidates" and run the Select Claims operation with this task ID.';
-	}
-	if (reason === 'duplicate_found') {
-		return 'A closely matching verification already exists — see "similar_claims". Reuse one of those verification IDs, or rephrase the claim to force a fresh check.';
 	}
 	return 'This verification needs caller input before it can continue.';
 }
@@ -430,8 +423,11 @@ function mapVerifyStatus(status: IDataObject, taskId: string, includeAudit: bool
 			reason: reason ?? null,
 			task_id: taskId,
 			claims: status.claims ?? [],
-			candidates: status.candidates ?? [],
-			similar_claims: status.similar_claims ?? [],
+			// Deprecated: always empty. The API no longer sends either field;
+			// both keys stay so saved workflows that read them keep working.
+			// Removal planned 2026-11-29.
+			candidates: [],
+			similar_claims: [],
 			message: needsInputMessage(reason),
 		};
 	}
@@ -889,7 +885,7 @@ export class Lenz implements INodeType {
 						],
 					},
 				},
-				description: 'The verification_id from a successful Verify (Deep) result. A timed-out or needs-clarification result returns a task_id instead, which won\'t work here.',
+				description: 'The verification_id from a successful Verify (Deep) result. A timed-out or needs-input result returns a task_id instead, which won\'t work here.',
 			},
 			{
 				displayName: 'Question',
@@ -923,7 +919,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['select'] },
 				},
-				description: 'Claim texts copied verbatim from the paused task\'s "claims" or "candidates" list. Anything that was not offered is rejected, and a paused task stays open for 24 hours from submission.',
+				description: 'Claim texts copied verbatim from the paused task\'s "claims" list. Anything that was not offered is rejected, and a paused task stays open for 24 hours from submission.',
 			},
 			{
 				displayName: 'Wait for Completion',
@@ -1611,7 +1607,7 @@ export class Lenz implements INodeType {
 					const claims = (result.claims ?? []) as IDataObject[];
 					if (!claims.length) {
 						responseData = {
-							status: result.error_code === 'ambiguous' ? 'ambiguous' : 'no_claim',
+							status: 'no_claim',
 							message: result.error ?? 'No verifiable factual claim was detected.',
 							candidate_claims: result.candidate_claims ?? [],
 						};
