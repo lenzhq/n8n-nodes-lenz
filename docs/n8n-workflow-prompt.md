@@ -158,9 +158,9 @@ Out** node on the field `claims` after the Lenz node, then branch on
 `{{ $json.passed }}`. If you only care whether *everything* passed, use a Code
 or Filter node over `claims` instead. Choose deliberately and say which you chose.
 
-`assess` can also return `status: "no_claim"` or `status: "ambiguous"` with
-`candidate_claims` — there was nothing checkable in the text. Handle it rather
-than letting it fall through the `passed` branch as a silent false.
+`assess` can also return `status: "no_claim"` — there was nothing checkable in
+the text. Handle it rather than letting it fall through the `passed` branch as
+a silent false.
 
 **`extract`** returns the claims as **plain strings**, under a different field
 name from `assess`, with a different set of status values:
@@ -227,14 +227,14 @@ review:
 ```
 
 The status filter is not optional padding. When `assess` finds nothing it
-returns `no_claim` or `ambiguous` **with no `claims` key at all**, and Split Out
+returns `no_claim` **with no `claims` key at all**, and Split Out
 throws on a missing field — so without the first IF that item fails the whole
 execution rather than routing anywhere.
 
-**Ambiguous input (verify only).** `verify` pauses instead of guessing when the
-text is not one unambiguous claim: `status: "needs_input"` with a `reason` of
-`multi_claim`, `clarification_required`, or `duplicate_found`. The first two are
-resolved by feeding the chosen claim text into `resource: "verification"`,
+**Multi-claim input (verify only).** `verify` pauses instead of guessing when
+the text contains several distinct claims: `status: "needs_input"` with
+`reason: "multi_claim"` and the claims found in `claims`. It is resolved by
+feeding the chosen claim texts into `resource: "verification"`,
 `operation: "select"` with the same `taskId`. Only add this branch if the input
 is genuinely freeform — for a single known claim it is noise.
 
@@ -317,8 +317,8 @@ for an interactive one, let it fail.
      field is `undefined` and every item takes the false branch. A workflow that
      ends in "list my verifications" is finished when it has listed them.
    - **Check `status` BEFORE `passed`, never instead of it.** `passed` is only
-     meaningful once you know a verdict exists. `assess` returns `no_claim` or
-     `ambiguous` with no `claims` array at all, and `verify` returns
+     meaningful once you know a verdict exists. `assess` returns `no_claim`
+     with no `claims` array at all, and `verify` returns
      `needs_input`, `failed`, `timeout` or `queued` whose `passed` is `null`
      (`queued` omits it entirely). Null is falsy, so branching straight on
      `passed` reports every one of those as "the claim is false" — a provider

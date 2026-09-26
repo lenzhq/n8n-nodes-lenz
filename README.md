@@ -36,7 +36,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Get Status** | Polls a submitted verification by `task_id`. Pairs with Verify's **Wait for Completion** toggle and with webhook delivery. |
-| **Select Claims** | Resolves a paused verification (see [Ambiguous and multi-claim input](#ambiguous-and-multi-claim-input)). |
+| **Select Claims** | Resolves a paused verification (see [Multi-claim input](#multi-claim-input)). |
 | **Submit Batch** | Submits up to 20 claims at once without waiting. Returns one item per spawned task. Each claim can override the batch **Depth**, so one batch can mix 5- and 10-credit checks. |
 | **Get** | Retrieves a stored verification report by `verification_id`. |
 | **Get Many** | Lists the verifications stored against this API key, with **Return All** / **Limit**. |
@@ -134,15 +134,13 @@ Ask a grounded question about the evidence behind a Verify (Deep) result, by cha
 3. Set the Verification ID field to an expression referencing the first node's output: `{{ $json.verification_id }}`.
 4. Keep the Question field as a fixed string (e.g. `"What are the main sources supporting this verdict?"`) — it works for whatever claim was just verified, since only the Verification ID needs to change per run.
 
-### Ambiguous and multi-claim input
+### Multi-claim input
 
-Verify pauses rather than guessing when the text isn't a single unambiguous claim. The result comes back with `status: "needs_input"` and a `reason`:
+Verify pauses rather than guessing when the text contains several distinct claims. The result comes back with `status: "needs_input"` and a `reason`:
 
 | `reason` | What the node returns | How to continue |
 |---|---|---|
 | `multi_claim` | `claims` — the distinct claims found in your text | Feed the ones you want into **Select Claims** with the same `task_id` |
-| `clarification_required` | `candidates` — the possible readings of one ambiguous claim | Feed the intended reading into **Select Claims** with the same `task_id` |
-| `duplicate_found` | `similar_claims` — existing verifications that already cover this | Reuse one of those `verification_id`s, or rephrase to force a fresh check |
 
 **Select Claims** spawns one independent verification per selected claim and returns one item each, so you can poll them with **Get Status** or collect them via webhook:
 
