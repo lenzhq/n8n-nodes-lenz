@@ -39,8 +39,16 @@ jobs:
       - name: Run build
         run: 'npm run build'
 
-      - name: Run tests
-        run: 'npm test'
+      # test:ci, not test: it adds --coverage, which is what enforces the
+      # thresholds in jest.config.js. `npm test` is deliberately left bare so
+      # that a focused run — `npm test -- credentials`, `-t '<name>'`,
+      # --watch — is judged only by whether its tests pass. Coverage over a
+      # subset of the suite cannot reach a whole-project floor, so forcing it
+      # on made those runs report every test passing and then exit 1 on a
+      # coverage error, which is a confusing way to tell a developer nothing
+      # is wrong.
+      - name: Run tests with the coverage gate
+        run: 'npm run test:ci'
 
       # The workflow prompt hands an agent literal node types, operation values
       # and parameter names. A stale one produces workflow JSON that pastes as a

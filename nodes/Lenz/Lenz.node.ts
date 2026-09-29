@@ -11,7 +11,11 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
 
-const BASE_URL = 'https://lenz.io/api/v1';
+// Exported so the credential's test can assert it probes the same host the
+// node calls. Without that, the two carry independent copies of the URL and a
+// host change fixes every request while leaving the credential's "Test" button
+// pointing at the old one.
+export const BASE_URL = 'https://lenz.io/api/v1';
 
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
