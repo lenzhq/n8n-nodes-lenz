@@ -200,19 +200,30 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 	// total, and the API does not say which — so it is reported as the stated
 	// value rather than described as an allowance.
 	description += limit === undefined ? '. ' : `, and the stated limit is ${limit}. `;
+	// Upgrade advice only for Lenz's own limiter. A 429 from a CDN, WAF or proxy
+	// in front of Lenz is not lifted by a Lenz plan, so pointing that user at
+	// Lenz billing names the wrong fix — the headline already says the request
+	// never reached Lenz, and the advice must not then contradict it. This used
+	// to gate the headline and `limit` on isLenzLimit but not this line.
+	const raiseCap = isLenzLimit ? `, or raise the cap: ${upgradeUrl}` : '';
 	if (wait !== undefined && wait <= WAIT_NODE_VIABLE_SECONDS) {
 		description +=
 			`Wait ~${readable} and submit again: send this node's error output into a Wait node ` +
 			`set to {{ $json.retry_after }} and loop it back.`;
 	} else if (wait !== undefined) {
-		// The honest version. A Wait node here would hold the execution open
-		// for the rest of the day, which is worse than simply failing.
+		// Too long to wait inside a workflow. Not because a Wait node holds a
+		// worker — n8n offloads long waits — but because the execution sits
+		// pending for hours, where an execution timeout or a Cloud duration
+		// limit can cancel it before the cap clears.
 		description +=
 			`That is too long to wait inside a workflow: the execution stays pending for hours, ` +
 			`where an execution timeout or a Cloud duration limit can cancel it before the cap clears. ` +
-			`Re-run the workflow after the reset, schedule it for then, or raise the cap: ${upgradeUrl}`;
+			`Re-run the workflow after the reset, or schedule it for then${raiseCap}.`;
 	} else {
-		description += `Retry later, or raise the cap: ${upgradeUrl}`;
+		description += isLenzLimit
+			? `Retry later${raiseCap}.`
+			: `Retry later. This limit is not Lenz's own, so a Lenz plan change will not lift it — ` +
+				`check any proxy, firewall or rate limit between n8n and Lenz.`;
 	}
 
 	return { message, description };
@@ -1996,9 +2007,16 @@ export class Lenz implements INodeType {
 					// shape can. A long reset travels as `resets_in_seconds`
 					// instead, so the information is still there for anyone who
 					// wants it and absent for anyone who would misuse it.
+					//
+					// The split is for 429s ONLY. A 503 has always emitted
+					// `retry_after` unconditionally, its message tells the user to
+					// set a Wait node to it, and a capacity wait is never a day-long
+					// cap reset — so splitting it would hand that documented Wait
+					// node `undefined` while the description still said "set to N
+					// seconds". This used to split every status.
 					const statedWait = statedWaitSeconds(body);
 					if (statedWait !== undefined) {
-						if (statedWait <= WAIT_NODE_VIABLE_SECONDS) {
+						if (status !== 429 || statedWait <= WAIT_NODE_VIABLE_SECONDS) {
 							json.retry_after = statedWait;
 						} else {
 							json.resets_in_seconds = statedWait;
@@ -2025,10 +2043,13 @@ export class Lenz implements INodeType {
 					// in magnitude. `limit` names which cap was hit and
 					// `upgrade_url` is where it is raised.
 					//
-					// Branch on the magnitude itself — `{{ $json.retry_after > 300 }}`
-					// — to tell "wait and loop" from "come back tomorrow". The
-					// threshold is deliberately NOT emitted as a boolean: it is
-					// this node's judgement about Wait nodes, not a fact the API
+					// To tell "wait and loop" from "come back tomorrow", branch on
+					// which key is present: `retry_after` means a wait worth
+					// sitting through, `resets_in_seconds` means a cap reset too
+					// long for that. (Not on `retry_after > 300`: a long reset
+					// never reaches `retry_after`, so that condition cannot be
+					// true.) No boolean is emitted for the threshold: it is this
+					// node's judgement about Wait nodes, not a fact the API
 					// stated, and baking it into the output would freeze it into
 					// the contract.
 					if (typeof body.limit === 'number') {

@@ -2193,7 +2193,35 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		const err = await expectRateLimitError({});
 		expect(err.message).toContain('before it reached Lenz');
 		expect(err.description).not.toContain('stated limit');
+		// The half that used to slip through: the headline said "never
+		// reached Lenz" and the description still ended "raise the cap:
+		// https://lenz.io/plans". A plan change cannot lift a CDN's limit.
+		expect(err.description).not.toContain('raise the cap');
+		expect(err.description).not.toContain('lenz.io/plans');
+		expect(err.description).toContain("not Lenz's own");
 		expect(err.httpCode).toBe('429');
+	});
+
+	it('still offers the upgrade path for a Lenz limit that states no wait', async () => {
+		// The mirror, so the gate above cannot pass by never offering it.
+		const err = await expectRateLimitError({ detail: 'Slow down.', code: 'rate_limited' });
+		expect(err.description).toContain('raise the cap');
+	});
+
+	it('keeps retry_after on a long 503 — only a 429 is split', async () => {
+		// A 503 always emitted retry_after, and its own message says to set a
+		// Wait node to it. Splitting it at 300s like a cap reset handed that
+		// documented Wait node `undefined`.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'A claim' },
+			() => {
+				throw apiError(503, { code: 'capacity', retry_after: 400 });
+			},
+			true, // continueOnFail
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.retry_after).toBe(400);
+		expect(json).not.toHaveProperty('resets_in_seconds');
 	});
 
 	it('does not render an empty detail as a bare full stop', async () => {
