@@ -156,17 +156,36 @@ const WAIT_NODE_VIABLE_SECONDS = 300;
  * clears in ~90s and a daily cap clears at midnight UTC, so the same advice
  * would be right in one case and absurd in the other.
  */
+/**
+ * Whether a 429 came from Lenz's own rate limiter rather than something in
+ * front of it.
+ *
+ * A CDN, a WAF, a reverse proxy or an egress throttle answers 429 with no Lenz
+ * body at all. Telling that user their Lenz plan is too small — and pointing
+ * them at a billing page — names the wrong cause and sells a fix for a problem
+ * they do not have.
+ *
+ * ONE answer, used everywhere: by the message's headline, by its advice, and by
+ * which fields the error output carries. It used to be decided separately in
+ * each, which is how a Lenz 429 that lacked `code` got Lenz's own text as the
+ * headline and "this limit is not Lenz's own" in the same message. So it keys
+ * on a Lenz-shaped body — the typed code, or any field of the documented
+ * `{ detail, code, limit, reset_in_seconds, upgrade_url }` — rather than on
+ * `code` alone. A proxy that returns its own JSON `detail` will read as Lenz;
+ * that is the unavoidable edge, and it errs toward the more useful message.
+ */
+function isLenzRateLimit(body: IDataObject): boolean {
+	if (body.code === 'rate_limited') return true;
+	return ['detail', 'reset_in_seconds', 'upgrade_url', 'limit'].some(
+		(k) => body[k] !== undefined && body[k] !== null && body[k] !== '',
+	);
+}
+
 function rateLimitMessageFor(error: unknown): { message: string; description: string } | undefined {
 	if (statusCodeOf(error) !== 429) return undefined;
 
 	const body = responseBodyOf(error);
-	// Is this Lenz's own rate limiter, or something in front of it? A CDN, a
-	// WAF, a reverse proxy or an egress throttle all answer 429 with no JSON
-	// body at all. Telling that user their Lenz plan is too small — and
-	// pointing them at a billing page — names the wrong cause and sells them a
-	// fix for a problem they do not have. capacityMessageFor already gates on
-	// its typed code for the same reason; this one used to take any 429.
-	const isLenzLimit = body.code === 'rate_limited';
+	const isLenzLimit = isLenzRateLimit(body);
 	const rawDetail = typeof body.detail === 'string' ? body.detail.trim() : '';
 	const detail =
 		rawDetail ||
@@ -213,11 +232,16 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 	} else if (wait !== undefined) {
 		// Too long to wait inside a workflow. Not because a Wait node holds a
 		// worker — n8n offloads long waits — but because the execution sits
-		// pending for hours, where an execution timeout or a Cloud duration
-		// limit can cancel it before the cap clears.
+		// pending that long, where an execution timeout or a Cloud duration
+		// limit can cancel it before the limit clears.
+		//
+		// The duration is stated, not assumed. This branch covers every wait
+		// over WAIT_NODE_VIABLE_SECONDS, which spans a ten-minute burst limit as
+		// well as a day-long cap; it used to say "pending for hours" for all of
+		// them, which is false for the first.
 		description +=
-			`That is too long to wait inside a workflow: the execution stays pending for hours, ` +
-			`where an execution timeout or a Cloud duration limit can cancel it before the cap clears. ` +
+			`That is too long to wait inside a workflow: the execution would stay pending for ~${readable}, ` +
+			`where an execution timeout or a Cloud duration limit can cancel it before the limit clears. ` +
 			`Re-run the workflow after the reset, or schedule it for then${raiseCap}.`;
 	} else {
 		description += isLenzLimit
@@ -2052,10 +2076,21 @@ export class Lenz implements INodeType {
 					// node's judgement about Wait nodes, not a fact the API
 					// stated, and baking it into the output would freeze it into
 					// the contract.
-					if (typeof body.limit === 'number') {
+					// Gated on the same answer the message uses, not copied from any
+					// body that happens to carry the key. A proxy 429, or some other
+					// error whose body holds a numeric `limit`, would otherwise hand a
+					// workflow a limit or an upgrade link that is not Lenz's.
+					// `upgrade_url` also travels on an out-of-credits 402, where
+					// topping up is exactly the remedy.
+					const lenzRateLimit = status === 429 && isLenzRateLimit(body);
+					if (lenzRateLimit && typeof body.limit === 'number') {
 						json.limit = body.limit;
 					}
-					if (typeof body.upgrade_url === 'string' && body.upgrade_url) {
+					if (
+						(lenzRateLimit || status === 402) &&
+						typeof body.upgrade_url === 'string' &&
+						body.upgrade_url
+					) {
 						json.upgrade_url = body.upgrade_url;
 					}
 					const typed =

@@ -2208,6 +2208,58 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		expect(err.description).toContain('raise the cap');
 	});
 
+	it('does not contradict itself on a Lenz 429 that lacks a code', async () => {
+		// Keyed on `code` alone, this read as foreign: Lenz's own text as the
+		// headline, then "This limit is not Lenz's own" underneath it.
+		const err = await expectRateLimitError({ detail: 'Slow down.' });
+		expect(err.message).toContain('Slow down.');
+		expect(err.description).not.toContain("not Lenz's own");
+		expect(err.description).toContain('raise the cap');
+	});
+
+	it('states the real duration of a long reset rather than "hours"', async () => {
+		// A ten-minute burst limit is over the Wait-node threshold, and used to
+		// be told the execution "stays pending for hours".
+		const err = await expectRateLimitError({
+			detail: 'Too many requests.',
+			code: 'rate_limited',
+			reset_in_seconds: 600,
+		});
+		expect(err.description).toContain('~10 minutes');
+		expect(err.description).not.toContain('hours');
+	});
+
+	it('carries limit and upgrade_url only for a Lenz rate limit', async () => {
+		// Not from any body that happens to hold the key — a proxy 429, or an
+		// unrelated error with a numeric `limit`, is not Lenz's limit.
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(400, { detail: 'Bad input.', limit: 50, upgrade_url: 'https://x.test' });
+			},
+			true, // continueOnFail
+		);
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('limit');
+		expect(json).not.toHaveProperty('upgrade_url');
+	});
+
+	it('carries upgrade_url on an out-of-credits 402, where topping up is the fix', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'A claim' },
+			() => {
+				throw apiError(402, {
+					detail: 'No credits.',
+					cost: 10,
+					credits_remaining: 0,
+					upgrade_url: 'https://lenz.io/plans',
+				});
+			},
+			true, // continueOnFail
+		);
+		expect((output[0].json as IDataObject).upgrade_url).toBe('https://lenz.io/plans');
+	});
+
 	it('keeps retry_after on a long 503 — only a 429 is split', async () => {
 		// A 503 always emitted retry_after, and its own message says to set a
 		// Wait node to it. Splitting it at 300s like a cap reset handed that
