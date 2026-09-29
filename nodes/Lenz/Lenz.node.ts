@@ -27,7 +27,26 @@ const API_VERSION = '2026-08-05';
 // Verify (Deep) is async server-side: submit returns a task_id, then we poll
 // the status endpoint until it reaches a terminal state. Backoff mirrors the
 // Lenz API's recommended 2s/4s/8s cadence, capped by the overall deadline.
-const POLL_TIMEOUT_MS = 120000;
+//
+// The default wait is 300s. It was 120s, which a real run proved too short
+// (lenzhq/Lenz#889): a verification finished in Lenz with a verdict, the credits
+// were taken, and the node had already given up and returned `timeout`. Lenz's
+// own measurements put a standard-depth run at about 90s median — standard
+// being this node's default depth — with the tail past 120s, and a split panel
+// adds an escalation round of up to 60s on top. 300s clears that with margin.
+//
+// This is a ceiling, not a duration: a verification that finishes in 60s
+// returns in 60s either way. Raising it changes only the slow tail, from
+// "charged, no result" to "result".
+//
+// It deliberately changes EXISTING workflows too, not only new nodes. n8n does
+// not save a parameter left at its default — verified: a Max Wait of 120 is
+// dropped from the saved node, a Max Wait of 300 is kept — so every node that
+// never touched Max Wait picks this up on upgrade. That was a decision, not a
+// side effect: versioning exists so behaviour does not change under people, but
+// the behaviour here was abandoning paid verifications, and a new node version
+// would have left every existing workflow still doing it.
+export const POLL_TIMEOUT_MS = 300000;
 const POLL_BACKOFF_MS = [2000, 4000, 8000];
 
 // The Max Wait contract, enforced where the value is consumed rather than only
@@ -935,13 +954,20 @@ export class Lenz implements INodeType {
 				displayName: 'Max Wait (Seconds)',
 				name: 'maxWaitSeconds',
 				type: 'number',
-				default: 120,
+				// A literal, and it must stay equal to POLL_TIMEOUT_MS / 1000. It
+				// cannot be written as that expression: n8n's node-param-default-
+				// missing lint only recognises a literal default. The two copies are
+				// held together by a test instead ('agrees with the fallback the
+				// node applies'), because a default that drifted from the
+				// execute-time fallback would mean the UI promised one wait and the
+				// node applied another.
+				default: 300,
 				typeOptions: { minValue: 10, maxValue: 900 },
 				displayOptions: {
 					show: { operation: ['verify'], waitForCompletion: [true] },
 				},
 				description:
-					'How long to keep polling before giving up and returning Status "timeout" with the task ID. A verification usually takes ~90s but can legitimately run longer. Giving up never cancels anything: the task keeps running server-side and stays fetchable with Get Verify Status, so the credits are not lost. Raise this only if the workflow can afford to block that long.',
+					'The longest to keep polling before giving up and returning Status "timeout" with the task ID. It is a ceiling, not a delay: a verification that finishes sooner returns as soon as it does. A standard-depth run is about 90s but can run past two minutes, which is why this defaults to 300. Giving up never cancels anything: the task keeps running server-side and stays fetchable with Get Verify Status, so the credits are not lost. Lower it only if the workflow cannot afford to block this long.',
 			},
 			{
 				displayName: 'Include Audit Trail',
