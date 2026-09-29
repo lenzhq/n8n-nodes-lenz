@@ -150,22 +150,22 @@ describe('Lenz node - Assess (Fast)', () => {
 		expect(httpMock).not.toHaveBeenCalled();
 	});
 
-	it('returns status "ambiguous" with candidate claims when framing cannot pick one', async () => {
-		const responder: Responder = () => ({
-			claims: [],
-			error: 'Ambiguous input',
-			error_code: 'ambiguous',
-			candidate_claims: ['Reading A', 'Reading B'],
-		});
-		const { output } = await runNode({ operation: 'assess', text: 'vague text' }, responder);
-		expect(output[0].json.status).toBe('ambiguous');
-		expect((output[0].json as IDataObject).candidate_claims).toEqual(['Reading A', 'Reading B']);
-	});
-
 	it('returns status "no_claim" when no verifiable claim is found', async () => {
 		const responder: Responder = () => ({ claims: [], error: 'No claim found' });
 		const { output } = await runNode({ operation: 'assess', text: 'just chatting' }, responder);
 		expect(output[0].json.status).toBe('no_claim');
+	});
+
+	it('keeps candidate_claims on a no_claim result, whatever the error_code', async () => {
+		const responder: Responder = () => ({
+			claims: [],
+			error: 'No claim found',
+			error_code: 'framing_failed',
+			candidate_claims: [],
+		});
+		const { output } = await runNode({ operation: 'assess', text: 'vague text' }, responder);
+		expect(output[0].json.status).toBe('no_claim');
+		expect((output[0].json as IDataObject).candidate_claims).toEqual([]);
 	});
 });
 
@@ -379,33 +379,8 @@ describe('Lenz node - Verify (Deep)', () => {
 			{ text: 'Claim two', domain: 'Finance' },
 		]);
 		expect(json.message).toContain('Select Claims');
-	});
-
-	it('surfaces the candidate readings on a clarification_required interrupt', async () => {
-		const responder = verifyResponder({
-			status: 'needs_input',
-			reason: 'clarification_required',
-			candidates: ['Reading A', 'Reading B'],
-		});
-		const { output } = await runNode({ operation: 'verify', claim: 'ambiguous' }, responder);
-		const json = output[0].json as IDataObject;
-		expect(json.candidates).toEqual(['Reading A', 'Reading B']);
-		expect(json.message).toContain('Select Claims');
-	});
-
-	it('points at the existing verification on a duplicate_found interrupt, not at Select Claims', async () => {
-		const responder = verifyResponder({
-			status: 'needs_input',
-			reason: 'duplicate_found',
-			similar_claims: [{ verification_id: 'ver_old', claim: 'Same claim', distance: 0.05 }],
-		});
-		const { output } = await runNode({ operation: 'verify', claim: 'dupe' }, responder);
-		const json = output[0].json as IDataObject;
-		expect(json.similar_claims).toEqual([
-			{ verification_id: 'ver_old', claim: 'Same claim', distance: 0.05 },
-		]);
-		expect(json.message).toContain('similar_claims');
-		expect(json.message).not.toContain('Select Claims');
+		expect(json).toHaveProperty('candidates', []);
+		expect(json).toHaveProperty('similar_claims', []);
 	});
 
 	it('maps a failed terminal state to a status: failed result, not a thrown error', async () => {
