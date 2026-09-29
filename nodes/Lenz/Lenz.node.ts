@@ -1259,9 +1259,18 @@ export class Lenz implements INodeType {
 						// enforced here too. `usableAsTool` means an LLM can supply
 						// this number directly; unclamped, `={{ 86400 }}` holds the
 						// execution open for a day. A non-numeric expression is worse
-						// than a wrong number: NaN makes the while-condition false on
-						// entry, so the node would report a timeout on a claim it
-						// never polled once, having already been charged for it.
+						// than a wrong number, and this check is what stands between
+						// it and a hot loop. The poll loop is `while (true)` and ends
+						// only when waitForNextPoll sees the window spent — but a NaN
+						// Max Wait makes the deadline NaN, `NaN <= 0` is false, so the
+						// window never counts as spent, and every sleep becomes
+						// `min(backoff, NaN)`, which setTimeout runs after ~1ms.
+						// Unguarded, that polls the status endpoint about once a
+						// millisecond, indefinitely, on a verification already charged
+						// for. (This comment used to describe the pre-`while (true)`
+						// loop, where the same NaN merely reported a timeout without
+						// polling — which made the guard look far less important than
+						// it is.)
 						const requestedWait = Number(
 							this.getNodeParameter('maxWaitSeconds', itemIndex, POLL_TIMEOUT_MS / 1000),
 						);

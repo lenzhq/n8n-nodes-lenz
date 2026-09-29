@@ -25,7 +25,7 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 
 Updating keeps your existing Lenz nodes on the node version they were added with, so saved workflows keep working unchanged. Two things do change underneath them, both deliberately:
 
-- **Max Wait (Seconds) defaults to 300 from 0.5.2** (it was 120). A Verify node that never set Max Wait picks this up, because n8n does not save a parameter left at its default. It only ever makes a slow verification *finish* rather than time out; a fast one returns exactly as before. If a workflow must not block that long, set Max Wait explicitly.
+- **Max Wait (Seconds) defaults to 300 from 0.5.2** (it was 120). A Verify node that never set Max Wait picks this up, because n8n does not save a parameter left at its default. It only ever makes a slow verification *finish* rather than time out; a fast one returns exactly as before. The limit is **per item**, and items are verified one after another, so the worst case for a run is the number of items times Max Wait — ten items can now block for up to fifty minutes where they used to give up after twenty. If a workflow must not block that long, or runs under a short execution timeout, set Max Wait explicitly.
 - A node added on an old release keeps that release's layout. A node added **before 0.1.10 uses node version 1**, the original flat operation list, and stays on it after updating. Workflows built on it keep working. For anything new — templates especially — add a fresh Lenz node after updating so it uses the current layout.
 
 ## Operations
