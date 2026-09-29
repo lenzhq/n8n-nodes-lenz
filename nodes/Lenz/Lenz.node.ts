@@ -144,19 +144,6 @@ function cappedPollWaitMs(ms: number | undefined): number | undefined {
 const WAIT_NODE_VIABLE_SECONDS = 300;
 
 /**
- * Build the user-facing text for a rate-limit rejection, or undefined if this
- * error isn't one.
- *
- * HTTP 429, body `{ detail, code, limit, reset_in_seconds, upgrade_url }`. The
- * one users actually meet is the /extract daily cap: Extract Claims is free
- * and capped per account per day, so it is the refusal most workflows will hit
- * and the only one here that costs nothing to have triggered.
- *
- * Deliberately NOT worded like the 503. Both are "come back later", but a 503
- * clears in ~90s and a daily cap clears at midnight UTC, so the same advice
- * would be right in one case and absurd in the other.
- */
-/**
  * Whether a 429 came from Lenz's own rate limiter rather than something in
  * front of it.
  *
@@ -181,6 +168,19 @@ function isLenzRateLimit(body: IDataObject): boolean {
 	);
 }
 
+/**
+ * Build the user-facing text for a rate-limit rejection, or undefined if this
+ * error isn't one.
+ *
+ * HTTP 429, body `{ detail, code, limit, reset_in_seconds, upgrade_url }`. The
+ * one users actually meet is the /extract daily cap: Extract Claims is free
+ * and capped per account per day, so it is the refusal most workflows will hit
+ * and the only one here that costs nothing to have triggered.
+ *
+ * Deliberately NOT worded like the 503. Both are "come back later", but a 503
+ * clears in ~90s and a daily cap clears at midnight UTC, so the same advice
+ * would be right in one case and absurd in the other.
+ */
 function rateLimitMessageFor(error: unknown): { message: string; description: string } | undefined {
 	if (statusCodeOf(error) !== 429) return undefined;
 
@@ -226,9 +226,15 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 	// to gate the headline and `limit` on isLenzLimit but not this line.
 	const raiseCap = isLenzLimit ? `, or raise the cap: ${upgradeUrl}` : '';
 	if (wait !== undefined && wait <= WAIT_NODE_VIABLE_SECONDS) {
+		// The unit is spelled out because n8n's Wait node defaults its Wait Unit
+		// to HOURS (n8n-nodes-base Wait.node: `unit`, `default: 'hours'`). Told
+		// only "set it to {{ $json.retry_after }}", someone who leaves the unit
+		// alone turns a 45-second limit into a 45-hour wait — in the one
+		// recovery pattern this node recommends.
 		description +=
 			`Wait ~${readable} and submit again: send this node's error output into a Wait node ` +
-			`set to {{ $json.retry_after }} and loop it back.`;
+			`with Wait Amount {{ $json.retry_after }} and Wait Unit set to Seconds ` +
+			`(it defaults to Hours), then loop it back.`;
 	} else if (wait !== undefined) {
 		// Too long to wait inside a workflow. Not because a Wait node holds a
 		// worker — n8n offloads long waits — but because the execution sits
@@ -403,7 +409,8 @@ function capacityMessageFor(error: unknown): { message: string; description: str
 		description:
 			`Transient (HTTP 503, code: ${code}). Nothing was charged. ` +
 			`Wait ~${wait}s before submitting again: send this node's error output into a Wait node ` +
-			`set to ${wait} seconds and loop it back, or re-run the workflow after the wait. ` +
+			`set to ${wait} seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, ` +
+			`or re-run the workflow after the wait. ` +
 			'"Retry On Fail" is not enough on its own — its tries are spaced too closely to clear the wait.',
 	};
 }

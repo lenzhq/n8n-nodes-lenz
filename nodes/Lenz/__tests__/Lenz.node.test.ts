@@ -2208,6 +2208,31 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		expect(err.description).toContain('raise the cap');
 	});
 
+	it('names the Wait unit, because the Wait node defaults to hours', async () => {
+		// n8n's Wait node ships with Wait Unit = Hours. Advice that says only
+		// "set it to {{ $json.retry_after }}" turns a 45-second limit into a
+		// 45-hour wait for anyone who leaves the unit alone.
+		const err = await expectRateLimitError({
+			detail: 'Too many requests.',
+			code: 'rate_limited',
+			reset_in_seconds: 45,
+		});
+		expect(err.description).toContain('Wait Unit set to Seconds');
+		expect(err.description).toContain('defaults to Hours');
+	});
+
+	it('names the Wait unit on a capacity 503 too', async () => {
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
+			throw apiError(503, { code: 'capacity', retry_after: 90 });
+		});
+		const err = (await new Lenz().execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		)) as NodeApiError;
+		expect(err.description).toContain('Wait Unit: Seconds');
+		expect(err.description).toContain('90 seconds');
+	});
+
 	it('does not contradict itself on a Lenz 429 that lacks a code', async () => {
 		// Keyed on `code` alone, this read as foreign: Lenz's own text as the
 		// headline, then "This limit is not Lenz's own" underneath it.

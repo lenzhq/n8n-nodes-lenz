@@ -243,7 +243,9 @@ capacity, stating a wait of roughly 90–120 seconds. Do not solve this with
 **Retry On Fail** — its tries are spaced seconds apart, so they all land inside
 the wait and re-send the submit each time. If the workflow must survive this,
 set the Lenz node's **On Error** to *Continue (using error output)* and send the
-error output into a **Wait** node set to `{{ $json.retry_after }}` seconds, then
+error output into a **Wait** node set to `{{ $json.retry_after }}` seconds — emit
+`"unit": "seconds"` explicitly, because the Wait node defaults its unit to hours
+and an omitted unit turns a 90-second wait into 90 hours — then
 loop back into the Lenz node. Only add this to unattended/scheduled workflows;
 for an interactive one, let it fail.
 

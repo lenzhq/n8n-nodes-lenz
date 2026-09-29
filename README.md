@@ -169,13 +169,13 @@ Both `failure_class` and `retryable` are empty/`null` on verifications older tha
 
 Separately, a *submit* can be refused outright with **HTTP 503** and a typed body code — `capacity` (Lenz is at its concurrency ceiling) or `upstream_unavailable` (model providers down). The node reports these as transient and names the stated wait (typically 90-120s, jittered so callers return spread out). Nothing is charged for a refused submit.
 
-The wait is longer than **Retry On Fail** can cover: that setting allows 2-5 tries spaced a few seconds apart, so it would spend every try inside the window and fail anyway — while re-sending the submit each time, which is the pile-on the jitter exists to prevent. Handle it in the workflow instead: set the node's **On Error** to *Continue (using error output)*, feed that output into a **Wait** node set to the stated seconds, and loop it back into the Lenz node. Re-running the workflow later works just as well.
+The wait is longer than **Retry On Fail** can cover: that setting allows 2-5 tries spaced a few seconds apart, so it would spend every try inside the window and fail anyway — while re-sending the submit each time, which is the pile-on the jitter exists to prevent. Handle it in the workflow instead: set the node's **On Error** to *Continue (using error output)*, feed that output into a **Wait** node set to the stated seconds, and loop it back into the Lenz node. **Set the Wait node's Wait Unit to Seconds** — it defaults to Hours, so a 90 left on the default waits 90 hours. Re-running the workflow later works just as well.
 
 So the Wait node has a number to read, the error output carries the refusal as fields rather than only as prose:
 
 | Field | What it says |
 |---|---|
-| `retry_after` | Seconds to wait before submitting again — safe to point a Wait node's duration at. Emitted only when the wait is short enough to be worth waiting (a 503, or a short rate limit); a long cap reset comes back as `resets_in_seconds` instead, and a 402 has nothing to wait for |
+| `retry_after` | Seconds to wait before submitting again — safe to point a Wait node's duration at, **with its Wait Unit set to Seconds** (the default is Hours). Emitted only when the wait is short enough to be worth waiting (a 503, or a short rate limit); a long cap reset comes back as `resets_in_seconds` instead, and a 402 has nothing to wait for |
 | `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `rate_limited`, `no_credits` |
 | `status_code` | The HTTP status, e.g. `429`, `503` |
 | `cost` | Credits the refused call needed, present only on an out-of-credits refusal |
@@ -195,7 +195,7 @@ Each of these is emitted when the API's response carries it, so treat the "when"
 
 **Extract Claims** is free and capped per account per day (resetting 00:00 UTC), so a 429 is the refusal a busy workflow is most likely to meet. Nothing is charged for a refused call. The body states `reset_in_seconds`, which the node reports under one of two names depending on how long it is — `retry_after` for a wait worth sitting through, `resets_in_seconds` for one that is not. The node's message says which you have:
 
-- **A short reset** (roughly five minutes or less) arrives as `retry_after`, and is the Wait-node loop described above — error output into a **Wait** node set to `{{ $json.retry_after }}`, looped back.
+- **A short reset** (roughly five minutes or less) arrives as `retry_after`, and is the Wait-node loop described above — error output into a **Wait** node with Wait Amount `{{ $json.retry_after }}` and **Wait Unit Seconds** (the default is Hours), looped back.
 - **A longer reset** — anything over about five minutes — arrives as **`resets_in_seconds`**, and deliberately *not* as `retry_after`: waiting it out inside a workflow leaves the execution pending that long, where an execution timeout or a Cloud duration limit can cancel it before the limit clears. The daily cap is the common case: it resets at midnight UTC, so the wait can be tens of thousands of seconds. Re-run the workflow after the reset, schedule it for then, or raise the cap.
 
 Splitting the two keys is what keeps `retry_after` meaning what this table says it means — a duration you can hand to a Wait node. A workflow already built on the documented pattern therefore keeps failing fast on a daily cap instead of silently parking for the rest of the day. To handle the long case, read `resets_in_seconds` explicitly.
