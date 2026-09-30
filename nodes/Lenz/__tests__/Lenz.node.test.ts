@@ -10,7 +10,7 @@ jest.mock('n8n-workflow', () => ({
 	sleep: jest.fn(async () => {}),
 }));
 
-import { Lenz } from '../Lenz.node';
+import { Lenz, POLL_TIMEOUT_MS } from '../Lenz.node';
 
 // A responder receives the httpRequest options and returns the mocked response
 // body (or throws to simulate an API/transport error).
@@ -1999,6 +1999,63 @@ describe('Lenz node - Verify poll resilience', () => {
 		}
 	});
 
+	// lenzhq/Lenz#889. A real run: the node returned `timeout` at 120s, the
+	// verification finished in Lenz with a verdict, the credits were taken, and
+	// the workflow never got the result. Lenz measures a standard-depth run —
+	// this node's default depth — at about 90s median with the tail past 120s.
+	//
+	// Twenty `processing` reads on the 2/4/8s ladder is about 150s of sleeping,
+	// then the verdict: the slow-but-healthy tail #889 describes.
+	const finishesAt150s = () =>
+		polling([...Array.from({ length: 20 }, () => processing), completed]);
+
+	it('waits long enough by default for a standard run that outlasts 120s', async () => {
+		const clock = sleepingClock();
+		try {
+			// No maxWaitSeconds at all — the case that matters, because n8n
+			// does not save a parameter left at its default, so this is every
+			// Verify node nobody tuned.
+			const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, finishesAt150s());
+			expect((output[0].json as IDataObject).status).toBe('completed');
+		} finally {
+			clock.restore();
+		}
+	});
+
+	it('still returns timeout when a run genuinely outlasts an explicit Max Wait', async () => {
+		// The mirror of the test above, so it cannot pass by never timing out:
+		// the same 150s run against an explicit 120s ceiling gives up.
+		const clock = sleepingClock();
+		try {
+			const { output } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 120 },
+				finishesAt150s(),
+			);
+			expect((output[0].json as IDataObject).status).toBe('timeout');
+		} finally {
+			clock.restore();
+		}
+	});
+
+	it('returns a fast verification as soon as it finishes, whatever the ceiling', async () => {
+		// Max Wait is a ceiling, not a delay. Raising the default must not make
+		// an ordinary run any slower — the reason raising it was safe to ship
+		// to existing workflows.
+		const clock = sleepingClock();
+		try {
+			const { output, calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim' },
+				polling([processing, completed]),
+			);
+			expect((output[0].json as IDataObject).status).toBe('completed');
+			expect(pollCount(calls)).toBe(2);
+			const slept = sleepMock.mock.calls.reduce((sum, [ms]) => sum + (ms as number), 0);
+			expect(slept).toBe(2000);
+		} finally {
+			clock.restore();
+		}
+	});
+
 	// A poll 429 carrying a daily-cap reset. The status endpoint can answer with
 	// the same limiter body the /extract cap uses, and `reset_in_seconds` there
 	// runs to hours. The loop honours a stated 429 wait so as not to re-trip a
@@ -2041,6 +2098,28 @@ describe('Lenz node - Verify poll resilience', () => {
 		} finally {
 			clock.restore();
 		}
+	});
+});
+
+describe('Lenz node - Max Wait default', () => {
+	const maxWait = () => new Lenz().description.properties.find((p) => p.name === 'maxWaitSeconds');
+
+	it('defaults to 300 seconds', () => {
+		expect(maxWait()?.default).toBe(300);
+	});
+
+	it('agrees with the fallback the node applies', () => {
+		// Two copies of one number — the field's default must be a literal for
+		// n8n's lint, and execute() falls back to POLL_TIMEOUT_MS. If they
+		// drift, the UI promises one wait and the node applies another, and
+		// only one of the two paths would ever be tested.
+		expect(maxWait()?.default).toBe(POLL_TIMEOUT_MS / 1000);
+	});
+
+	it('sits inside the range the field advertises', () => {
+		const opts = maxWait()?.typeOptions as { minValue: number; maxValue: number };
+		expect(maxWait()?.default).toBeGreaterThanOrEqual(opts.minValue);
+		expect(maxWait()?.default).toBeLessThanOrEqual(opts.maxValue);
 	});
 });
 
