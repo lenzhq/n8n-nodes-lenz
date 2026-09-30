@@ -158,9 +158,9 @@ Out** node on the field `claims` after the Lenz node, then branch on
 `{{ $json.passed }}`. If you only care whether *everything* passed, use a Code
 or Filter node over `claims` instead. Choose deliberately and say which you chose.
 
-`assess` can also return `status: "no_claim"` or `status: "ambiguous"` with
-`candidate_claims` — there was nothing checkable in the text. Handle it rather
-than letting it fall through the `passed` branch as a silent false.
+`assess` can also return `status: "no_claim"` — there was nothing checkable in
+the text. Handle it rather than letting it fall through the `passed` branch as
+a silent false.
 
 **`extract`** returns the claims as **plain strings**, under a different field
 name from `assess`, with a different set of status values:
@@ -227,14 +227,14 @@ review:
 ```
 
 The status filter is not optional padding. When `assess` finds nothing it
-returns `no_claim` or `ambiguous` **with no `claims` key at all**, and Split Out
+returns `no_claim` **with no `claims` key at all**, and Split Out
 throws on a missing field — so without the first IF that item fails the whole
 execution rather than routing anywhere.
 
-**Ambiguous input (verify only).** `verify` pauses instead of guessing when the
-text is not one unambiguous claim: `status: "needs_input"` with a `reason` of
-`multi_claim`, `clarification_required`, or `duplicate_found`. The first two are
-resolved by feeding the chosen claim text into `resource: "verification"`,
+**Multi-claim input (verify only).** `verify` pauses instead of guessing when
+the text contains several distinct claims: `status: "needs_input"` with
+`reason: "multi_claim"` and the claims found in `claims`. It is resolved by
+feeding the chosen claim texts into `resource: "verification"`,
 `operation: "select"` with the same `taskId`. Only add this branch if the input
 is genuinely freeform — for a single known claim it is noise.
 
@@ -243,9 +243,23 @@ capacity, stating a wait of roughly 90–120 seconds. Do not solve this with
 **Retry On Fail** — its tries are spaced seconds apart, so they all land inside
 the wait and re-send the submit each time. If the workflow must survive this,
 set the Lenz node's **On Error** to *Continue (using error output)* and send the
-error output into a **Wait** node set to `{{ $json.retry_after }}` seconds, then
+error output into a **Wait** node set to `{{ $json.retry_after }}` seconds — emit
+`"unit": "seconds"` explicitly, because the Wait node defaults its unit to hours
+and an omitted unit turns a 90-second wait into 90 hours — then
 loop back into the Lenz node. Only add this to unattended/scheduled workflows;
 for an interactive one, let it fail.
+
+**Rate limits are a different shape.** A refusal can also be HTTP 429 —
+`extract` is free and capped per account per day, so it is the one a busy
+workflow meets. A short rate limit sets `retry_after` and the Wait loop above
+is correct for it. A daily cap does NOT set `retry_after`: it sets
+`resets_in_seconds`, which can be most of a day, precisely so that a Wait node
+wired to `{{ $json.retry_after }}` cannot silently park the execution for
+hours.
+
+So do not wire a Wait node to `resets_in_seconds`. For a scheduled workflow the
+correct answer to a daily cap is to let the run fail and let the schedule retry
+it later. Add an error branch for it only if the user asked for one.
 
 ## Workflow JSON shape
 
@@ -317,8 +331,8 @@ for an interactive one, let it fail.
      field is `undefined` and every item takes the false branch. A workflow that
      ends in "list my verifications" is finished when it has listed them.
    - **Check `status` BEFORE `passed`, never instead of it.** `passed` is only
-     meaningful once you know a verdict exists. `assess` returns `no_claim` or
-     `ambiguous` with no `claims` array at all, and `verify` returns
+     meaningful once you know a verdict exists. `assess` returns `no_claim`
+     with no `claims` array at all, and `verify` returns
      `needs_input`, `failed`, `timeout` or `queued` whose `passed` is `null`
      (`queued` omits it entirely). Null is falsy, so branching straight on
      `passed` reports every one of those as "the claim is false" — a provider

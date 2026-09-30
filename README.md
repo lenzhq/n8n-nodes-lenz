@@ -19,6 +19,15 @@ This is an n8n community node. It lets you use **Lenz** in your n8n workflows.
 
 Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes/installation/) in the n8n community nodes documentation, and search for `n8n-nodes-lenz` under **Settings → Community Nodes → Install**.
 
+### Updating
+
+**An installed copy does not update itself.** A fix only reaches your workflows once you update the node: **Settings → Community Nodes**, then **Update** on `n8n-nodes-lenz`. Worth doing if you installed it a while ago — an instance still on an early release keeps behaviour that has since been fixed. Before 0.1.10 in particular, a slow Verify gives up at 120 seconds with no way to collect the result afterwards: Get Verify Status arrived in 0.1.10, and Max Wait in 0.5.0.
+
+Updating keeps your existing Lenz nodes on the node version they were added with, so saved workflows keep working unchanged. Two things do change underneath them, both deliberately:
+
+- **Max Wait (Seconds) defaults to 300 from 0.5.2** (it was 120). A Verify node that never set Max Wait picks this up, because n8n does not save a parameter left at its default. It only ever makes a slow verification *finish* rather than time out; a fast one returns exactly as before. The limit is **per item**, and items are verified one after another, so the worst case for a run is the number of items times Max Wait — ten items can now block for up to fifty minutes where they used to give up after twenty. If a workflow must not block that long, or runs under a short execution timeout, set Max Wait explicitly.
+- A node added on an old release keeps that release's layout. A node added **before 0.1.10 uses node version 1**, the original flat operation list, and stays on it after updating. Workflows built on it keep working. For anything new — templates especially — add a fresh Lenz node after updating so it uses the current layout.
+
 ## Operations
 
 Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 stay on node version 1, which shows the original flat operation list — existing workflows are unaffected.)
@@ -28,7 +37,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Verify (Deep)** *(default)* | Full multi-model pipeline (research → debate → adjudication), ~90 seconds. Returns a verdict, confidence, `lenz_score` (1-10), `key_finding`, sourced citations, and an executive summary. Reserve for high-stakes claims that need a thorough, cited answer. **Depth** trades work for price: *Low* searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments, for **5 credits instead of 10**. |
-| **Assess (Fast)** | A quick 3-model panel verdict, ~10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. |
+| **Assess (Fast)** | A quick 3-model panel verdict, ~10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. Each entry carries a `verification_url`, **which is usually empty, and that is expected**: it is set only when the claim was already deep-checked with **Verify (Deep)** and that result is one you can read. A fresh panel verdict creates no stored verification, so there is no page to link to. If you need a link and sources for a claim, run Verify (Deep) on it. |
 | **Extract Claims** | Free — pulls the verifiable factual claims out of a block of text without checking them. Useful as a first step before running Assess or Verify on each claim individually. **Focus** narrows the result to the claims you describe (300 characters, no extra cost); when none of them match, `status` comes back as `no_match` with an empty list rather than the unfocused claims. **Text** can also be a single public web page URL: Lenz reads the page, or a YouTube video's transcript, and extracts the claims from its first 50,000 characters. Pages behind a login (Facebook, Instagram, Threads, LinkedIn) can't be read, and a URL call typically takes 5-40 seconds. |
 
 ### Verification — manage submitted and stored work
@@ -36,7 +45,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Get Status** | Polls a submitted verification by `task_id`. Pairs with Verify's **Wait for Completion** toggle and with webhook delivery. |
-| **Select Claims** | Resolves a paused verification (see [Ambiguous and multi-claim input](#ambiguous-and-multi-claim-input)). |
+| **Select Claims** | Resolves a paused verification (see [Multi-claim input](#multi-claim-input)). |
 | **Submit Batch** | Submits up to 20 claims at once without waiting. Returns one item per spawned task. Each claim can override the batch **Depth**, so one batch can mix 5- and 10-credit checks. |
 | **Get** | Retrieves a stored verification report by `verification_id`. |
 | **Get Many** | Lists the verifications stored against this API key, with **Return All** / **Limit**. |
@@ -87,7 +96,7 @@ Built against `n8n-workflow` (n8n API version 1) and tested against n8n v2.30.4.
 ## Usage
 
 - **Verify (Deep) takes ~90 seconds** — it's the full multi-model pipeline, not an instant call. The node blocks/polls until the result is ready, so no separate polling setup is needed on your end.
-- **If it outlasts Max Wait (Seconds)**, the node returns `status: "timeout"` with the `task_id` and `passed: null` instead of a verdict. Nothing is lost — giving up does not cancel anything, the verification keeps running server-side, and the credits were spent at submit either way. Collect it later with **Get Verify Status**, or raise **Max Wait (Seconds)** (default 120). A poll that fails with a 5xx, a 429 or a 408/425 is retried for as long as the window lasts rather than failing the item; a 429 waits the reopening time the API states instead of returning on the node's own cadence. A failure carrying no HTTP status at all — a DNS or TLS problem, say — is different: it could equally be a bug or a bad credential, so it gets two retries and is then surfaced as the error it is. If the window ends on a failed poll, the `timeout` result names it in `last_error` and `last_error_status`.
+- **If it outlasts Max Wait (Seconds)**, the node returns `status: "timeout"` with the `task_id` and `passed: null` instead of a verdict. Nothing is lost — giving up does not cancel anything, the verification keeps running server-side, and the credits were spent at submit either way. Collect it later with **Get Verify Status**, or raise **Max Wait (Seconds)** (default 300 — it was 120 before 0.5.2, which a standard-depth run can outlast; see [Updating](#updating)). Max Wait is a ceiling, not a delay: a verification that finishes sooner returns as soon as it does. A poll that fails with a 5xx, a 429 or a 408/425 is retried for as long as the window lasts rather than failing the item; a 429 waits the reopening time the API states instead of returning on the node's own cadence. A failure carrying no HTTP status at all — a DNS or TLS problem, say — is different: it could equally be a bug or a bad credential, so it gets two retries and is then surfaced as the error it is. If the window ends on a failed poll, the `timeout` result names it in `last_error` and `last_error_status`.
 - **Low depth drops a debate round, not just sources.** As well as searching fewer sources and skipping the recovery fetch tiers, *Low* stops the debate after the opening arguments — so with **Include Audit Trail** on, `audit.debate_pro.rebuttal` and `audit.debate_con.rebuttal` come back as empty strings. Every step that does run uses the same models, so Low is a volume lever rather than a model downgrade — but it is one round of argument fewer, not merely a narrower search.
 - **You are charged for the Depth you asked for, not the one you got.** A *Low* request that Lenz can answer from an existing *standard* verdict still costs 5 — and the `depth` field on the result reads `standard`, because it describes the evidence behind the verdict rather than the request. Seeing `standard` come back from a *Low* request is correct, not a bug.
 - To feed data from a previous node instead of a fixed value, toggle a field to **Expression** and reference it, e.g. `{{ $json.output }}`.
@@ -134,15 +143,13 @@ Ask a grounded question about the evidence behind a Verify (Deep) result, by cha
 3. Set the Verification ID field to an expression referencing the first node's output: `{{ $json.verification_id }}`.
 4. Keep the Question field as a fixed string (e.g. `"What are the main sources supporting this verdict?"`) — it works for whatever claim was just verified, since only the Verification ID needs to change per run.
 
-### Ambiguous and multi-claim input
+### Multi-claim input
 
-Verify pauses rather than guessing when the text isn't a single unambiguous claim. The result comes back with `status: "needs_input"` and a `reason`:
+Verify pauses rather than guessing when the text contains several distinct claims. The result comes back with `status: "needs_input"` and a `reason`:
 
 | `reason` | What the node returns | How to continue |
 |---|---|---|
 | `multi_claim` | `claims` — the distinct claims found in your text | Feed the ones you want into **Select Claims** with the same `task_id` |
-| `clarification_required` | `candidates` — the possible readings of one ambiguous claim | Feed the intended reading into **Select Claims** with the same `task_id` |
-| `duplicate_found` | `similar_claims` — existing verifications that already cover this | Reuse one of those `verification_id`s, or rephrase to force a fresh check |
 
 **Select Claims** spawns one independent verification per selected claim and returns one item each, so you can poll them with **Get Status** or collect them via webhook:
 
@@ -171,22 +178,38 @@ Both `failure_class` and `retryable` are empty/`null` on verifications older tha
 
 Separately, a *submit* can be refused outright with **HTTP 503** and a typed body code — `capacity` (Lenz is at its concurrency ceiling) or `upstream_unavailable` (model providers down). The node reports these as transient and names the stated wait (typically 90-120s, jittered so callers return spread out). Nothing is charged for a refused submit.
 
-The wait is longer than **Retry On Fail** can cover: that setting allows 2-5 tries spaced a few seconds apart, so it would spend every try inside the window and fail anyway — while re-sending the submit each time, which is the pile-on the jitter exists to prevent. Handle it in the workflow instead: set the node's **On Error** to *Continue (using error output)*, feed that output into a **Wait** node set to the stated seconds, and loop it back into the Lenz node. Re-running the workflow later works just as well.
+The wait is longer than **Retry On Fail** can cover: that setting allows 2-5 tries spaced a few seconds apart, so it would spend every try inside the window and fail anyway — while re-sending the submit each time, which is the pile-on the jitter exists to prevent. Handle it in the workflow instead: set the node's **On Error** to *Continue (using error output)*, feed that output into a **Wait** node set to the stated seconds, and loop it back into the Lenz node. **Set the Wait node's Wait Unit to Seconds** — it defaults to Hours, so a 90 left on the default waits 90 hours. Re-running the workflow later works just as well.
 
 So the Wait node has a number to read, the error output carries the refusal as fields rather than only as prose:
 
 | Field | What it says |
 |---|---|
-| `retry_after` | Seconds to wait before submitting again — point the Wait node's duration at `{{ $json.retry_after }}` |
-| `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `no_credits` |
-| `status_code` | The HTTP status, e.g. `503` |
+| `retry_after` | Seconds to wait before submitting again — safe to point a Wait node's duration at, **with its Wait Unit set to Seconds** (the default is Hours). Emitted only when the wait is short enough to be worth waiting (a 503, or a short rate limit); a long cap reset comes back as `resets_in_seconds` instead, and a 402 has nothing to wait for |
+| `code` | The typed reason, e.g. `capacity`, `upstream_unavailable`, `rate_limited`, `no_credits` |
+| `status_code` | The HTTP status, e.g. `429`, `503` |
 | `cost` | Credits the refused call needed, present only on an out-of-credits refusal |
 | `credits_remaining` | Credits the account holds — `0` is a real value and is reported, not dropped |
-| `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing or capacity refusal |
+| `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing, capacity or rate-limit refusal |
+| `resets_in_seconds` | Seconds until a rate limit clears, when that is too long to sit in a Wait node — see [Rate limits](#rate-limits-http-429) |
+| `limit` | The limit the API stated, on a Lenz rate-limit refusal |
+| `upgrade_url` | Where that limit or plan is raised — on a Lenz rate-limit refusal, and on an out-of-credits refusal |
+
+Each of these is emitted when the API's response carries it, so treat the "when" column as what today's API does rather than as a guarantee.
 
 `cost` and `credits_remaining` let an **IF** node tell a shortfall from an empty balance without reading the prose: `{{ $json.credits_remaining }}` above zero is one top-up away, zero is a plan decision.
 
 `error` keeps the raw message it always carried, so existing workflows reading it are unaffected.
+
+### Rate limits (HTTP 429)
+
+**Extract Claims** is free and capped per account per day (resetting 00:00 UTC), so a 429 is the refusal a busy workflow is most likely to meet. Nothing is charged for a refused call. The body states `reset_in_seconds`, which the node reports under one of two names depending on how long it is — `retry_after` for a wait worth sitting through, `resets_in_seconds` for one that is not. The node's message says which you have:
+
+- **A short reset** (roughly five minutes or less) arrives as `retry_after`, and is the Wait-node loop described above — error output into a **Wait** node with Wait Amount `{{ $json.retry_after }}` and **Wait Unit Seconds** (the default is Hours), looped back.
+- **A longer reset** — anything over about five minutes — arrives as **`resets_in_seconds`**, and deliberately *not* as `retry_after`: waiting it out inside a workflow leaves the execution pending that long, where an execution timeout or a Cloud duration limit can cancel it before the limit clears. The daily cap is the common case: it resets at midnight UTC, so the wait can be tens of thousands of seconds. Re-run the workflow after the reset, schedule it for then, or raise the cap.
+
+Splitting the two keys is what keeps `retry_after` meaning what this table says it means — a duration you can hand to a Wait node. A workflow already built on the documented pattern therefore keeps failing fast on a daily cap instead of silently parking for the rest of the day. To handle the long case, read `resets_in_seconds` explicitly.
+
+Note that the wait is read from the response body, not from the `Retry-After` header. The API sends the header, but n8n wraps every failed request in a `NodeApiError` that keeps the parsed body and discards the response object, so by the time the node sees the error the header is gone.
 
 ## Resources
 

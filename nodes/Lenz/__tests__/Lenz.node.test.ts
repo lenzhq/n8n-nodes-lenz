@@ -10,7 +10,7 @@ jest.mock('n8n-workflow', () => ({
 	sleep: jest.fn(async () => {}),
 }));
 
-import { Lenz } from '../Lenz.node';
+import { Lenz, POLL_TIMEOUT_MS } from '../Lenz.node';
 
 // A responder receives the httpRequest options and returns the mocked response
 // body (or throws to simulate an API/transport error).
@@ -150,22 +150,22 @@ describe('Lenz node - Assess (Fast)', () => {
 		expect(httpMock).not.toHaveBeenCalled();
 	});
 
-	it('returns status "ambiguous" with candidate claims when framing cannot pick one', async () => {
-		const responder: Responder = () => ({
-			claims: [],
-			error: 'Ambiguous input',
-			error_code: 'ambiguous',
-			candidate_claims: ['Reading A', 'Reading B'],
-		});
-		const { output } = await runNode({ operation: 'assess', text: 'vague text' }, responder);
-		expect(output[0].json.status).toBe('ambiguous');
-		expect((output[0].json as IDataObject).candidate_claims).toEqual(['Reading A', 'Reading B']);
-	});
-
 	it('returns status "no_claim" when no verifiable claim is found', async () => {
 		const responder: Responder = () => ({ claims: [], error: 'No claim found' });
 		const { output } = await runNode({ operation: 'assess', text: 'just chatting' }, responder);
 		expect(output[0].json.status).toBe('no_claim');
+	});
+
+	it('keeps candidate_claims on a no_claim result, whatever the error_code', async () => {
+		const responder: Responder = () => ({
+			claims: [],
+			error: 'No claim found',
+			error_code: 'framing_failed',
+			candidate_claims: [],
+		});
+		const { output } = await runNode({ operation: 'assess', text: 'vague text' }, responder);
+		expect(output[0].json.status).toBe('no_claim');
+		expect((output[0].json as IDataObject).candidate_claims).toEqual([]);
 	});
 });
 
@@ -379,33 +379,8 @@ describe('Lenz node - Verify (Deep)', () => {
 			{ text: 'Claim two', domain: 'Finance' },
 		]);
 		expect(json.message).toContain('Select Claims');
-	});
-
-	it('surfaces the candidate readings on a clarification_required interrupt', async () => {
-		const responder = verifyResponder({
-			status: 'needs_input',
-			reason: 'clarification_required',
-			candidates: ['Reading A', 'Reading B'],
-		});
-		const { output } = await runNode({ operation: 'verify', claim: 'ambiguous' }, responder);
-		const json = output[0].json as IDataObject;
-		expect(json.candidates).toEqual(['Reading A', 'Reading B']);
-		expect(json.message).toContain('Select Claims');
-	});
-
-	it('points at the existing verification on a duplicate_found interrupt, not at Select Claims', async () => {
-		const responder = verifyResponder({
-			status: 'needs_input',
-			reason: 'duplicate_found',
-			similar_claims: [{ verification_id: 'ver_old', claim: 'Same claim', distance: 0.05 }],
-		});
-		const { output } = await runNode({ operation: 'verify', claim: 'dupe' }, responder);
-		const json = output[0].json as IDataObject;
-		expect(json.similar_claims).toEqual([
-			{ verification_id: 'ver_old', claim: 'Same claim', distance: 0.05 },
-		]);
-		expect(json.message).toContain('similar_claims');
-		expect(json.message).not.toContain('Select Claims');
+		expect(json).toHaveProperty('candidates', []);
+		expect(json).toHaveProperty('similar_claims', []);
 	});
 
 	it('maps a failed terminal state to a status: failed result, not a thrown error', async () => {
@@ -2022,5 +1997,447 @@ describe('Lenz node - Verify poll resilience', () => {
 		} finally {
 			clock.restore();
 		}
+	});
+
+	// lenzhq/Lenz#889. A real run: the node returned `timeout` at 120s, the
+	// verification finished in Lenz with a verdict, the credits were taken, and
+	// the workflow never got the result. Lenz measures a standard-depth run —
+	// this node's default depth — at about 90s median with the tail past 120s.
+	//
+	// Twenty `processing` reads on the 2/4/8s ladder is about 150s of sleeping,
+	// then the verdict: the slow-but-healthy tail #889 describes.
+	const finishesAt150s = () =>
+		polling([...Array.from({ length: 20 }, () => processing), completed]);
+
+	it('waits long enough by default for a standard run that outlasts 120s', async () => {
+		const clock = sleepingClock();
+		try {
+			// No maxWaitSeconds at all — the case that matters, because n8n
+			// does not save a parameter left at its default, so this is every
+			// Verify node nobody tuned.
+			const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, finishesAt150s());
+			expect((output[0].json as IDataObject).status).toBe('completed');
+		} finally {
+			clock.restore();
+		}
+	});
+
+	it('still returns timeout when a run genuinely outlasts an explicit Max Wait', async () => {
+		// The mirror of the test above, so it cannot pass by never timing out:
+		// the same 150s run against an explicit 120s ceiling gives up.
+		const clock = sleepingClock();
+		try {
+			const { output } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 120 },
+				finishesAt150s(),
+			);
+			expect((output[0].json as IDataObject).status).toBe('timeout');
+		} finally {
+			clock.restore();
+		}
+	});
+
+	it('returns a fast verification as soon as it finishes, whatever the ceiling', async () => {
+		// Max Wait is a ceiling, not a delay. Raising the default must not make
+		// an ordinary run any slower — the reason raising it was safe to ship
+		// to existing workflows.
+		const clock = sleepingClock();
+		try {
+			const { output, calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim' },
+				polling([processing, completed]),
+			);
+			expect((output[0].json as IDataObject).status).toBe('completed');
+			expect(pollCount(calls)).toBe(2);
+			const slept = sleepMock.mock.calls.reduce((sum, [ms]) => sum + (ms as number), 0);
+			expect(slept).toBe(2000);
+		} finally {
+			clock.restore();
+		}
+	});
+
+	// A poll 429 carrying a daily-cap reset. The status endpoint can answer with
+	// the same limiter body the /extract cap uses, and `reset_in_seconds` there
+	// runs to hours. The loop honours a stated 429 wait so as not to re-trip a
+	// limiter on its own 2/4/8s ladder — but uncapped, "honour" meant sleeping
+	// the whole remaining Max Wait in one go on a verification already charged.
+	const dailyCapPoll = () => {
+		throw apiError(429, { detail: 'Rate limited.', code: 'rate_limited', reset_in_seconds: 32400 });
+	};
+
+	it('caps a stated poll 429 wait instead of sleeping away the window', async () => {
+		const clock = sleepingClock();
+		try {
+			await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 900 },
+				polling([dailyCapPoll, completed]),
+			);
+			// 60s, not ~900s. Uncapped, this sleep was min(32400s, remaining),
+			// i.e. the entire Max Wait: a verdict ready a minute in was not seen
+			// for fifteen.
+			expect(sleepMock.mock.calls[0][0]).toBe(60000);
+		} finally {
+			clock.restore();
+		}
+	});
+
+	it('keeps polling through a persistent 429 and still finds the verdict', async () => {
+		const clock = sleepingClock();
+		try {
+			const { output, calls } = await runNode(
+				{ operation: 'verify', claim: 'Some claim', maxWaitSeconds: 900 },
+				polling([dailyCapPoll, dailyCapPoll, dailyCapPoll, completed]),
+			);
+			// The sharper failure. Uncapped, the first 429 slept the whole window,
+			// the single final read landed on the SECOND 429, the deadline was
+			// spent, and the result was `timeout` — telling the caller to fetch
+			// later a verdict the node could have returned. Capped, it reads
+			// every minute and gets there.
+			expect((output[0].json as IDataObject).status).toBe('completed');
+			expect(pollCount(calls)).toBe(4);
+		} finally {
+			clock.restore();
+		}
+	});
+});
+
+describe('Lenz node - Max Wait default', () => {
+	const maxWait = () => new Lenz().description.properties.find((p) => p.name === 'maxWaitSeconds');
+
+	it('defaults to 300 seconds', () => {
+		expect(maxWait()?.default).toBe(300);
+	});
+
+	it('agrees with the fallback the node applies', () => {
+		// Two copies of one number — the field's default must be a literal for
+		// n8n's lint, and execute() falls back to POLL_TIMEOUT_MS. If they
+		// drift, the UI promises one wait and the node applies another, and
+		// only one of the two paths would ever be tested.
+		expect(maxWait()?.default).toBe(POLL_TIMEOUT_MS / 1000);
+	});
+
+	it('sits inside the range the field advertises', () => {
+		const opts = maxWait()?.typeOptions as { minValue: number; maxValue: number };
+		expect(maxWait()?.default).toBeGreaterThanOrEqual(opts.minValue);
+		expect(maxWait()?.default).toBeLessThanOrEqual(opts.maxValue);
+	});
+});
+
+describe('Lenz node - rate limit (HTTP 429)', () => {
+	// The /extract daily cap, and any other rate limit. Extract Claims is free
+	// and capped per account per day, so this is the refusal a busy workflow
+	// meets most — and the one the node had no typed handling for at all: it
+	// arrived as n8n's stock "Request failed with status code 429", and the
+	// error output carried no `retry_after`, because the branch read
+	// `body.retry_after` and a 429 states `reset_in_seconds` instead.
+	//
+	// The real body shape, per the API: { detail, code, limit,
+	// reset_in_seconds, upgrade_url }.
+	const dailyCap = {
+		detail: 'Daily extract cap reached.',
+		code: 'rate_limited',
+		limit: 1000,
+		reset_in_seconds: 32400,
+		upgrade_url: 'https://lenz.io/plans',
+	};
+
+	const burst = {
+		detail: 'Too many requests.',
+		code: 'rate_limited',
+		limit: 60,
+		reset_in_seconds: 45,
+	};
+
+	async function expectRateLimitError(body: Record<string, unknown>) {
+		const { ctx } = createContext({ operation: 'extract', text: 'Some text' }, () => {
+			throw apiError(429, body);
+		});
+		const err = await new Lenz().execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(err).toBeInstanceOf(NodeApiError);
+		return err as NodeApiError;
+	}
+
+	it('names the cap, the reset and that nothing was charged', async () => {
+		const err = await expectRateLimitError(dailyCap);
+		expect(err.message).toContain('Daily extract cap reached');
+		expect(err.description).toContain('Nothing was charged');
+		expect(err.description).toContain('1000');
+		expect(err.httpCode).toBe('429');
+		// Not n8n's stock wording, which named none of the above.
+		expect(err.message).not.toContain('Request failed with status code');
+	});
+
+	it('reports a long reset in hours, not five digits of seconds', async () => {
+		const err = await expectRateLimitError(dailyCap);
+		// 32400s is 9 hours. Nobody reads that as a number of seconds.
+		expect(err.message).toContain('9 hours');
+		expect(err.message).not.toContain('32400');
+	});
+
+	it('does NOT prescribe a Wait node for a reset that lasts most of a day', async () => {
+		// The 503 advice copied verbatim would park an execution until
+		// midnight UTC, which is worse than failing.
+		const err = await expectRateLimitError(dailyCap);
+		// Asserted on what the advice tells the user to DO, not on a phrase.
+		// The earlier wording claimed a Wait node "holds the execution open",
+		// which overstated n8n's internals — it offloads long waits — so the
+		// reason changed while the advice did not.
+		expect(err.description).toContain('too long to wait inside a workflow');
+		expect(err.description).toContain('Re-run the workflow after the reset');
+		expect(err.description).toContain('https://lenz.io/plans');
+		// And it must not send them to the Wait-node loop.
+		expect(err.description).not.toContain('Wait node set');
+	});
+
+	it('DOES prescribe the Wait-node loop for a short burst limit', async () => {
+		const err = await expectRateLimitError(burst);
+		expect(err.message).toContain('45s');
+		expect(err.description).toContain('Wait node');
+		expect(err.description).toContain('retry_after');
+	});
+
+	it('carries retry_after on the error output, read from reset_in_seconds', async () => {
+		// The headline bug: the documented Wait-node recovery fed the Wait node
+		// `undefined`, because the error output only ever read `retry_after`.
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(429, burst);
+			},
+			true, // continueOnFail
+		);
+
+		const json = output[0].json as IDataObject;
+		expect(json.retry_after).toBe(45);
+		expect(json.status_code).toBe(429);
+		expect(json.code).toBe('rate_limited');
+		expect(json.error_message).toContain('Too many requests');
+		expect(json.error_description).toContain('Nothing was charged');
+	});
+
+	it('still carries the 503 spelling, so capacity refusals are unaffected', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'A claim' },
+			() => {
+				throw apiError(503, { code: 'capacity', retry_after: 90 });
+			},
+			true, // continueOnFail
+		);
+		expect((output[0].json as IDataObject).retry_after).toBe(90);
+	});
+
+	it('omits retry_after when the body states no wait, rather than inventing one', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(429, { detail: 'Slow down.', code: 'rate_limited' });
+			},
+			true, // continueOnFail
+		);
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('retry_after');
+		// A Wait node reading an absent key gets nothing, which is honest; a
+		// fabricated 0 would loop instantly and re-trip the limiter.
+		expect(json.error_description).toContain('Retry later');
+	});
+
+
+	it('does NOT put a day-long cap reset in retry_after, so old workflows still fail fast', async () => {
+		// The regression this split exists to prevent. A workflow already wired
+		// to the documented pattern (error output -> Wait `{{ $json.retry_after }}`
+		// -> loop) got `undefined` here before 429 handling existed, and failed
+		// fast. Emitting 32400 would have made it park for nine hours with no
+		// warning and nothing to branch on — and docs cannot reach a workflow
+		// already saved on someone's instance.
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(429, dailyCap);
+			},
+			true, // continueOnFail
+		);
+
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('retry_after');
+		expect(json.resets_in_seconds).toBe(32400);
+	});
+
+	it('does not blame the user plan for a 429 that never reached Lenz', async () => {
+		// A CDN, WAF or egress throttle answers 429 with no JSON body. Reporting
+		// that as "raise your Lenz cap", with a billing link, names the wrong
+		// cause and sells a fix for a problem they do not have.
+		const err = await expectRateLimitError({});
+		expect(err.message).toContain('before it reached Lenz');
+		expect(err.description).not.toContain('stated limit');
+		// The half that used to slip through: the headline said "never
+		// reached Lenz" and the description still ended "raise the cap:
+		// https://lenz.io/plans". A plan change cannot lift a CDN's limit.
+		expect(err.description).not.toContain('raise the cap');
+		expect(err.description).not.toContain('lenz.io/plans');
+		expect(err.description).toContain("not Lenz's own");
+		expect(err.httpCode).toBe('429');
+	});
+
+	it('still offers the upgrade path for a Lenz limit that states no wait', async () => {
+		// The mirror, so the gate above cannot pass by never offering it.
+		const err = await expectRateLimitError({ detail: 'Slow down.', code: 'rate_limited' });
+		expect(err.description).toContain('raise the cap');
+	});
+
+	it('names the Wait unit, because the Wait node defaults to hours', async () => {
+		// n8n's Wait node ships with Wait Unit = Hours. Advice that says only
+		// "set it to {{ $json.retry_after }}" turns a 45-second limit into a
+		// 45-hour wait for anyone who leaves the unit alone.
+		const err = await expectRateLimitError({
+			detail: 'Too many requests.',
+			code: 'rate_limited',
+			reset_in_seconds: 45,
+		});
+		expect(err.description).toContain('Wait Unit set to Seconds');
+		expect(err.description).toContain('defaults to Hours');
+	});
+
+	it('names the Wait unit on a capacity 503 too', async () => {
+		const { ctx } = createContext({ operation: 'verify', claim: 'claim' }, () => {
+			throw apiError(503, { code: 'capacity', retry_after: 90 });
+		});
+		const err = (await new Lenz().execute.call(ctx).then(
+			() => null,
+			(e: unknown) => e,
+		)) as NodeApiError;
+		expect(err.description).toContain('Wait Unit: Seconds');
+		expect(err.description).toContain('90 seconds');
+	});
+
+	it('does not contradict itself on a Lenz 429 that lacks a code', async () => {
+		// Keyed on `code` alone, this read as foreign: Lenz's own text as the
+		// headline, then "This limit is not Lenz's own" underneath it.
+		const err = await expectRateLimitError({ detail: 'Slow down.' });
+		expect(err.message).toContain('Slow down.');
+		expect(err.description).not.toContain("not Lenz's own");
+		expect(err.description).toContain('raise the cap');
+	});
+
+	it('states the real duration of a long reset rather than "hours"', async () => {
+		// A ten-minute burst limit is over the Wait-node threshold, and used to
+		// be told the execution "stays pending for hours".
+		const err = await expectRateLimitError({
+			detail: 'Too many requests.',
+			code: 'rate_limited',
+			reset_in_seconds: 600,
+		});
+		expect(err.description).toContain('~10 minutes');
+		expect(err.description).not.toContain('hours');
+	});
+
+	it('carries limit and upgrade_url only for a Lenz rate limit', async () => {
+		// Not from any body that happens to hold the key — a proxy 429, or an
+		// unrelated error with a numeric `limit`, is not Lenz's limit.
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(400, { detail: 'Bad input.', limit: 50, upgrade_url: 'https://x.test' });
+			},
+			true, // continueOnFail
+		);
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('limit');
+		expect(json).not.toHaveProperty('upgrade_url');
+	});
+
+	it('carries upgrade_url on an out-of-credits 402, where topping up is the fix', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'A claim' },
+			() => {
+				throw apiError(402, {
+					detail: 'No credits.',
+					cost: 10,
+					credits_remaining: 0,
+					upgrade_url: 'https://lenz.io/plans',
+				});
+			},
+			true, // continueOnFail
+		);
+		expect((output[0].json as IDataObject).upgrade_url).toBe('https://lenz.io/plans');
+	});
+
+	it('keeps retry_after on a long 503 — only a 429 is split', async () => {
+		// A 503 always emitted retry_after, and its own message says to set a
+		// Wait node to it. Splitting it at 300s like a cap reset handed that
+		// documented Wait node `undefined`.
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'A claim' },
+			() => {
+				throw apiError(503, { code: 'capacity', retry_after: 400 });
+			},
+			true, // continueOnFail
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.retry_after).toBe(400);
+		expect(json).not.toHaveProperty('resets_in_seconds');
+	});
+
+	it('does not render an empty detail as a bare full stop', async () => {
+		const err = await expectRateLimitError({
+			detail: '',
+			code: 'rate_limited',
+			reset_in_seconds: 45,
+		});
+		expect(err.message).not.toContain('Lenz: .');
+		expect(err.message).toContain('Rate limit reached');
+	});
+
+	it('carries limit and upgrade_url so a workflow can tell which cap it hit', async () => {
+		// Without these, a 45-second burst limit and a nine-hour daily cap are
+		// indistinguishable on the wire: same status_code, same code, and a
+		// retry_after differing only in magnitude. The judgement about which is
+		// which stays the caller's — branch on `retry_after > 300` — but the
+		// facts the API stated should not be locked inside English prose.
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Some text' },
+			() => {
+				throw apiError(429, dailyCap);
+			},
+			true, // continueOnFail
+		);
+
+		const json = output[0].json as IDataObject;
+		expect(json.limit).toBe(1000);
+		expect(json.upgrade_url).toBe('https://lenz.io/plans');
+		expect(json.resets_in_seconds).toBe(32400);
+	});
+
+	it('does not run two sentences together when detail lacks punctuation', async () => {
+		// `detail` is free text. "Rate limit exceeded" with no full stop used to
+		// render as "Lenz: Rate limit exceeded Resets in ~9 hours."
+		const err = await expectRateLimitError({
+			detail: 'Rate limit exceeded',
+			code: 'rate_limited',
+			reset_in_seconds: 32400,
+		});
+		expect(err.message).toContain('Rate limit exceeded. Resets in');
+		expect(err.message).not.toContain('exceeded Resets');
+	});
+
+	it('does not double the full stop when detail already has one', async () => {
+		const err = await expectRateLimitError(burst);
+		expect(err.message).not.toContain('..');
+	});
+
+	it('leaves a 402 without a retry_after, since topping up is not a wait', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'A claim' },
+			() => {
+				throw apiError(402, { detail: 'No credits.', cost: 10, credits_remaining: 4 });
+			},
+			true, // continueOnFail
+		);
+		const json = output[0].json as IDataObject;
+		expect(json).not.toHaveProperty('retry_after');
+		expect(json.cost).toBe(10);
+		expect(json.credits_remaining).toBe(4);
 	});
 });
