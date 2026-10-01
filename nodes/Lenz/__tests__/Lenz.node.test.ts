@@ -194,6 +194,7 @@ describe('Lenz node - Verify (Deep)', () => {
 			lenz_score: 2,
 			key_finding: 'The figure is off by an order of magnitude.',
 			executive_summary: 'This claim is false.',
+			suggested_rewrite: 'The figure is closer to 4 million.',
 			warnings: ['stale source'],
 			domain: 'Finance',
 			entities: [{ name: 'Acme', qid: 'Q42' }],
@@ -270,6 +271,44 @@ describe('Lenz node - Verify (Deep)', () => {
 		});
 		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, responder);
 		expect((output[0].json as IDataObject).key_finding).toBe('');
+	});
+
+	describe('suggested_rewrite (Lenz#916)', () => {
+		const completed = (result: IDataObject) =>
+			verifyResponder({
+				status: 'completed',
+				result: { verification_id: 'ver_sr', verdict: 'True', confidence: 'high', sources: [], ...result },
+			});
+
+		it('passes the rewrite through on a false claim', async () => {
+			const { output } = await runNode(
+				{ operation: 'verify', claim: 'Some claim' },
+				verifyResponder(completedStatus),
+			);
+			expect((output[0].json as IDataObject).suggested_rewrite).toBe('The figure is closer to 4 million.');
+		});
+
+		it('reads "" for a true claim, whose rewrite is null', async () => {
+			const { output } = await runNode(
+				{ operation: 'verify', claim: 'Some claim' },
+				completed({ suggested_rewrite: null }),
+			);
+			const json = output[0].json as IDataObject;
+			expect(json).toHaveProperty('suggested_rewrite', '');
+		});
+
+		it('reads "" when the key is absent (a verification from before the field)', async () => {
+			const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, completed({}));
+			expect((output[0].json as IDataObject).suggested_rewrite).toBe('');
+		});
+
+		it('reads "" for anything that is not a string', async () => {
+			const { output } = await runNode(
+				{ operation: 'verify', claim: 'Some claim' },
+				completed({ suggested_rewrite: { text: 'x' } }),
+			);
+			expect((output[0].json as IDataObject).suggested_rewrite).toBe('');
+		});
 	});
 
 	it('returns the verdict even when sources is not a list', async () => {
@@ -475,14 +514,20 @@ describe('Lenz node - Get Verify Status', () => {
 			expect(options.url).toBe('/verify/status/task_9');
 			return {
 				status: 'completed',
-				result: { verification_id: 'ver_9', verdict: 'True', key_finding: 'Checks out.' },
+				result: {
+					verification_id: 'ver_9',
+					verdict: 'Mostly False',
+					key_finding: 'Off by a year.',
+					suggested_rewrite: 'It opened in 1889.',
+				},
 			};
 		};
 		const { output } = await runNode({ operation: 'verifyStatus', taskId: 'task_9' }, responder);
 		const json = output[0].json as IDataObject;
 		expect(json.status).toBe('completed');
-		expect(json.passed).toBe(true);
-		expect(json.key_finding).toBe('Checks out.');
+		expect(json.passed).toBe(false);
+		expect(json.key_finding).toBe('Off by a year.');
+		expect(json.suggested_rewrite).toBe('It opened in 1889.');
 	});
 
 	it('reports an in-flight task as processing with its progress', async () => {
@@ -821,6 +866,7 @@ describe('Lenz node - stored verifications', () => {
 				verification_id: 'ver_5',
 				verdict: 'Mostly True',
 				key_finding: 'Broadly right.',
+				suggested_rewrite: null,
 				audit: { panel_agreement: 'majority' },
 				sources: [],
 			};
@@ -832,6 +878,7 @@ describe('Lenz node - stored verifications', () => {
 		const json = output[0].json as IDataObject;
 		expect(json.passed).toBe(true);
 		expect(json.key_finding).toBe('Broadly right.');
+		expect(json.suggested_rewrite).toBe('');
 		// audit is opt-in here too
 		expect(json.audit).toBeUndefined();
 	});

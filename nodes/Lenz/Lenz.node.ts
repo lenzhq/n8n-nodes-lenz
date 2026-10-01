@@ -536,6 +536,14 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 		lenz_score: result.lenz_score ?? null,
 		key_finding: result.key_finding ?? '',
 		executive_summary: result.executive_summary ?? '',
+		// A suggested rewrite of `claim` that the verification's findings
+		// support. It has NOT been verified itself: a person reviews it before
+		// using it. The API sends null for a true claim, when no correction is
+		// established, and on verifications that predate the field (where the
+		// key is absent); all of those read '' here, like key_finding, so an IF
+		// node's "is empty" holds either way. The name matches the API, both
+		// SDKs and the Zapier app, and is a public contract: never rename it.
+		suggested_rewrite: typeof result.suggested_rewrite === 'string' ? result.suggested_rewrite : '',
 		warnings: result.warnings ?? [],
 		claim: result.claim ?? '',
 		domain: result.domain ?? '',
