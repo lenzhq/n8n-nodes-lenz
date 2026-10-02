@@ -2464,16 +2464,23 @@ describe('Lenz node - Authentication', () => {
 
 	// n8n does not save a parameter left at its default, so what an existing
 	// node uses is the default of the copy shown at ITS version.
+	// Matched the way n8n's credential window matches it: a plain `includes`
+	// on a literal version list. A `_cnd` range there matches nothing, and the
+	// API key / OAuth chooser disappears from the credential window.
 	const authenticationDefaultAt = (version: number) => {
-		const shown = new Lenz().description.properties.filter((p) => {
-			if (p.name !== 'authentication') return false;
-			const cnd = (p.displayOptions?.show?.['@version'] as Array<{ _cnd: { lt?: number; gte?: number } }>)[0]
-				._cnd;
-			return (cnd.lt === undefined || version < cnd.lt) && (cnd.gte === undefined || version >= cnd.gte);
-		});
+		const shown = new Lenz().description.properties.filter(
+			(p) =>
+				p.name === 'authentication' &&
+				(p.displayOptions?.show?.['@version'] as unknown[]).includes(version),
+		);
 		expect(shown).toHaveLength(1);
 		return shown[0].default;
 	};
+
+	it('lists every node version under exactly one authentication copy', () => {
+		const versions = new Lenz().description.version as number[];
+		for (const version of versions) authenticationDefaultAt(version);
+	});
 
 	it.each([
 		[1, 'apiKey'],

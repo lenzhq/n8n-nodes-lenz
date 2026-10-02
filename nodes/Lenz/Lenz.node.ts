@@ -740,7 +740,13 @@ export class Lenz implements INodeType {
 			// on 1 or 1.1 has no `authentication` value and reads the default of
 			// the copy for ITS version: API key, which is what it always used.
 			// Changing that default would move every existing node off its key.
-			// A node added from 1.2 on starts on OAuth instead. The VALUE
+			// A node added from 1.2 on starts on OAuth instead.
+			//
+			// The versions are LITERAL lists, not `_cnd` ranges like the rest of
+			// this file: n8n's credential window builds its API key / OAuth
+			// chooser by matching `@version` with a plain `includes`, so a range
+			// matches nothing and the chooser disappears. A new version must be
+			// added to the second list by hand. The VALUE
 			// `oAuth2` is saved in workflows and never changes; the label is free.
 			{
 				displayName: 'Authentication',
@@ -749,7 +755,7 @@ export class Lenz implements INodeType {
 				noDataExpression: true,
 				options: AUTHENTICATION_OPTIONS,
 				default: 'apiKey',
-				displayOptions: { show: { '@version': [{ _cnd: { lt: 1.2 } }] } },
+				displayOptions: { show: { '@version': [1, 1.1] } },
 			},
 			{
 				displayName: 'Authentication',
@@ -758,7 +764,7 @@ export class Lenz implements INodeType {
 				noDataExpression: true,
 				options: AUTHENTICATION_OPTIONS,
 				default: 'oAuth2',
-				displayOptions: { show: { '@version': [{ _cnd: { gte: 1.2 } }] } },
+				displayOptions: { show: { '@version': [1.2] } },
 			},
 			// Resource + Operation (node version 1.1 and later). Version 1 keeps the
 			// flat operation list it shipped with, so nodes already saved in a
