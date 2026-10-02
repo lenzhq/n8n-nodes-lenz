@@ -2441,3 +2441,57 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		expect(json.credits_remaining).toBe(4);
 	});
 });
+
+describe('Lenz node - Authentication', () => {
+	const usage: Responder = (options) => {
+		expect(options.url).toBe('/me/usage');
+		return { credits: { remaining: 10 } };
+	};
+
+	it.each([
+		['apiKey', 'lenzApi'],
+		['oAuth2', 'lenzOAuth2Api'],
+	])('authentication %s sends through the %s credential', async (authentication, credential) => {
+		const { httpMock } = await runNode({ operation: 'usage', authentication }, usage);
+		expect(httpMock).toHaveBeenCalled();
+		for (const call of httpMock.mock.calls) expect(call[0]).toBe(credential);
+	});
+
+	it('a node with no authentication value keeps its API key', async () => {
+		const { httpMock } = await runNode({ operation: 'usage' }, usage);
+		expect(httpMock.mock.calls[0][0]).toBe('lenzApi');
+	});
+
+	// n8n does not save a parameter left at its default, so what an existing
+	// node uses is the default of the copy shown at ITS version.
+	const authenticationDefaultAt = (version: number) => {
+		const shown = new Lenz().description.properties.filter((p) => {
+			if (p.name !== 'authentication') return false;
+			const cnd = (p.displayOptions?.show?.['@version'] as Array<{ _cnd: { lt?: number; gte?: number } }>)[0]
+				._cnd;
+			return (cnd.lt === undefined || version < cnd.lt) && (cnd.gte === undefined || version >= cnd.gte);
+		});
+		expect(shown).toHaveLength(1);
+		return shown[0].default;
+	};
+
+	it.each([
+		[1, 'apiKey'],
+		[1.1, 'apiKey'],
+		[1.2, 'oAuth2'],
+	])('version %s defaults to %s', (version, expected) => {
+		expect(authenticationDefaultAt(version)).toBe(expected);
+	});
+
+	it('a new node is created at the version that defaults to OAuth', () => {
+		const versions = new Lenz().description.version as number[];
+		expect(Math.max(...versions)).toBe(1.2);
+	});
+
+	it('offers each credential only under its own authentication value', () => {
+		expect(new Lenz().description.credentials).toEqual([
+			{ name: 'lenzApi', required: true, displayOptions: { show: { authentication: ['apiKey'] } } },
+			{ name: 'lenzOAuth2Api', required: true, displayOptions: { show: { authentication: ['oAuth2'] } } },
+		]);
+	});
+});

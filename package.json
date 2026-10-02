@@ -41,7 +41,8 @@
         "n8nNodesApiVersion": 1,
         "strict": true,
         "credentials": [
-            "dist/credentials/LenzApi.credentials.js"
+            "dist/credentials/LenzApi.credentials.js",
+            "dist/credentials/LenzOAuth2Api.credentials.js"
         ],
         "nodes": [
             "dist/nodes/Lenz/Lenz.node.js"

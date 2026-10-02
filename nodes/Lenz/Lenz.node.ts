@@ -693,13 +693,27 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 	return Math.ceil(seconds) * 1000;
 }
 
+const AUTHENTICATION_OPTIONS = [
+	{
+		name: 'OAuth (Recommended)',
+		value: 'oAuth2',
+		description:
+			'Sign in with your Lenz account; n8n registers itself with Lenz automatically, no API key needed',
+	},
+	{
+		name: 'API Key',
+		value: 'apiKey',
+		description: 'Paste a Lenz API key',
+	},
+];
+
 export class Lenz implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Lenz',
 		name: 'lenz',
 		icon: { light: 'file:lenz.svg', dark: 'file:lenz.dark.svg' },
 		group: ['transform'],
-		version: [1, 1.1],
+		version: [1, 1.1, 1.2],
 		subtitle: '={{$parameter["operation"]}}',
 		description: 'Fact-check claims and catch AI hallucinations with sourced, audit-grade verdicts',
 		defaults: {
@@ -712,9 +726,40 @@ export class Lenz implements INodeType {
 			{
 				name: 'lenzApi',
 				required: true,
+				displayOptions: { show: { authentication: ['apiKey'] } },
+			},
+			{
+				name: 'lenzOAuth2Api',
+				required: true,
+				displayOptions: { show: { authentication: ['oAuth2'] } },
 			},
 		],
 		properties: [
+			// Authentication. Two copies of one parameter, never shown together.
+			// n8n does not save a parameter left at its default, so a node saved
+			// on 1 or 1.1 has no `authentication` value and reads the default of
+			// the copy for ITS version: API key, which is what it always used.
+			// Changing that default would move every existing node off its key.
+			// A node added from 1.2 on starts on OAuth instead. The VALUE
+			// `oAuth2` is saved in workflows and never changes; the label is free.
+			{
+				displayName: 'Authentication',
+				name: 'authentication',
+				type: 'options',
+				noDataExpression: true,
+				options: AUTHENTICATION_OPTIONS,
+				default: 'apiKey',
+				displayOptions: { show: { '@version': [{ _cnd: { lt: 1.2 } }] } },
+			},
+			{
+				displayName: 'Authentication',
+				name: 'authentication',
+				type: 'options',
+				noDataExpression: true,
+				options: AUTHENTICATION_OPTIONS,
+				default: 'oAuth2',
+				displayOptions: { show: { '@version': [{ _cnd: { gte: 1.2 } }] } },
+			},
 			// Resource + Operation (node version 1.1 and later). Version 1 keeps the
 			// flat operation list it shipped with, so nodes already saved in a
 			// workflow are untouched — see the legacy Operation property below.
@@ -1336,6 +1381,11 @@ export class Lenz implements INodeType {
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
 		// n8n. No third-party SDK — this is the required shape for a verified
 		// community node (zero runtime dependencies).
+		// Read once: the credential is per node, not per item.
+		const credentialType =
+			(this.getNodeParameter('authentication', 0, 'apiKey') as string) === 'oAuth2'
+				? 'lenzOAuth2Api'
+				: 'lenzApi';
 		const lenzRequest = async (
 			method: IHttpRequestMethods,
 			path: string,
@@ -1372,7 +1422,7 @@ export class Lenz implements INodeType {
 			}
 			return (await this.helpers.httpRequestWithAuthentication.call(
 				this,
-				'lenzApi',
+				credentialType,
 				options,
 			)) as IDataObject;
 		};
