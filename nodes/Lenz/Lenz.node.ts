@@ -695,7 +695,7 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 
 const AUTHENTICATION_OPTIONS = [
 	{
-		name: 'OAuth (Recommended)',
+		name: 'OAuth',
 		value: 'oAuth2',
 		description:
 			'Sign in with your Lenz account; n8n registers itself with Lenz automatically, no API key needed',
