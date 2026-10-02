@@ -48,7 +48,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | **Select Claims** | Resolves a paused verification (see [Multi-claim input](#multi-claim-input)). |
 | **Submit Batch** | Submits up to 20 claims at once without waiting. Returns one item per spawned task. Each claim can override the batch **Depth**, so one batch can mix 5- and 10-credit checks. |
 | **Get** | Retrieves a stored verification report by `verification_id`. |
-| **Get Many** | Lists the verifications stored against this API key, with **Return All** / **Limit**. |
+| **Get Many** | Lists the verifications stored in your Lenz account, with **Return All** / **Limit**. |
 | **List Related** | Public verifications semantically related to a given one — useful for "see also" surfaces. |
 | **Delete** | Permanently deletes one of your stored verifications. |
 
@@ -65,6 +65,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Get Usage** | Returns your credit balance and the per-endpoint price list (`costs`), plus the same balance projected into each capability (`assess` / `verify` / `ask`), the `extract` daily cap, your current plan, and when credits reset. Prices that depend on a request parameter are under `cost_options` instead, nested capability → parameter → value — today `cost_options.verify.depth.low` is 5 against a default of 10. That is the only place it appears: it is a price rather than a capability, so it has no balance block of its own, and `costs` carries just the four capability keys (`verify`, `assess`, `ask`, `extract`). To size how many low-depth checks you can afford, divide `credits.remaining` by `cost_options.verify.depth.low`. If that block is missing, `costs.verify` is a safe fallback but it is the *standard* price, so it understates the answer by half. |
+| **Get Webhook Secret** | OAuth connections only. Returns `webhook_secret`, the secret Lenz signs this connection's webhook deliveries with — verify each delivery's signature with it. Lenz creates it on this first call and refuses a **Webhook URL** until it exists; reconnecting gives the connection a new one. An API key's secret is set and shown on [lenz.io/api-credentials](https://lenz.io/api-credentials) instead. |
 
 The per-capability blocks (`verify` / `ask` / `assess`) and each block's `credits` alias are **deprecated, and the API removes them on 2026-11-29**. They are projections of the one balance, not separate allowances, so derive them instead and branch on the balance itself: `Math.floor(credits.remaining / costs[capability])`. Note the single slash — in an n8n expression `//` starts a comment, so the older form silently returned the raw balance. Only divide for a capability that costs credits: `costs.extract` is `0`. An **IF** node reading `{{ $json.verify.remaining }}` today will stop resolving on that date.
 
@@ -84,14 +85,25 @@ Note that **Assess bills per claim found in the text**, not per request: a parag
 
 ## Credentials
 
-You'll need a free Lenz API key:
+Connect with your Lenz account (**OAuth**, the default on a new node) or with an API key. When you create a credential from a Lenz node, the credential window lets you pick either one.
 
-1. Sign up at [lenz.io/api-credentials](https://lenz.io/api-credentials) to get a key (starts with `lenz_`).
-2. In n8n, add new credentials of type **Lenz API**, paste the key, and click **Test** to confirm it's valid.
+**OAuth (Lenz OAuth2 API)** — nothing to copy or paste:
+
+1. On a Lenz node, open **Credential to connect with → Create new credential** and keep **OAuth** selected.
+2. Click **Connect my account**, sign in to Lenz and click **Allow**.
+
+n8n registers itself with Lenz the first time you connect, so there is no client ID, secret or redirect URL to set up, and any number of n8n instances and credentials can connect to the same Lenz account. It needs n8n 2.12.0 or later (see [Compatibility](#compatibility)). The OAuth Redirect URL n8n shows must be a public `https://` address, or `http://localhost` for an n8n on your own computer; if it shows an internal address, set `WEBHOOK_URL` to your instance's real address and restart n8n. Disconnect it any time under **Connected apps** in your Lenz account. To use a **Webhook URL** over OAuth, run **Account → Get Webhook Secret** once first: Lenz signs that connection's deliveries with it, and refuses a webhook URL until it has been fetched. Reconnecting gives the connection a new secret.
+
+**API key (Lenz API):**
+
+1. Get a free key at [lenz.io/api-credentials](https://lenz.io/api-credentials) (it starts with `lenz_`).
+2. Create a credential, pick **API Key**, paste the key and click **Save**; n8n tests it straight away.
+
+Nodes you added before OAuth existed keep using their API key: nothing changes for them unless you switch.
 
 ## Compatibility
 
-Built against `n8n-workflow` (n8n API version 1) and tested against n8n v2.30.4. No known version incompatibilities.
+Built against `n8n-workflow` (n8n API version 1) and tested against n8n v2.30.4; the OAuth credential against v2.41.6. **OAuth needs n8n 2.12.0 or later**, the first release that finds Lenz's OAuth metadata. On an older n8n, use an API key: a new Lenz node starts on OAuth, so pick **API Key** in the credential window.
 
 ## Usage
 

@@ -48,7 +48,19 @@ const properties = description.properties;
 const versions = Array.isArray(description.version) ? description.version : [description.version];
 const typeVersion = Math.max(...versions);
 const nodeType = `${pkg.name}.${description.name}`;
-const credentialName = (description.credentials ?? [])[0]?.name ?? '';
+// The credential a node at `typeVersion` asks for when its workflow JSON sets
+// no `authentication`: the default of the authentication copy shown at that
+// version, mapped through the credentials' displayOptions. Taking the first
+// credential named the API-key one while a new node defaults to OAuth.
+const authCopy = properties.find(
+	(p) => p.name === 'authentication' && (p.displayOptions?.show?.['@version'] ?? []).includes(typeVersion),
+);
+const credentialFor = (value) =>
+	(description.credentials ?? []).find((c) => (c.displayOptions?.show?.authentication ?? []).includes(value))
+		?.name ?? '';
+const defaultAuthentication = authCopy?.default ?? '';
+const credentialName = authCopy ? credentialFor(defaultAuthentication) : (description.credentials ?? [])[0]?.name ?? '';
+const otherAuthentication = authCopy?.options?.find((o) => o.value !== defaultAuthentication);
 
 const show = (p) => p.displayOptions?.show ?? {};
 const isResourceScoped = (p) => Array.isArray(show(p).resource);
@@ -75,6 +87,11 @@ lines.push('|---|---|');
 lines.push(`| Node type | \`${nodeType}\` |`);
 lines.push(`| \`typeVersion\` | \`${typeVersion}\` |`);
 lines.push(`| Credential type | \`${credentialName}\` — **omit the \`credentials\` block entirely** (see rules) |`);
+if (otherAuthentication) {
+	lines.push(
+		`| \`authentication\` | Omit it: the node defaults to \`${defaultAuthentication}\` (\`${credentialName}\`). Set \`"${otherAuthentication.value}"\` only if asked to use \`${credentialFor(otherAuthentication.value)}\` |`,
+	);
+}
 lines.push(`| Inputs / outputs | ${description.inputs.length} main in, ${description.outputs.length} main out |`);
 lines.push('');
 // Deliberately no version here. `prompt:check` compares this block byte-for-

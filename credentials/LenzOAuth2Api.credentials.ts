@@ -20,15 +20,8 @@ export class LenzOAuth2Api implements ICredentialType {
 	properties: INodeProperties[] = [
 		{
 			displayName:
-				'This one-click connection requires a recent version of n8n. If the <b>Connect</b> button does not work, update n8n, or use the <b>Lenz API</b> credential (API key) instead.',
-			name: 'versionNotice',
-			type: 'notice',
-			default: '',
-		},
-		{
-			displayName:
-				'Getting an error when connecting? Check the <b>OAuth Redirect URL</b> shown above: Lenz accepts a public <code>https://</code> address, or <code>http://localhost</code> for an n8n on your own computer. If it shows an internal address such as <code>http://n8n.local:5678</code>, set the <code>WEBHOOK_URL</code> environment variable to your instance\'s real HTTPS address and restart n8n.',
-			name: 'redirectUrlNotice',
+				'Click <b>Connect my account</b> and sign in to Lenz — nothing to fill in. Lenz needs the redirect URL above to be a public <code>https://</code> address or <code>http://localhost</code>; it needs n8n 2.12 or later; otherwise use an API key.',
+			name: 'connectNotice',
 			type: 'notice',
 			default: '',
 		},

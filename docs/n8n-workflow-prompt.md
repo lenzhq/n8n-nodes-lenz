@@ -26,8 +26,9 @@ your assumptions in one line underneath.
 | Field | Value |
 |---|---|
 | Node type | `n8n-nodes-lenz.lenz` |
-| `typeVersion` | `1.1` |
-| Credential type | `lenzApi` — **omit the `credentials` block entirely** (see rules) |
+| `typeVersion` | `1.2` |
+| Credential type | `lenzOAuth2Api` — **omit the `credentials` block entirely** (see rules) |
+| `authentication` | Omit it: the node defaults to `oAuth2` (`lenzOAuth2Api`). Set `"apiKey"` only if asked to use `lenzApi` |
 | Inputs / outputs | 1 main in, 1 main out |
 
 Generated from `n8n-nodes-lenz`. Do not hand-edit.
@@ -46,7 +47,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 |---|---|---|
 | `deleteVerification` | Permanently delete a stored verification | `verificationId`**\*** |
 | `getVerification` | Retrieve a stored verification report by its ID | `verificationId`**\***, `includeAudit` |
-| `listVerifications` | Retrieve the verifications stored against this API key | `returnAll`, `limit` |
+| `listVerifications` | Retrieve the verifications stored in your Lenz account | `returnAll`, `limit` |
 | `verifyStatus` | Poll a submitted verification task by its task ID | `taskId`**\***, `includeAudit` |
 | `listRelated` | Retrieve public verifications semantically related to a given one | `verificationId`**\***, `relatedLimit` |
 | `select` | Resolve a needs-input interrupt by picking which offered claims to verify | `taskId`**\***, `selectedClaims`**\*** |
@@ -65,6 +66,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 | `operation` | What it does | Parameters |
 |---|---|---|
 | `usage` | Check your account credit balance, what each operation costs, and when credits reset. Credits are per account, shared across your API keys. | — |
+| `webhookSecret` | OAuth connections only: the secret Lenz signs this connection's webhook deliveries with. Run it once before using a Webhook URL; an API key's secret is on lenz.io/api-credentials. | — |
 
 `*` = required. Parameters not listed for an operation are not shown by the node and
 must not appear in the workflow JSON for it.

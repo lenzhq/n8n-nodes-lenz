@@ -853,7 +853,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Get Many',
 						value: 'listVerifications',
-						description: 'Retrieve the verifications stored against this API key',
+						description: 'Retrieve the verifications stored in your Lenz account',
 						action: 'Get many verifications',
 					},
 					{
@@ -927,6 +927,13 @@ export class Lenz implements INodeType {
 						value: 'usage',
 						description: 'Check your account credit balance, what each operation costs, and when credits reset. Credits are per account, shared across your API keys.',
 						action: 'Check usage and credits',
+					},
+					{
+						name: 'Get Webhook Secret',
+						value: 'webhookSecret',
+						description:
+							'OAuth connections only: the secret Lenz signs this connection\'s webhook deliveries with. Run it once before using a Webhook URL; an API key\'s secret is on lenz.io/api-credentials.',
+						action: 'Get the webhook signing secret',
 					},
 				],
 				default: 'usage',
@@ -1095,7 +1102,7 @@ export class Lenz implements INodeType {
 									{
 										name: 'Private',
 										value: 'private',
-										description: 'Only reachable with your API key',
+										description: 'Only reachable with your Lenz credential',
 									},
 									{
 										name: 'Unlisted',
@@ -1253,7 +1260,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['verify', 'verifyBatch'] },
 				},
-				description: 'Optional URL Lenz POSTs the signed result to when the pipeline finishes. Requires an HMAC secret on your API key, otherwise the call is rejected.',
+				description: 'Optional URL Lenz POSTs the signed result to when the pipeline finishes. It needs a signing secret, otherwise the call is rejected: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret once for this connection (reconnecting gives it a new one).',
 			},
 			{
 				displayName: 'Visibility',
@@ -1263,7 +1270,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Private',
 						value: 'private',
-						description: 'Only reachable with your API key',
+						description: 'Only reachable with your Lenz credential',
 					},
 					{
 						name: 'Unlisted',
@@ -2082,6 +2089,18 @@ export class Lenz implements INodeType {
 					continue;
 				} else if (operation === 'usage') {
 					responseData = await lenzRequest('GET', '/me/usage');
+				} else if (operation === 'webhookSecret') {
+					// Lenz mints an OAuth connection's signing secret on this first
+					// read and refuses a webhook_url until then; an API key's secret
+					// is never served over the API (403 oauth_only), so say where it is.
+					if (credentialType !== 'lenzOAuth2Api') {
+						throw new NodeOperationError(
+							this.getNode(),
+							"An API key's webhook secret is set and shown on https://lenz.io/api-credentials, not over the API. Get Webhook Secret is for OAuth connections.",
+							{ itemIndex },
+						);
+					}
+					responseData = await lenzRequest('GET', '/me/webhook-secret');
 				} else {
 					throw new NodeOperationError(this.getNode(), 'Unknown operation: ' + operation, {
 						itemIndex,
