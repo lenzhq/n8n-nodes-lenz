@@ -693,13 +693,27 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 	return Math.ceil(seconds) * 1000;
 }
 
+const AUTHENTICATION_OPTIONS = [
+	{
+		name: 'OAuth',
+		value: 'oAuth2',
+		description:
+			'Sign in with your Lenz account; n8n registers itself with Lenz automatically, no API key needed',
+	},
+	{
+		name: 'API Key',
+		value: 'apiKey',
+		description: 'Paste a Lenz API key',
+	},
+];
+
 export class Lenz implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Lenz',
 		name: 'lenz',
 		icon: { light: 'file:lenz.svg', dark: 'file:lenz.dark.svg' },
 		group: ['transform'],
-		version: [1, 1.1],
+		version: [1, 1.1, 1.2],
 		subtitle: '={{$parameter["operation"]}}',
 		description: 'Fact-check claims and catch AI hallucinations with sourced, audit-grade verdicts',
 		defaults: {
@@ -712,9 +726,46 @@ export class Lenz implements INodeType {
 			{
 				name: 'lenzApi',
 				required: true,
+				displayOptions: { show: { authentication: ['apiKey'] } },
+			},
+			{
+				name: 'lenzOAuth2Api',
+				required: true,
+				displayOptions: { show: { authentication: ['oAuth2'] } },
 			},
 		],
 		properties: [
+			// Authentication. Two copies of one parameter, never shown together.
+			// n8n does not save a parameter left at its default, so a node saved
+			// on 1 or 1.1 has no `authentication` value and reads the default of
+			// the copy for ITS version: API key, which is what it always used.
+			// Changing that default would move every existing node off its key.
+			// A node added from 1.2 on starts on OAuth instead.
+			//
+			// The versions are LITERAL lists, not `_cnd` ranges like the rest of
+			// this file: n8n's credential window builds its API key / OAuth
+			// chooser by matching `@version` with a plain `includes`, so a range
+			// matches nothing and the chooser disappears. A new version must be
+			// added to the second list by hand. The VALUE
+			// `oAuth2` is saved in workflows and never changes; the label is free.
+			{
+				displayName: 'Authentication',
+				name: 'authentication',
+				type: 'options',
+				noDataExpression: true,
+				options: AUTHENTICATION_OPTIONS,
+				default: 'apiKey',
+				displayOptions: { show: { '@version': [1, 1.1] } },
+			},
+			{
+				displayName: 'Authentication',
+				name: 'authentication',
+				type: 'options',
+				noDataExpression: true,
+				options: AUTHENTICATION_OPTIONS,
+				default: 'oAuth2',
+				displayOptions: { show: { '@version': [1.2] } },
+			},
 			// Resource + Operation (node version 1.1 and later). Version 1 keeps the
 			// flat operation list it shipped with, so nodes already saved in a
 			// workflow are untouched — see the legacy Operation property below.
@@ -802,7 +853,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Get Many',
 						value: 'listVerifications',
-						description: 'Retrieve the verifications stored against this API key',
+						description: 'Retrieve the verifications stored in your Lenz account',
 						action: 'Get many verifications',
 					},
 					{
@@ -876,6 +927,13 @@ export class Lenz implements INodeType {
 						value: 'usage',
 						description: 'Check your account credit balance, what each operation costs, and when credits reset. Credits are per account, shared across your API keys.',
 						action: 'Check usage and credits',
+					},
+					{
+						name: 'Get Webhook Secret',
+						value: 'webhookSecret',
+						description:
+							'OAuth connections only: the secret Lenz signs this connection\'s webhook deliveries with. Run it once before using a Webhook URL; an API key\'s secret is on lenz.io/api-credentials.',
+						action: 'Get the webhook signing secret',
 					},
 				],
 				default: 'usage',
@@ -1044,7 +1102,7 @@ export class Lenz implements INodeType {
 									{
 										name: 'Private',
 										value: 'private',
-										description: 'Only reachable with your API key',
+										description: 'Only reachable with your Lenz credential',
 									},
 									{
 										name: 'Unlisted',
@@ -1202,7 +1260,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['verify', 'verifyBatch'] },
 				},
-				description: 'Optional URL Lenz POSTs the signed result to when the pipeline finishes. Requires an HMAC secret on your API key, otherwise the call is rejected.',
+				description: 'Optional URL Lenz POSTs the signed result to when the pipeline finishes. It needs a signing secret, otherwise the call is rejected: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret once for this connection (reconnecting gives it a new one).',
 			},
 			{
 				displayName: 'Visibility',
@@ -1212,7 +1270,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Private',
 						value: 'private',
-						description: 'Only reachable with your API key',
+						description: 'Only reachable with your Lenz credential',
 					},
 					{
 						name: 'Unlisted',
@@ -1336,6 +1394,11 @@ export class Lenz implements INodeType {
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
 		// n8n. No third-party SDK — this is the required shape for a verified
 		// community node (zero runtime dependencies).
+		// Read once: the credential is per node, not per item.
+		const credentialType =
+			(this.getNodeParameter('authentication', 0, 'apiKey') as string) === 'oAuth2'
+				? 'lenzOAuth2Api'
+				: 'lenzApi';
 		const lenzRequest = async (
 			method: IHttpRequestMethods,
 			path: string,
@@ -1372,7 +1435,7 @@ export class Lenz implements INodeType {
 			}
 			return (await this.helpers.httpRequestWithAuthentication.call(
 				this,
-				'lenzApi',
+				credentialType,
 				options,
 			)) as IDataObject;
 		};
@@ -2026,6 +2089,18 @@ export class Lenz implements INodeType {
 					continue;
 				} else if (operation === 'usage') {
 					responseData = await lenzRequest('GET', '/me/usage');
+				} else if (operation === 'webhookSecret') {
+					// Lenz mints an OAuth connection's signing secret on this first
+					// read and refuses a webhook_url until then; an API key's secret
+					// is never served over the API (403 oauth_only), so say where it is.
+					if (credentialType !== 'lenzOAuth2Api') {
+						throw new NodeOperationError(
+							this.getNode(),
+							"An API key's webhook secret is set and shown on https://lenz.io/api-credentials, not over the API. Get Webhook Secret is for OAuth connections.",
+							{ itemIndex },
+						);
+					}
+					responseData = await lenzRequest('GET', '/me/webhook-secret');
 				} else {
 					throw new NodeOperationError(this.getNode(), 'Unknown operation: ' + operation, {
 						itemIndex,

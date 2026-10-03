@@ -54,8 +54,9 @@ function createContext(
 	itemCount = 1,
 	// The node's identity is a test input for the Idempotency-Key: its name is
 	// user-editable free text, and its id is absent on older n8n versions.
-	nodeIdentity: { name?: string; id?: string } = {},
+	nodeIdentity: { name?: string; id?: string; typeVersion?: number } = {},
 ): { ctx: IExecuteFunctions; httpMock: jest.Mock; calls: IHttpRequestOptions[] } {
+	const typeVersion = nodeIdentity.typeVersion ?? 1;
 	const items = Array.from({ length: itemCount }, () => ({ json: {} }));
 	const calls: IHttpRequestOptions[] = [];
 	const httpMock = jest.fn(async (_credType: string, options: IHttpRequestOptions) => {
@@ -66,13 +67,27 @@ function createContext(
 		getInputData: jest.fn(() => items),
 		getNodeParameter: jest.fn((name: string, _itemIndex: number, fallback?: unknown) => {
 			if (name in params) return params[name];
+			// What real n8n does for a parameter the workflow never saved: the
+			// default of the copy shown at the node's version. Modelled for
+			// `authentication` only, the one parameter whose default differs by
+			// version; everything else keeps the caller's fallback.
+			if (name === 'authentication') {
+				const copy = new Lenz().description.properties.find(
+					(p) =>
+						p.name === name &&
+						((p.displayOptions?.show?.['@version'] as unknown[] | undefined) ?? [typeVersion]).includes(
+							typeVersion,
+						),
+				);
+				if (copy) return copy.default;
+			}
 			return fallback;
 		}),
 		getNode: jest.fn(() => ({
 			name: nodeIdentity.name ?? 'Lenz',
 			...(nodeIdentity.id === undefined ? {} : { id: nodeIdentity.id }),
 			type: 'lenz',
-			typeVersion: 1,
+			typeVersion,
 			position: [0, 0],
 		})),
 		getExecutionId: jest.fn(() => 'exec-1'),
@@ -89,7 +104,7 @@ async function runNode(
 	responder: Responder,
 	continueOnFail = false,
 	itemCount = 1,
-	nodeIdentity: { name?: string; id?: string } = {},
+	nodeIdentity: { name?: string; id?: string; typeVersion?: number } = {},
 ) {
 	const { ctx, httpMock, calls } = createContext(
 		params,
@@ -2439,5 +2454,92 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		expect(json).not.toHaveProperty('retry_after');
 		expect(json.cost).toBe(10);
 		expect(json.credits_remaining).toBe(4);
+	});
+});
+
+describe('Lenz node - Authentication', () => {
+	const usage: Responder = (options) => {
+		expect(options.url).toBe('/me/usage');
+		return { credits: { remaining: 10 } };
+	};
+
+	it.each([
+		['apiKey', 'lenzApi'],
+		['oAuth2', 'lenzOAuth2Api'],
+	])('authentication %s sends through the %s credential', async (authentication, credential) => {
+		const { httpMock } = await runNode({ operation: 'usage', authentication }, usage);
+		expect(httpMock).toHaveBeenCalled();
+		for (const call of httpMock.mock.calls) expect(call[0]).toBe(credential);
+	});
+
+	it.each([
+		[1, 'lenzApi'],
+		[1.1, 'lenzApi'],
+		[1.2, 'lenzOAuth2Api'],
+	])('a version %s node that never saved authentication uses %s', async (typeVersion, credential) => {
+		const { httpMock } = await runNode({ operation: 'usage' }, usage, false, 1, { typeVersion });
+		expect(httpMock.mock.calls[0][0]).toBe(credential);
+	});
+
+	describe('Get Webhook Secret', () => {
+		it('fetches the OAuth connection secret', async () => {
+			const responder: Responder = (options) => {
+				expect(options.method).toBe('GET');
+				expect(options.url).toBe('/me/webhook-secret');
+				return { webhook_secret: 'whsec_abc' };
+			};
+			const { output, httpMock } = await runNode(
+				{ operation: 'webhookSecret', authentication: 'oAuth2' },
+				responder,
+			);
+			expect(httpMock.mock.calls[0][0]).toBe('lenzOAuth2Api');
+			expect(output[0].json).toEqual({ webhook_secret: 'whsec_abc' });
+		});
+
+		it('points an API key to the credentials page instead of calling the API', async () => {
+			const ctx = createContext({ operation: 'webhookSecret', authentication: 'apiKey' }, noCall);
+			await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(/lenz\.io\/api-credentials/);
+			expect(ctx.httpMock).not.toHaveBeenCalled();
+		});
+	});
+
+	// n8n does not save a parameter left at its default, so what an existing
+	// node uses is the default of the copy shown at ITS version.
+	// Matched the way n8n's credential window matches it: a plain `includes`
+	// on a literal version list. A `_cnd` range there matches nothing, and the
+	// API key / OAuth chooser disappears from the credential window.
+	const authenticationDefaultAt = (version: number) => {
+		const shown = new Lenz().description.properties.filter(
+			(p) =>
+				p.name === 'authentication' &&
+				(p.displayOptions?.show?.['@version'] as unknown[]).includes(version),
+		);
+		expect(shown).toHaveLength(1);
+		return shown[0].default;
+	};
+
+	it('lists every node version under exactly one authentication copy', () => {
+		const versions = new Lenz().description.version as number[];
+		for (const version of versions) authenticationDefaultAt(version);
+	});
+
+	it.each([
+		[1, 'apiKey'],
+		[1.1, 'apiKey'],
+		[1.2, 'oAuth2'],
+	])('version %s defaults to %s', (version, expected) => {
+		expect(authenticationDefaultAt(version)).toBe(expected);
+	});
+
+	it('a new node is created at the version that defaults to OAuth', () => {
+		const versions = new Lenz().description.version as number[];
+		expect(Math.max(...versions)).toBe(1.2);
+	});
+
+	it('offers each credential only under its own authentication value', () => {
+		expect(new Lenz().description.credentials).toEqual([
+			{ name: 'lenzApi', required: true, displayOptions: { show: { authentication: ['apiKey'] } } },
+			{ name: 'lenzOAuth2Api', required: true, displayOptions: { show: { authentication: ['oAuth2'] } } },
+		]);
 	});
 });
