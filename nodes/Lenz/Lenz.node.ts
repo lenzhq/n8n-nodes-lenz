@@ -701,6 +701,27 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 	return Math.ceil(seconds) * 1000;
 }
 
+// A review or a citation check, as the node hands it on: the API's own body,
+// plus `passed` for an IF node — true only for a completed `clean` outcome,
+// null until there is an outcome, like Verify's.
+function withPassed(job: IDataObject): IDataObject {
+	return { passed: job.status === 'completed' ? job.outcome === 'clean' : null, ...job };
+}
+
+// The review policy (`escalate`) from the node's Options, sending only what
+// the user set: an omitted key takes the API's own default.
+function reviewPolicy(options: IDataObject): IDataObject | undefined {
+	const policy: IDataObject = {};
+	if (Array.isArray(options.verdicts)) policy.verdicts = options.verdicts;
+	if (Array.isArray(options.confidence)) policy.confidence = options.confidence;
+	if (options.maxAssessments !== undefined) policy.max_assessments = Number(options.maxAssessments);
+	if (options.maxVerifications !== undefined) policy.max_verifications = Number(options.maxVerifications);
+	if (typeof options.depth === 'string' && options.depth) policy.depth = options.depth;
+	if (options.maxCitations !== undefined) policy.max_citations = Number(options.maxCitations);
+	if (options.suggestEdits !== undefined) policy.suggest_edits = Boolean(options.suggestEdits);
+	return Object.keys(policy).length ? policy : undefined;
+}
+
 const AUTHENTICATION_OPTIONS = [
 	{
 		name: 'OAuth',
@@ -798,6 +819,10 @@ export class Lenz implements INodeType {
 						value: 'claim',
 					},
 					{
+						name: 'Review',
+						value: 'review',
+					},
+					{
 						name: 'Verification',
 						value: 'verification',
 					},
@@ -836,6 +861,44 @@ export class Lenz implements INodeType {
 					},
 				],
 				default: 'verify',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: {
+					show: { resource: ['review'], '@version': [{ _cnd: { gte: 1.1 } }] },
+				},
+				options: [
+					{
+						name: 'Check Citations',
+						value: 'checkCitations',
+						description:
+							'Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked.',
+						action: 'Check citations',
+					},
+					{
+						name: 'Get Citation Check',
+						value: 'getCitationCheck',
+						description: 'Retrieve a citation check by its ID',
+						action: 'Get a citation check',
+					},
+					{
+						name: 'Get Review',
+						value: 'getReview',
+						description: 'Retrieve a review by its ID',
+						action: 'Get a review',
+					},
+					{
+						name: 'Review Draft',
+						value: 'reviewDraft',
+						description:
+							'Review a whole draft: find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations',
+						action: 'Review a draft',
+					},
+				],
+				default: 'reviewDraft',
 			},
 			{
 				displayName: 'Operation',
@@ -1208,6 +1271,266 @@ export class Lenz implements INodeType {
 				description:
 					'The longest to keep polling before giving up and returning Status "timeout" with the task ID. It is a ceiling, not a delay: a verification that finishes sooner returns as soon as it does. A standard-depth run is about 90s but can run past two minutes, which is why this defaults to 300. Giving up never cancels anything: the task keeps running server-side and stays fetchable with Get Verify Status, so the credits are not lost. Lower it only if the workflow cannot afford to block this long.',
 			},
+			// ── Review / Check Citations ─────────────────────────────────────
+			{
+				displayName: 'Draft',
+				name: 'draft',
+				type: 'string',
+				typeOptions: { rows: 6 },
+				default: '',
+				required: true,
+				displayOptions: {
+					show: { operation: ['reviewDraft'] },
+				},
+				description:
+					'The draft to review, up to 50,000 characters (longer text is cut and reported as input_truncated), or one public http(s) URL to read it from',
+			},
+			{
+				displayName: 'Input',
+				name: 'citationInput',
+				type: 'options',
+				options: [
+					{
+						name: 'Statement-Source Pairs',
+						value: 'pairs',
+						description: 'Up to 20 statements, each with the URL or DOI it cites',
+					},
+					{
+						name: 'Text',
+						value: 'text',
+						description: 'A text with its links, DOIs or [n] markers and a reference list',
+					},
+				],
+				default: 'text',
+				displayOptions: {
+					show: { operation: ['checkCitations'] },
+				},
+			},
+			{
+				displayName: 'Text',
+				name: 'citationText',
+				type: 'string',
+				typeOptions: { rows: 6 },
+				default: '',
+				required: true,
+				displayOptions: {
+					show: { operation: ['checkCitations'], citationInput: ['text'] },
+				},
+				description:
+					'The text to check, up to 50,000 characters, with its citations: markdown links, bare URLs, doi: and doi.org forms, or [n] markers with a reference list',
+			},
+			{
+				displayName: 'Pairs',
+				name: 'citationPairs',
+				type: 'fixedCollection',
+				typeOptions: { multipleValues: true },
+				placeholder: 'Add Pair',
+				default: {},
+				displayOptions: {
+					show: { operation: ['checkCitations'], citationInput: ['pairs'] },
+				},
+				description: 'Statements and the source each one cites: a URL or a DOI, not both',
+				options: [
+					{
+						name: 'pair',
+						displayName: 'Pair',
+						values: [
+							{
+								displayName: 'DOI',
+								name: 'doi',
+								type: 'string',
+								default: '',
+								placeholder: '10.1038/nature12373',
+								description: 'The cited DOI alone. Leave empty when the source is a URL.',
+							},
+							{
+								displayName: 'Statement',
+								name: 'statement',
+								type: 'string',
+								default: '',
+								description: 'The sentence that cites the source, at most 1,000 characters',
+							},
+							{
+								displayName: 'URL',
+								name: 'url',
+								type: 'string',
+								default: '',
+								placeholder: 'https://example.com/article',
+								description: 'The cited page. Leave empty when the source is a DOI.',
+							},
+						],
+					},
+				],
+			},
+			{
+				displayName: 'Max Citations',
+				name: 'maxCitations',
+				type: 'number',
+				default: 20,
+				typeOptions: { minValue: 1, maxValue: 20 },
+				displayOptions: {
+					show: { operation: ['checkCitations'], citationInput: ['text'] },
+				},
+				description:
+					"How many of the text's citations to check, in the order they appear. 1 credit each; the rest are listed in more_citations.",
+			},
+			{
+				displayName: 'Review ID',
+				name: 'reviewId',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: {
+					show: { operation: ['getReview'] },
+				},
+				description: 'The review_id Review Draft returned',
+			},
+			{
+				displayName: 'Issues Only',
+				name: 'issuesOnly',
+				type: 'boolean',
+				default: false,
+				displayOptions: {
+					show: { operation: ['getReview'] },
+				},
+				description:
+					'Whether to leave out claims[] and citations[] and return only the issues, failures and summary',
+			},
+			{
+				displayName: 'Citation Check ID',
+				name: 'citecheckId',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: {
+					show: { operation: ['getCitationCheck'] },
+				},
+				description: 'The citecheck_id Check Citations returned',
+			},
+			{
+				// Same parameter name as Verify's, its own copy: a review runs for
+				// minutes, not ~90s, and the help says so.
+				displayName: 'Wait for Completion',
+				name: 'waitForCompletion',
+				type: 'boolean',
+				default: true,
+				displayOptions: {
+					show: { operation: ['reviewDraft', 'checkCitations'] },
+				},
+				description:
+					'Whether to poll until it finishes. Turn off to return the ID immediately and collect the result later with Get Review / Get Citation Check, or a webhook.',
+			},
+			{
+				displayName: 'Max Wait (Seconds)',
+				name: 'maxWaitSeconds',
+				type: 'number',
+				default: 300,
+				typeOptions: { minValue: 10, maxValue: 900 },
+				displayOptions: {
+					show: { operation: ['reviewDraft', 'checkCitations'], waitForCompletion: [true] },
+				},
+				description:
+					'The longest to keep polling before returning Status "timeout" with the ID. A ceiling, not a delay. A review with deep checks can take several minutes; giving up never cancels it, and Get Review / Get Citation Check fetches it later.',
+			},
+			{
+				displayName: 'Webhook URL',
+				name: 'webhookUrl',
+				type: 'string',
+				default: '',
+				displayOptions: {
+					show: { operation: ['reviewDraft', 'checkCitations'] },
+				},
+				description:
+					'Optional URL Lenz POSTs the signed result to when it finishes (review.completed / citecheck.completed). It needs a signing secret: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret first.',
+			},
+			{
+				displayName: 'Options',
+				name: 'reviewOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				default: {},
+				displayOptions: {
+					show: { operation: ['reviewDraft'] },
+				},
+				options: [
+					{
+						displayName: 'Deep-Check Confidence',
+						name: 'confidence',
+						type: 'multiOptions',
+						options: [
+							{ name: 'High', value: 'high' },
+							{ name: 'Low', value: 'low' },
+							{ name: 'Medium', value: 'medium' },
+						],
+						default: ['low'],
+						description:
+							'Quick-check confidence levels that get a deep check (alongside the verdicts below). Default: low.',
+					},
+					{
+						displayName: 'Deep-Check Verdicts',
+						name: 'verdicts',
+						type: 'multiOptions',
+						options: [
+							{ name: 'False', value: 'False' },
+							{ name: 'Mixed', value: 'Mixed' },
+							{ name: 'Mostly False', value: 'Mostly False' },
+							{ name: 'Mostly True', value: 'Mostly True' },
+							{ name: 'True', value: 'True' },
+						],
+						default: ['False', 'Mostly False', 'Mixed'],
+						description: 'Quick-check verdicts that get a deep check. Default: False, Mostly False, Mixed.',
+					},
+					{
+						displayName: 'Depth',
+						name: 'depth',
+						type: 'options',
+						options: [
+							{ name: 'Standard', value: 'standard', description: '10 credits per deep check' },
+							{
+								name: 'Low',
+								value: 'low',
+								description: 'Fewer sources, no rebuttal round: 5 credits per deep check',
+							},
+						],
+						default: 'standard',
+						description: 'Depth of every deep check',
+					},
+					{
+						displayName: 'Max Citations',
+						name: 'maxCitations',
+						type: 'number',
+						default: 0,
+						typeOptions: { minValue: 0, maxValue: 20 },
+						description:
+							"How many of the draft's citations to check, in order: does each source say what the draft attributes to it? 1 credit each. 0 (the default) skips the citation check.",
+					},
+					{
+						displayName: 'Max Deep Checks',
+						name: 'maxVerifications',
+						type: 'number',
+						default: 5,
+						typeOptions: { minValue: 0, maxValue: 20 },
+						description: 'At most this many claims get a deep check (10 credits each at standard depth)',
+					},
+					{
+						displayName: 'Max Quick Checks',
+						name: 'maxAssessments',
+						type: 'number',
+						default: 20,
+						typeOptions: { minValue: 0, maxValue: 20 },
+						description:
+							"How many of the draft's claims, most check-worthy first, get a quick verdict (1 credit each). 0 checks only the citations.",
+					},
+					{
+						displayName: 'Suggest Edits',
+						name: 'suggestEdits',
+						type: 'boolean',
+						default: false,
+						description:
+							'Whether to add, for each claim with a suggested rewrite, the smallest edits to the draft that make it say what the rewrite says. No extra credits, but the review takes longer. Not verified themselves.',
+					},
+				],
+			},
 			{
 				displayName: 'Include Audit Trail',
 				name: 'includeAudit',
@@ -1288,7 +1611,7 @@ export class Lenz implements INodeType {
 				],
 				default: 'private',
 				displayOptions: {
-					show: { operation: ['verify', 'verifyBatch'] },
+					show: { operation: ['verify', 'verifyBatch', 'reviewDraft'] },
 				},
 				description: 'Who can reach the verification once it completes',
 			},
@@ -1333,7 +1656,9 @@ export class Lenz implements INodeType {
 				placeholder: 'Es',
 				description: 'Optional ISO 639-1 response language code. Defaults to English.',
 				displayOptions: {
-					show: { operation: ['ask', 'assess', 'extract', 'verify', 'verifyBatch'] },
+					show: {
+						operation: ['ask', 'assess', 'extract', 'verify', 'verifyBatch', 'reviewDraft', 'checkCitations'],
+					},
 				},
 			},
 		],
@@ -1448,6 +1773,100 @@ export class Lenz implements INodeType {
 			)) as IDataObject;
 		};
 
+		// Max Wait, validated BEFORE anything is submitted: a non-numeric value
+		// found after a paid submit leaves a charged job with nowhere to go,
+		// and a NaN deadline would poll in a hot loop (see Verify).
+		const readWaitSeconds = (itemIndex: number): number => {
+			const requested = Number(
+				this.getNodeParameter('maxWaitSeconds', itemIndex, POLL_TIMEOUT_MS / 1000),
+			);
+			if (!Number.isFinite(requested)) {
+				throw new NodeOperationError(this.getNode(), 'Max Wait (Seconds) must be a number of seconds', {
+					itemIndex,
+				});
+			}
+			return Math.min(MAX_WAIT_CEILING_SECONDS, Math.max(MAX_WAIT_FLOOR_SECONDS, requested));
+		};
+
+		// Polls a review or a citation check until it is completed or failed,
+		// with the rules Verify's loop follows and for the same reasons: the
+		// job is already paid for, so a 5xx / 429 / 408 / 425 poll is retried
+		// for the window, a status-less failure gets a small bounded number of
+		// tries, a stated wait (429 Retry-After, the body's poll_after_seconds)
+		// is honoured within limits, and waitForNextPoll ends the loop on a
+		// read rather than on a sleep.
+		const pollJob = async (
+			path: string,
+			itemIndex: number,
+			waitSeconds: number,
+		): Promise<{
+			terminal?: IDataObject;
+			lastStatus: string;
+			lastError?: { message: string; status: number | null };
+		}> => {
+			const deadline = Date.now() + waitSeconds * 1000;
+			let lastStatus = '';
+			let pollIdx = 0;
+			let unclassifiedRetries = 0;
+			let lastError: { message: string; status: number | null } | undefined;
+			while (true) {
+				let job: IDataObject;
+				try {
+					job = await lenzRequest('GET', path);
+				} catch (pollError) {
+					const code = statusCodeOf(pollError);
+					const retryable =
+						code === undefined
+							? unclassifiedRetries < MAX_UNCLASSIFIED_POLL_RETRIES
+							: code >= 500 || code === 429 || code === 408 || code === 425;
+					if (!retryable) {
+						throw describeApiError(this.getNode(), pollError, itemIndex, {
+							message: (pollError as Error).message,
+						});
+					}
+					lastError = { message: (pollError as Error).message, status: code ?? null };
+					if (code === undefined) {
+						unclassifiedRetries += 1;
+					}
+					const statedWait =
+						code === 429 ? cappedPollWaitMs(statedRetryAfterMs(pollError)) : undefined;
+					if (!(await waitForNextPoll(pollIdx, deadline, statedWait))) {
+						return { lastStatus, lastError };
+					}
+					pollIdx += 1;
+					continue;
+				}
+				unclassifiedRetries = 0;
+				lastError = undefined;
+				const state = job.status as string;
+				lastStatus = state || lastStatus;
+				if (state === 'completed' || state === 'failed') {
+					return { terminal: job, lastStatus };
+				}
+				if (!(await waitForNextPoll(pollIdx, deadline, statedPollAfterMs(job)))) {
+					return { lastStatus, lastError };
+				}
+				pollIdx += 1;
+			}
+		};
+
+		// The result of a submitted job the wait gave up on: never an error,
+		// since giving up cancels nothing.
+		const jobTimeout = (
+			idKey: 'review_id' | 'citecheck_id',
+			id: string,
+			getOperation: string,
+			polled: { lastStatus: string; lastError?: { message: string; status: number | null } },
+		): IDataObject => ({
+			status: 'timeout',
+			passed: null,
+			[idKey]: id,
+			last_status: polled.lastStatus || null,
+			last_error: polled.lastError?.message ?? null,
+			last_error_status: polled.lastError?.status ?? null,
+			message: `Still running when Max Wait ran out. Nothing was cancelled: fetch it with ${getOperation} using this ${idKey}, or raise Max Wait (Seconds).`,
+		});
+
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			// The task_id of a verification this item has already PAID for, held
 			// outside the try so the catch below can still hand it back. Verify
@@ -1457,6 +1876,9 @@ export class Lenz implements INodeType {
 			// only handle to a running, paid-for verification was gone. Reset
 			// per item so one item's id can never be reported on another's error.
 			let pendingTaskId = '';
+			// The same, for a review or a citation check: its id and the sentence
+			// that tells the caller how to fetch it.
+			let pendingJob: { key: 'review_id' | 'citecheck_id'; id: string; receipt: string } | undefined;
 			try {
 				const operation = this.getNodeParameter('operation', itemIndex) as string;
 				const language = (this.getNodeParameter('language', itemIndex, '') as string) || undefined;
@@ -2095,6 +2517,170 @@ export class Lenz implements INodeType {
 						});
 					}
 					continue;
+				} else if (operation === 'reviewDraft') {
+					const draft = (this.getNodeParameter('draft', itemIndex) as string).trim();
+					if (!draft) {
+						returnData.push({
+							json: { skipped: true, reason: 'empty_input' },
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					const wait = this.getNodeParameter('waitForCompletion', itemIndex, true) as boolean;
+					const waitSeconds = wait ? readWaitSeconds(itemIndex) : 0;
+					const body: IDataObject = { text: draft };
+					if (language) body.language = language;
+					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
+					if (visibility) body.visibility = visibility;
+					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
+					if (webhookUrl) body.webhook_url = webhookUrl;
+					const policy = reviewPolicy(
+						this.getNodeParameter('reviewOptions', itemIndex, {}) as IDataObject,
+					);
+					if (policy) body.escalate = policy;
+
+					const accepted = await lenzRequest('POST', '/review', body, {
+						idempotent: { operation, itemIndex },
+					});
+					const reviewId = (accepted.review_id as string) ?? '';
+					if (!reviewId) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'Lenz accepted the draft but returned no review_id, so the review cannot be fetched',
+							{ itemIndex },
+						);
+					}
+					pendingJob = {
+						key: 'review_id',
+						id: reviewId,
+						receipt: `The review was accepted and is running: fetch it with Get Review using review_id ${reviewId}.`,
+					};
+					if (!wait) {
+						responseData = {
+							status: (accepted.status as string) ?? 'queued',
+							review_id: reviewId,
+							message: 'Submitted. Fetch it with Get Review using this review_id, or wait for the webhook.',
+						};
+					} else {
+						const polled = await pollJob(
+							`/reviews/${encodeURIComponent(reviewId)}`,
+							itemIndex,
+							waitSeconds,
+						);
+						responseData = polled.terminal
+							? withPassed(polled.terminal)
+							: jobTimeout('review_id', reviewId, 'Get Review', polled);
+					}
+				} else if (operation === 'getReview') {
+					const reviewId = (this.getNodeParameter('reviewId', itemIndex) as string).trim();
+					if (!reviewId) {
+						returnData.push({
+							json: { skipped: true, reason: 'empty_input' },
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					const issuesOnly = this.getNodeParameter('issuesOnly', itemIndex, false) as boolean;
+					responseData = withPassed(
+						await lenzRequest(
+							'GET',
+							`/reviews/${encodeURIComponent(reviewId)}`,
+							undefined,
+							issuesOnly ? { qs: { view: 'issues' } } : undefined,
+						),
+					);
+				} else if (operation === 'checkCitations') {
+					const input = this.getNodeParameter('citationInput', itemIndex, 'text') as string;
+					const body: IDataObject = {};
+					if (input === 'pairs') {
+						const raw = this.getNodeParameter('citationPairs', itemIndex, {}) as {
+							pair?: Array<{ statement?: string; url?: string; doi?: string }>;
+						};
+						const pairs: IDataObject[] = [];
+						for (const [n, pair] of (raw.pair ?? []).entries()) {
+							const statement = (pair.statement ?? '').trim();
+							const url = (pair.url ?? '').trim();
+							const doi = (pair.doi ?? '').trim();
+							if (!statement || Boolean(url) === Boolean(doi)) {
+								throw new NodeOperationError(
+									this.getNode(),
+									`Pair ${n + 1} needs a statement and exactly one source: a URL or a DOI`,
+									{ itemIndex },
+								);
+							}
+							pairs.push(url ? { statement, url } : { statement, doi });
+						}
+						if (pairs.length === 0) {
+							returnData.push({
+								json: { skipped: true, reason: 'empty_input' },
+								pairedItem: { item: itemIndex },
+							});
+							continue;
+						}
+						body.pairs = pairs;
+					} else {
+						const text = (this.getNodeParameter('citationText', itemIndex) as string).trim();
+						if (!text) {
+							returnData.push({
+								json: { skipped: true, reason: 'empty_input' },
+								pairedItem: { item: itemIndex },
+							});
+							continue;
+						}
+						body.text = text;
+						body.max_citations = Number(this.getNodeParameter('maxCitations', itemIndex, 20));
+					}
+					const wait = this.getNodeParameter('waitForCompletion', itemIndex, true) as boolean;
+					const waitSeconds = wait ? readWaitSeconds(itemIndex) : 0;
+					if (language) body.language = language;
+					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
+					if (webhookUrl) body.webhook_url = webhookUrl;
+
+					const accepted = await lenzRequest('POST', '/citecheck', body, {
+						idempotent: { operation, itemIndex },
+					});
+					const citecheckId = (accepted.citecheck_id as string) ?? '';
+					if (!citecheckId) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'Lenz accepted the citations but returned no citecheck_id, so the check cannot be fetched',
+							{ itemIndex },
+						);
+					}
+					pendingJob = {
+						key: 'citecheck_id',
+						id: citecheckId,
+						receipt: `The citation check was accepted and is running: fetch it with Get Citation Check using citecheck_id ${citecheckId}.`,
+					};
+					if (!wait) {
+						responseData = {
+							status: (accepted.status as string) ?? 'queued',
+							citecheck_id: citecheckId,
+							message:
+								'Submitted. Fetch it with Get Citation Check using this citecheck_id, or wait for the webhook.',
+						};
+					} else {
+						const polled = await pollJob(
+							`/citechecks/${encodeURIComponent(citecheckId)}`,
+							itemIndex,
+							waitSeconds,
+						);
+						responseData = polled.terminal
+							? withPassed(polled.terminal)
+							: jobTimeout('citecheck_id', citecheckId, 'Get Citation Check', polled);
+					}
+				} else if (operation === 'getCitationCheck') {
+					const citecheckId = (this.getNodeParameter('citecheckId', itemIndex) as string).trim();
+					if (!citecheckId) {
+						returnData.push({
+							json: { skipped: true, reason: 'empty_input' },
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					responseData = withPassed(
+						await lenzRequest('GET', `/citechecks/${encodeURIComponent(citecheckId)}`),
+					);
 				} else if (operation === 'usage') {
 					responseData = await lenzRequest('GET', '/me/usage');
 				} else if (operation === 'webhookSecret') {
@@ -2135,6 +2721,9 @@ export class Lenz implements INodeType {
 					// the success paths.
 					if (pendingTaskId) {
 						json.task_id = pendingTaskId;
+					}
+					if (pendingJob) {
+						json[pendingJob.key] = pendingJob.id;
 					}
 					const status = statusCodeOf(error);
 					if (status !== undefined) {
@@ -2252,7 +2841,7 @@ export class Lenz implements INodeType {
 					// constructs a FRESH error, so anything not copied across is
 					// lost, and the task id is the one thing that cannot be
 					// reconstructed afterwards.
-					const opReceipt = pendingTaskId ? submittedReceipt(pendingTaskId) : '';
+					const opReceipt = pendingTaskId ? submittedReceipt(pendingTaskId) : (pendingJob?.receipt ?? '');
 					throw new NodeOperationError(this.getNode(), error.message, {
 						itemIndex,
 						description:
@@ -2310,7 +2899,7 @@ export class Lenz implements INodeType {
 				// vanish behind our own sentence.
 				const existingDescription =
 					error instanceof NodeApiError ? (error.description ?? '') : '';
-				const receipt = pendingTaskId ? submittedReceipt(pendingTaskId) : '';
+				const receipt = pendingTaskId ? submittedReceipt(pendingTaskId) : (pendingJob?.receipt ?? '');
 				throw describeApiError(this.getNode(), error, itemIndex, {
 					message: (error as Error).message,
 					...(receipt

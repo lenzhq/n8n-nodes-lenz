@@ -2590,3 +2590,211 @@ describe('Lenz node - Authentication', () => {
 		]);
 	});
 });
+
+describe('Lenz node - Review', () => {
+	const completedReview = (outcome: string): IDataObject => ({
+		review_id: 'rev_1',
+		status: 'completed',
+		outcome,
+		poll_after_seconds: null,
+		issues: outcome === 'clean' ? [] : [{ claim: 'A', verdict: 'False' }],
+		credits: { charged: 12 },
+	});
+
+	it('submits the draft with only the options set, polls, and adds passed', async () => {
+		let polls = 0;
+		const { output, calls } = await runNode(
+			{
+				operation: 'reviewDraft',
+				draft: '  The Eiffel Tower opened in 1887.  ',
+				language: 'en',
+				visibility: 'unlisted',
+				reviewOptions: { maxVerifications: 2, depth: 'low', suggestEdits: true },
+			},
+			(options) => {
+				if (options.method === 'POST') {
+					expect(options.url).toBe('/review');
+					return { review_id: 'rev_1', status: 'queued' };
+				}
+				expect(options.url).toBe('/reviews/rev_1');
+				polls += 1;
+				return polls < 2
+					? { review_id: 'rev_1', status: 'assessing', poll_after_seconds: 3 }
+					: completedReview('issues_found');
+			},
+		);
+		expect(calls[0].body).toEqual({
+			text: 'The Eiffel Tower opened in 1887.',
+			language: 'en',
+			visibility: 'unlisted',
+			escalate: { max_verifications: 2, depth: 'low', suggest_edits: true },
+		});
+		// Billable submit carries an Idempotency-Key, so an n8n retry cannot pay twice.
+		expect((calls[0].headers as IDataObject)['Idempotency-Key']).toEqual(expect.any(String));
+		const json = output[0].json as IDataObject;
+		expect(json.passed).toBe(false);
+		expect(json.outcome).toBe('issues_found');
+		expect(json.review_id).toBe('rev_1');
+		expect(json.credits).toEqual({ charged: 12 });
+	});
+
+	it('sends no escalate block when no option is set', async () => {
+		const { calls, output } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) =>
+			options.method === 'POST' ? { review_id: 'rev_1', status: 'queued' } : completedReview('clean'),
+		);
+		expect(calls[0].body).toEqual({ text: 'x' });
+		expect((output[0].json as IDataObject).passed).toBe(true);
+	});
+
+	it('returns the review_id at once without waiting', async () => {
+		const { output, calls } = await runNode(
+			{ operation: 'reviewDraft', draft: 'x', waitForCompletion: false },
+			() => ({ review_id: 'rev_9', status: 'queued' }),
+		);
+		expect(calls).toHaveLength(1);
+		expect(output[0].json).toMatchObject({ status: 'queued', review_id: 'rev_9' });
+	});
+
+	it('passed is null on a failed review, which has no outcome to judge', async () => {
+		const { output } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) =>
+			options.method === 'POST'
+				? { review_id: 'rev_1', status: 'queued' }
+				: { review_id: 'rev_1', status: 'failed', outcome: null, failure: { failure_reason: 'x' } },
+		);
+		expect((output[0].json as IDataObject).passed).toBeNull();
+	});
+
+	it('retries a 503 poll instead of losing a paid review', async () => {
+		let polls = 0;
+		const { output } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) => {
+			if (options.method === 'POST') return { review_id: 'rev_1', status: 'queued' };
+			polls += 1;
+			if (polls === 1) throw apiError(503);
+			return completedReview('clean');
+		});
+		expect(polls).toBe(2);
+		expect((output[0].json as IDataObject).outcome).toBe('clean');
+	});
+
+	it('reports a timeout with the review_id when Max Wait runs out', async () => {
+		const realNow = Date.now;
+		let now = realNow();
+		const spy = jest.spyOn(Date, 'now').mockImplementation(() => (now += 4000));
+		try {
+			const { output } = await runNode(
+				{ operation: 'reviewDraft', draft: 'x', maxWaitSeconds: 10 },
+				(options) =>
+					options.method === 'POST'
+						? { review_id: 'rev_1', status: 'queued' }
+						: { review_id: 'rev_1', status: 'verifying' },
+			);
+			expect(output[0].json).toMatchObject({
+				status: 'timeout',
+				passed: null,
+				review_id: 'rev_1',
+				last_status: 'verifying',
+			});
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it('refuses a non-numeric Max Wait before submitting anything', async () => {
+		const ctx = createContext({ operation: 'reviewDraft', draft: 'x', maxWaitSeconds: 'soon' }, noCall);
+		await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(/Max Wait/);
+		expect(ctx.httpMock).not.toHaveBeenCalled();
+	});
+
+	it('hands back the review_id on the error output when a poll fails for good', async () => {
+		const { output } = await runNode(
+			{ operation: 'reviewDraft', draft: 'x' },
+			(options) => {
+				if (options.method === 'POST') return { review_id: 'rev_7', status: 'queued' };
+				throw apiError(404);
+			},
+			true,
+		);
+		expect((output[0].json as IDataObject).review_id).toBe('rev_7');
+	});
+
+	it('skips an empty draft without calling the API', async () => {
+		const { output } = await runNode({ operation: 'reviewDraft', draft: '   ' }, noCall);
+		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
+	});
+
+	it('Get Review fetches by id, with view=issues when asked', async () => {
+		const { output, calls } = await runNode(
+			{ operation: 'getReview', reviewId: ' rev/1 ', issuesOnly: true },
+			() => completedReview('clean'),
+		);
+		expect(calls[0].url).toBe('/reviews/rev%2F1');
+		expect(calls[0].qs).toEqual({ view: 'issues' });
+		expect((output[0].json as IDataObject).passed).toBe(true);
+	});
+});
+
+describe('Lenz node - Check Citations', () => {
+	const completedCheck: IDataObject = {
+		citecheck_id: 'cc_1',
+		status: 'completed',
+		outcome: 'clean',
+		citation_issues: [],
+	};
+
+	it('checks a text with its max citations', async () => {
+		const { calls, output } = await runNode(
+			{ operation: 'checkCitations', citationInput: 'text', citationText: 'See [1].', maxCitations: 5 },
+			(options) =>
+				options.method === 'POST' ? { citecheck_id: 'cc_1', status: 'queued' } : completedCheck,
+		);
+		expect(calls[0].url).toBe('/citecheck');
+		expect(calls[0].body).toEqual({ text: 'See [1].', max_citations: 5 });
+		expect(calls[1].url).toBe('/citechecks/cc_1');
+		expect((output[0].json as IDataObject).passed).toBe(true);
+	});
+
+	it('sends pairs with a URL or a DOI, never max_citations', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'checkCitations',
+				citationInput: 'pairs',
+				citationPairs: {
+					pair: [
+						{ statement: ' A ', url: ' https://a.example ' },
+						{ statement: 'B', doi: '10.1038/nature12373' },
+					],
+				},
+			},
+			(options) =>
+				options.method === 'POST' ? { citecheck_id: 'cc_1', status: 'queued' } : completedCheck,
+		);
+		expect(calls[0].body).toEqual({
+			pairs: [
+				{ statement: 'A', url: 'https://a.example' },
+				{ statement: 'B', doi: '10.1038/nature12373' },
+			],
+		});
+	});
+
+	it.each([
+		[{ statement: 'A' }],
+		[{ statement: 'A', url: 'https://a.example', doi: '10.1/x' }],
+		[{ url: 'https://a.example' }],
+	])('refuses a pair without a statement and exactly one source, before submitting: %j', async (pair) => {
+		const ctx = createContext(
+			{ operation: 'checkCitations', citationInput: 'pairs', citationPairs: { pair: [pair] } },
+			noCall,
+		);
+		await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(/exactly one source/);
+		expect(ctx.httpMock).not.toHaveBeenCalled();
+	});
+
+	it('Get Citation Check fetches by id', async () => {
+		const { calls, output } = await runNode(
+			{ operation: 'getCitationCheck', citecheckId: 'cc_1' },
+			() => completedCheck,
+		);
+		expect(calls[0].url).toBe('/citechecks/cc_1');
+		expect((output[0].json as IDataObject).outcome).toBe('clean');
+	});
+});
