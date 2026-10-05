@@ -37,7 +37,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Verify (Deep)** *(default)* | Full multi-model pipeline (research → debate → adjudication), ~90 seconds. Returns a verdict, confidence, `lenz_score` (1-10), `key_finding`, sourced citations, an executive summary, and a `suggested_rewrite` when the claim needs correcting. Reserve for high-stakes claims that need a thorough, cited answer. **Depth** trades work for price: *Low* searches fewer sources, skips the recovery fetch tiers and stops the debate after the opening arguments, for **5 credits instead of 10**. |
-| **Assess (Fast)** | A quick 3-model panel verdict, ~10 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. Each entry carries a `verification_url`, **which is usually empty, and that is expected**: it is set only when the claim was already deep-checked with **Verify (Deep)** and that result is one you can read. A fresh panel verdict creates no stored verification, so there is no page to link to. If you need a link and sources for a claim, run Verify (Deep) on it. |
+| **Assess (Fast)** | A quick 3-model panel verdict, ~15 seconds, one entry per claim identified in the input text. Good default for lower-stakes checks. Each entry carries a `verification_url`, **which is usually empty, and that is expected**: it is set only when the claim was already deep-checked with **Verify (Deep)** and that result is one you can read. A fresh panel verdict creates no stored verification, so there is no page to link to. If you need a link and sources for a claim, run Verify (Deep) on it. |
 | **Extract Claims** | Free — pulls the verifiable factual claims out of a block of text without checking them. Useful as a first step before running Assess or Verify on each claim individually. **Focus** narrows the result to the claims you describe (300 characters, no extra cost); when none of them match, `status` comes back as `no_match` with an empty list rather than the unfocused claims. **Text** can also be a single public web page URL: Lenz reads the page, or a YouTube video's transcript, and extracts the claims from its first 50,000 characters. Pages behind a login (Facebook, Instagram, Threads, LinkedIn) can't be read, and a URL call typically takes 5-40 seconds. |
 
 ### Verification — manage submitted and stored work
@@ -138,7 +138,7 @@ A simple "fact-check gate" pattern — verify an LLM's output before acting on i
 
 > **Check `status` before `passed`.** `passed` only means something once a verdict exists. A timeout, a `failed` pipeline or a `needs_input` interrupt has no verdict, and `passed` is `null` or absent — which an IF reads as false. Branching straight on `passed` therefore reports "this claim did not pass" for a claim nobody ever checked, and a provider outage becomes a debunking.
 
-For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~10s instead of ~90s.
+For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~15s instead of ~90s.
 
 ### Follow-up questions on a completed verification
 
