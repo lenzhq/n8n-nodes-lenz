@@ -13,6 +13,11 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default (flagged by code scanning: actions/missing-workflow-permissions).
+# This job only reads the checked-out code and runs local scripts — no GitHub API writes.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
