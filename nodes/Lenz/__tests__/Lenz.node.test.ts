@@ -3022,7 +3022,7 @@ describe('Lenz node - second review fixes', () => {
 		expect((err as Error).message).toMatch(/still being created from an earlier attempt/);
 		const description = (err as { description?: string }).description ?? '';
 		expect(description).toMatch(/Nothing new was charged/);
-		expect(description).toMatch(/Do not send it again from a new or re-run execution/);
+		expect(description).toMatch(/a new or re-run execution counts as a new request/);
 		// Retry On Fail cannot outlast a 15-minute hold: never recommended.
 		expect(description).not.toMatch(/Retry On Fail/);
 	});
