@@ -41,3 +41,61 @@ describe('parameter keys survive the Claim relabel', () => {
 		expect(forOperation('select').some((p) => p.name === 'selectedClaims')).toBe(true);
 	});
 });
+
+describe('Review resource parameter keys (saved in 0.8.0 workflows)', () => {
+	const props = new Lenz().description.properties;
+	const forOperation = (op: string): INodeProperties[] =>
+		props.filter((p) => ((p.displayOptions?.show?.operation as string[] | undefined) ?? []).includes(op));
+	const names = (op: string) => forOperation(op).map((p) => p.name);
+
+	it.each([
+		['reviewDraft', ['draft', 'waitForCompletion', 'reviewOptions', 'visibility', 'language']],
+		['getReview', ['reviewId', 'issuesOnly']],
+		['checkCitations', ['citationInput', 'citationText', 'citationPairs', 'maxCitations', 'citationOptions']],
+		['getCitationCheck', ['citecheckId']],
+	])('%s keeps its keys', (op, keys) => {
+		expect(names(op)).toEqual(expect.arrayContaining(keys));
+	});
+
+	const collectionKeys = (name: string) =>
+		(props.find((p) => p.name === name)?.options as INodeProperties[]).map((o) => o.name).sort();
+
+	it('Options keep their keys, with Max Wait at 600 inside them', () => {
+		expect(collectionKeys('reviewOptions')).toEqual(
+			[
+				'confidence',
+				'depth',
+				'maxAssessments',
+				'maxCitations',
+				'maxVerifications',
+				'maxWaitSeconds',
+				'suggestEdits',
+				'verdicts',
+				'webhookUrl',
+			].sort(),
+		);
+		expect(collectionKeys('citationOptions')).toEqual(['maxWaitSeconds', 'webhookUrl']);
+		for (const name of ['reviewOptions', 'citationOptions']) {
+			const wait = (props.find((p) => p.name === name)?.options as INodeProperties[]).find(
+				(o) => o.name === 'maxWaitSeconds',
+			);
+			expect(wait?.default).toBe(600);
+		}
+	});
+
+	it('every copy of a shared key keeps one type and never shows twice for an operation', () => {
+		for (const key of ['waitForCompletion', 'maxWaitSeconds', 'webhookUrl', 'operation']) {
+			const copies = props.filter((p) => p.name === key);
+			if (key !== 'operation') {
+				expect(new Set(copies.map((c) => c.type)).size).toBe(1);
+			}
+			const seen = new Map<string, number>();
+			for (const copy of copies) {
+				for (const op of (copy.displayOptions?.show?.operation as string[] | undefined) ?? []) {
+					seen.set(op, (seen.get(op) ?? 0) + 1);
+				}
+			}
+			for (const [op, n] of seen) expect([key, op, n]).toEqual([key, op, 1]);
+		}
+	});
+});

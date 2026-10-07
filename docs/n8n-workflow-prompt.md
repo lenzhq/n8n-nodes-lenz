@@ -41,6 +41,15 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 | `extract` | Pull verifiable claims out of text, or out of a public web page given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `focus`, `language` |
 | `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
 
+### `resource: "review"` — Review
+
+| `operation` | What it does | Parameters |
+|---|---|---|
+| `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language` |
+| `getCitationCheck` | Retrieve a citation check by its ID | `citecheckId`**\*** |
+| `getReview` | Retrieve a review by its ID | `reviewId`**\***, `issuesOnly` |
+| `reviewDraft` | Review a whole draft: find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `draft`**\***, `waitForCompletion`, `reviewOptions`, `visibility`, `language` |
+
 ### `resource: "verification"` — Verification
 
 | `operation` | What it does | Parameters |
