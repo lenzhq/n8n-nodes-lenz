@@ -1268,7 +1268,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['verify', 'verifyBatch'] },
 				},
-				description: 'Optional URL Lenz POSTs the signed result to when the pipeline finishes. It needs a signing secret, otherwise the call is rejected: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret once for this connection (and again after reconnecting, which starts the connection without one).',
+				description: 'Optional URL Lenz POSTs the signed result to when the pipeline finishes. It needs a signing secret, otherwise the call is rejected: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret once for this connection, from any current Lenz node on the same credential (and again after reconnecting, which starts the connection without one).',
 			},
 			{
 				displayName: 'Visibility',
