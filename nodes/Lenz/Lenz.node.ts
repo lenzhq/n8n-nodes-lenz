@@ -20,7 +20,7 @@ export const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.6.0';
+const USER_AGENT = 'n8n-nodes-lenz/0.7.0';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -1268,7 +1268,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['verify', 'verifyBatch'] },
 				},
-				description: 'Optional URL Lenz POSTs the signed result to when the pipeline finishes. It needs a signing secret, otherwise the call is rejected: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret once for this connection (reconnecting gives it a new one).',
+				description: 'Optional URL Lenz POSTs the signed result to when the pipeline finishes. It needs a signing secret, otherwise the call is rejected: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret once for this connection (and again after reconnecting, which starts the connection without one).',
 			},
 			{
 				displayName: 'Visibility',
