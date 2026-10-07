@@ -2941,3 +2941,86 @@ describe('Lenz node - OAuth not connected', () => {
 		expect((err as Error).message).not.toMatch(/not connected yet/);
 	});
 });
+
+describe('Lenz node - second review fixes', () => {
+	const done: IDataObject = { review_id: 'rev_1', status: 'completed', outcome: 'clean' };
+	const accept: Responder = (options) =>
+		options.method === 'POST' ? { review_id: 'rev_1', status: 'queued' } : done;
+
+	it('sends an empty Deep-Check Verdicts list: it is a valid policy', async () => {
+		const { calls } = await runNode(
+			{ operation: 'reviewDraft', draft: 'x', reviewOptions: { verdicts: [], confidence: ['low'] } },
+			accept,
+		);
+		expect((calls[0].body as IDataObject).escalate).toEqual({ verdicts: [], confidence: ['low'] });
+	});
+
+	it.each(['OAuth credentials not connected', 'Unable to sign without access token'])(
+		'explains "%s" on an OAuth credential',
+		async (text) => {
+			const ctx = createContext({ operation: 'usage', authentication: 'oAuth2' }, () => {
+				throw new Error(text);
+			});
+			const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+			expect((err as Error).message).toMatch(/not connected yet/);
+		},
+	);
+
+	it.each(['', null])('Verify still reads an empty Max Wait (%p) as the 10s floor', async (maxWaitSeconds) => {
+		const { calls } = await runNode(
+			{ operation: 'verify', claim: 'Some claim', maxWaitSeconds },
+			(options) =>
+				options.method === 'POST'
+					? { task_id: 'task_1', status: 'queued' }
+					: { status: 'completed', result: { verification_id: 'v1', verdict: 'True', sources: [] } },
+		);
+		expect(calls[0].method).toBe('POST');
+	});
+
+	it('names earlier Verify task_ids when a later item fails for good', async () => {
+		let posts = 0;
+		const ctx = createContext(
+			{ operation: 'verify', claim: 'Some claim', waitForCompletion: false },
+			() => {
+				posts += 1;
+				if (posts === 1) return { task_id: 'task_first', status: 'queued' };
+				throw apiError(402, { code: 'no_credits', detail: 'No remaining credits.' });
+			},
+			false,
+			2,
+		);
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		const description = (err as { description?: string }).description ?? '';
+		expect(description).toMatch(/task_id task_first/);
+		expect(description).toMatch(/already accepted and charged/);
+	});
+
+	it('lists at most ten earlier jobs', async () => {
+		let posts = 0;
+		const ctx = createContext(
+			{ operation: 'reviewDraft', draft: 'x', waitForCompletion: false },
+			(options) => {
+				if (options.method !== 'POST') return done;
+				posts += 1;
+				if (posts <= 12) return { review_id: `rev_${posts}`, status: 'queued' };
+				throw apiError(402, { code: 'no_credits', detail: 'No remaining credits.' });
+			},
+			false,
+			13,
+		);
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		const description = (err as { description?: string }).description ?? '';
+		expect(description).toMatch(/rev_10\b/);
+		expect(description).not.toMatch(/rev_11\b/);
+		expect(description).toMatch(/and 2 more/);
+	});
+
+	it('explains a conflict that never names the job instead of n8n\'s "Conflict"', async () => {
+		const ctx = createContext({ operation: 'reviewDraft', draft: 'x' }, () => {
+			throw apiError(409, { code: 'idempotency_conflict', detail: 'creating' });
+		});
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		expect((err as Error).message).toMatch(/still creating this review/);
+		expect((err as { description?: string }).description ?? '').toMatch(/nothing new was charged/);
+	});
+});
