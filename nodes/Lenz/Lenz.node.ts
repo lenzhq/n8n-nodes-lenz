@@ -131,7 +131,9 @@ function statedWaitSeconds(body: IDataObject): number | undefined {
 	// while discarding `response` entirely. Verified against n8n-workflow:
 	// walking the caught error finds no header anywhere on it. A header
 	// fallback here would be code that can never run.
-	for (const raw of [body.retry_after, body.reset_in_seconds]) {
+	// A third spelling: the per-account in-flight cap on /review and /citecheck
+	// (429 review_in_flight / citecheck_in_flight) states `retry_after_seconds`.
+	for (const raw of [body.retry_after, body.reset_in_seconds, body.retry_after_seconds]) {
 		const seconds = Number(raw);
 		if (Number.isFinite(seconds) && seconds > 0) {
 			return Math.ceil(seconds);
@@ -208,6 +210,22 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 	if (statusCodeOf(error) !== 429) return undefined;
 
 	const body = responseBodyOf(error);
+	// The in-flight cap is about how many reviews or citation checks run AT ONCE
+	// on the account (three), not about the plan: upgrade advice would name the
+	// wrong fix. The node already waits and resubmits on it, so reaching this
+	// message means the wait ran out with all three still running.
+	if (body.code === 'review_in_flight' || body.code === 'citecheck_in_flight') {
+		const what = body.code === 'review_in_flight' ? 'reviews' : 'citation checks';
+		const wait = statedWaitSeconds(body) ?? 60;
+		return {
+			message: `Lenz: this account already has ${IN_FLIGHT_CAP} ${what} running — retry when one finishes.`,
+			description:
+				`HTTP 429 (${body.code}). Nothing was charged. Lenz runs at most ${IN_FLIGHT_CAP} ${what} at a time ` +
+				`per account; this is not a plan limit. The node waited for a slot and none opened in time. ` +
+				`Send fewer items through at once, or send this node's error output into a Wait node with ` +
+				`Wait Amount ${wait} and Wait Unit set to Seconds (it defaults to Hours), then loop it back.`,
+		};
+	}
 	const isLenzLimit = isLenzRateLimit(body);
 	const rawDetail = typeof body.detail === 'string' ? body.detail.trim() : '';
 	const detail =
@@ -281,6 +299,19 @@ function rateLimitMessageFor(error: unknown): { message: string; description: st
 
 	return { message, description };
 }
+
+// Reviews (and, separately, citation checks) one account may have running at
+// once; a fourth submit is refused 429 review_in_flight / citecheck_in_flight
+// with retry_after_seconds (lenz/review/service.py REVIEW_MAX_IN_FLIGHT).
+const IN_FLIGHT_CAP = 3;
+// How long a submit refused for the in-flight cap may wait for a slot before
+// the item fails. A review takes two to four minutes, so this covers one
+// finishing; the stated wait (60s) paces the retries.
+const IN_FLIGHT_WAIT_BUDGET_MS = 5 * 60 * 1000;
+// A 409 idempotency_conflict means the same request is still being created:
+// "retry shortly". Bounded, because it should clear in seconds.
+const CONFLICT_RETRY_DELAY_MS = 3000;
+const CONFLICT_MAX_RETRIES = 3;
 
 // Server-side cap on POST /verify/batch and POST /verify/{task_id}/select.
 const BATCH_MAX_CLAIMS = 20;
@@ -418,14 +449,18 @@ function capacityMessageFor(error: unknown): { message: string; description: str
 
 	const body = responseBodyOf(error);
 	const code = typeof body.code === 'string' ? body.code : '';
-	if (code !== 'capacity' && code !== 'upstream_unavailable') return undefined;
+	if (code !== 'capacity' && code !== 'upstream_unavailable' && code !== 'citations_unavailable') {
+		return undefined;
+	}
 
 	const retryAfter = Number(body.retry_after);
 	const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 90;
 	const what =
 		code === 'capacity'
 			? 'Lenz is at capacity right now'
-			: "Lenz's model providers are temporarily unavailable";
+			: code === 'citations_unavailable'
+				? 'citation checking is switched off for a moment'
+				: "Lenz's model providers are temporarily unavailable";
 
 	return {
 		message: `Lenz: ${what} — retry in ~${wait}s.`,
@@ -710,14 +745,42 @@ function withPassed(job: IDataObject): IDataObject {
 
 // The review policy (`escalate`) from the node's Options, sending only what
 // the user set: an omitted key takes the API's own default.
-function reviewPolicy(options: IDataObject): IDataObject | undefined {
+function reviewPolicy(
+	options: IDataObject,
+	fail: (message: string) => never,
+): IDataObject | undefined {
 	const policy: IDataObject = {};
-	if (Array.isArray(options.verdicts)) policy.verdicts = options.verdicts;
-	if (Array.isArray(options.confidence)) policy.confidence = options.confidence;
-	if (options.maxAssessments !== undefined) policy.max_assessments = Number(options.maxAssessments);
-	if (options.maxVerifications !== undefined) policy.max_verifications = Number(options.maxVerifications);
+	// A multi-select arrives as an array; an expression may hand over a string,
+	// so "False, Mixed" is read as a list rather than silently dropped.
+	const list = (raw: unknown, label: string): string[] | undefined => {
+		if (raw === undefined || raw === null || raw === '') return undefined;
+		const items = Array.isArray(raw) ? raw : String(raw).split(',');
+		const cleaned = items.map((v) => String(v).trim()).filter(Boolean);
+		if (!cleaned.length) fail(`${label} needs at least one value`);
+		return cleaned;
+	};
+	// An empty or non-numeric expression is refused, never sent as null: the
+	// API would read null as "use the default", and the default for deep checks
+	// is 5, about 50 credits, where the user may have meant 0.
+	const count = (raw: unknown, label: string, min: number, max: number): number | undefined => {
+		if (raw === undefined) return undefined;
+		const n = Number(raw);
+		if (raw === '' || raw === null || !Number.isInteger(n) || n < min || n > max) {
+			fail(`${label} must be a whole number from ${min} to ${max}`);
+		}
+		return n;
+	};
+	const verdicts = list(options.verdicts, 'Deep-Check Verdicts');
+	if (verdicts) policy.verdicts = verdicts;
+	const confidence = list(options.confidence, 'Deep-Check Confidence');
+	if (confidence) policy.confidence = confidence;
+	const maxAssessments = count(options.maxAssessments, 'Max Quick Checks', 0, 20);
+	if (maxAssessments !== undefined) policy.max_assessments = maxAssessments;
+	const maxVerifications = count(options.maxVerifications, 'Max Deep Checks', 0, 20);
+	if (maxVerifications !== undefined) policy.max_verifications = maxVerifications;
 	if (typeof options.depth === 'string' && options.depth) policy.depth = options.depth;
-	if (options.maxCitations !== undefined) policy.max_citations = Number(options.maxCitations);
+	const maxCitations = count(options.maxCitations, 'Max Citations', 0, 20);
+	if (maxCitations !== undefined) policy.max_citations = maxCitations;
 	if (options.suggestEdits !== undefined) policy.suggest_edits = Boolean(options.suggestEdits);
 	return Object.keys(policy).length ? policy : undefined;
 }
@@ -1375,6 +1438,39 @@ export class Lenz implements INodeType {
 					"How many of the text's citations to check, in the order they appear. 1 credit each; the rest are listed in more_citations.",
 			},
 			{
+				displayName: 'Options',
+				name: 'citationOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				default: {},
+				displayOptions: {
+					show: { operation: ['checkCitations'] },
+				},
+				options: [
+					{
+						// Inside Options, not top level, and 600 by default: a review takes two
+						// to four minutes before deep checks, citations or suggested edits.
+						// n8n does not save a parameter left at its default, so this value is
+						// a contract from the first release: decided here, never moved.
+						displayName: 'Max Wait (Seconds)',
+						name: 'maxWaitSeconds',
+						type: 'number',
+						default: 600,
+						typeOptions: { minValue: 10, maxValue: 900 },
+						description:
+							'With Wait for Completion on: the longest to keep polling before returning Status "timeout" with the ID. A ceiling, not a delay. Giving up never cancels the job; fetch it later with its Get operation.',
+					},
+					{
+						displayName: 'Webhook URL',
+						name: 'webhookUrl',
+						type: 'string',
+						default: '',
+						description:
+							'URL Lenz POSTs the signed result to when it finishes. It needs a signing secret: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret first.',
+					},
+				],
+			},
+			{
 				displayName: 'Review ID',
 				name: 'reviewId',
 				type: 'string',
@@ -1419,29 +1515,6 @@ export class Lenz implements INodeType {
 				},
 				description:
 					'Whether to poll until it finishes. Turn off to return the ID immediately and collect the result later with Get Review / Get Citation Check, or a webhook.',
-			},
-			{
-				displayName: 'Max Wait (Seconds)',
-				name: 'maxWaitSeconds',
-				type: 'number',
-				default: 300,
-				typeOptions: { minValue: 10, maxValue: 900 },
-				displayOptions: {
-					show: { operation: ['reviewDraft', 'checkCitations'], waitForCompletion: [true] },
-				},
-				description:
-					'The longest to keep polling before returning Status "timeout" with the ID. A ceiling, not a delay. A review with deep checks can take several minutes; giving up never cancels it, and Get Review / Get Citation Check fetches it later.',
-			},
-			{
-				displayName: 'Webhook URL',
-				name: 'webhookUrl',
-				type: 'string',
-				default: '',
-				displayOptions: {
-					show: { operation: ['reviewDraft', 'checkCitations'] },
-				},
-				description:
-					'Optional URL Lenz POSTs the signed result to when it finishes (review.completed / citecheck.completed). It needs a signing secret: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret first.',
 			},
 			{
 				displayName: 'Options',
@@ -1522,12 +1595,33 @@ export class Lenz implements INodeType {
 							"How many of the draft's claims, most check-worthy first, get a quick verdict (1 credit each). 0 checks only the citations.",
 					},
 					{
+						// Inside Options, not top level, and 600 by default: a review takes two
+						// to four minutes before deep checks, citations or suggested edits.
+						// n8n does not save a parameter left at its default, so this value is
+						// a contract from the first release: decided here, never moved.
+						displayName: 'Max Wait (Seconds)',
+						name: 'maxWaitSeconds',
+						type: 'number',
+						default: 600,
+						typeOptions: { minValue: 10, maxValue: 900 },
+						description:
+							'With Wait for Completion on: the longest to keep polling before returning Status "timeout" with the ID. A ceiling, not a delay. Giving up never cancels the job; fetch it later with its Get operation.',
+					},
+					{
 						displayName: 'Suggest Edits',
 						name: 'suggestEdits',
 						type: 'boolean',
 						default: false,
 						description:
 							'Whether to add, for each claim with a suggested rewrite, the smallest edits to the draft that make it say what the rewrite says. No extra credits, but the review takes longer. Not verified themselves.',
+					},
+					{
+						displayName: 'Webhook URL',
+						name: 'webhookUrl',
+						type: 'string',
+						default: '',
+						description:
+							'URL Lenz POSTs the signed result to when it finishes. It needs a signing secret: with an API key, set one on lenz.io/api-credentials; with OAuth, run Account → Get Webhook Secret first.',
 					},
 				],
 			},
@@ -1776,11 +1870,9 @@ export class Lenz implements INodeType {
 		// Max Wait, validated BEFORE anything is submitted: a non-numeric value
 		// found after a paid submit leaves a charged job with nowhere to go,
 		// and a NaN deadline would poll in a hot loop (see Verify).
-		const readWaitSeconds = (itemIndex: number): number => {
-			const requested = Number(
-				this.getNodeParameter('maxWaitSeconds', itemIndex, POLL_TIMEOUT_MS / 1000),
-			);
-			if (!Number.isFinite(requested)) {
+		const readWaitSeconds = (itemIndex: number, raw: unknown): number => {
+			const requested = Number(raw);
+			if (raw === '' || raw === null || !Number.isFinite(requested)) {
 				throw new NodeOperationError(this.getNode(), 'Max Wait (Seconds) must be a number of seconds', {
 					itemIndex,
 				});
@@ -1799,6 +1891,10 @@ export class Lenz implements INodeType {
 			path: string,
 			itemIndex: number,
 			waitSeconds: number,
+			opts: {
+				terminal: readonly string[];
+				pollAfterMs: (body: IDataObject) => number | undefined;
+			} = { terminal: ['completed', 'failed'], pollAfterMs: (body) => statedPollAfterMs(body) },
 		): Promise<{
 			terminal?: IDataObject;
 			lastStatus: string;
@@ -1840,13 +1936,79 @@ export class Lenz implements INodeType {
 				lastError = undefined;
 				const state = job.status as string;
 				lastStatus = state || lastStatus;
-				if (state === 'completed' || state === 'failed') {
+				if (opts.terminal.includes(state)) {
 					return { terminal: job, lastStatus };
 				}
-				if (!(await waitForNextPoll(pollIdx, deadline, statedPollAfterMs(job)))) {
+				if (!(await waitForNextPoll(pollIdx, deadline, opts.pollAfterMs(job)))) {
 					return { lastStatus, lastError };
 				}
 				pollIdx += 1;
+			}
+		};
+
+		// IDs of reviews and citation checks this run has had ACCEPTED (and
+		// charged), in order. A later item that fails names them, so a hard
+		// failure never takes the earlier, paid-for IDs with it: n8n drops the
+		// whole output when execute() throws.
+		const acceptedJobs: string[] = [];
+		const earlierJobsNote = (current?: string): string => {
+			const earlier = acceptedJobs.filter((job) => job !== current);
+			return earlier.length
+				? `Earlier items in this run were accepted and are running: ${earlier.join(', ')}. ` +
+					'Fetch them with Get Review / Get Citation Check rather than resubmitting.'
+				: '';
+		};
+
+		// POST /review or /citecheck. Two refusals are retried here because they
+		// clear on their own and the request is safe to resend (same
+		// Idempotency-Key, nothing charged by a refusal):
+		//  - 429 review_in_flight / citecheck_in_flight: three already run on the
+		//    account. Wait the stated retry_after_seconds (capped) for a slot,
+		//    within IN_FLIGHT_WAIT_BUDGET_MS; a run of four or more items reaches
+		//    this as a matter of course.
+		//  - 409 idempotency_conflict: the same request is still being created.
+		//    When the body names the job, that IS the accepted job; otherwise
+		//    retry shortly, a few times.
+		const submitJob = async (
+			path: '/review' | '/citecheck',
+			body: IDataObject,
+			operation: string,
+			itemIndex: number,
+			idKey: 'review_id' | 'citecheck_id',
+		): Promise<IDataObject> => {
+			const slotDeadline = Date.now() + IN_FLIGHT_WAIT_BUDGET_MS;
+			let conflicts = 0;
+			while (true) {
+				try {
+					return await lenzRequest('POST', path, body, { idempotent: { operation, itemIndex } });
+				} catch (submitError) {
+					const code = statusCodeOf(submitError);
+					const errBody = responseBodyOf(submitError);
+					if (code === 409 && errBody.code === 'idempotency_conflict') {
+						const named = typeof errBody[idKey] === 'string' ? (errBody[idKey] as string) : '';
+						if (named) return { [idKey]: named, status: 'queued' };
+						if (conflicts < CONFLICT_MAX_RETRIES) {
+							conflicts += 1;
+							await sleep(CONFLICT_RETRY_DELAY_MS);
+							continue;
+						}
+					}
+					const inFlight = errBody.code === 'review_in_flight' || errBody.code === 'citecheck_in_flight';
+					if (code === 429 && inFlight) {
+						const left = slotDeadline - Date.now();
+						if (left > 0) {
+							const stated = (statedWaitSeconds(errBody) ?? 60) * 1000;
+							await sleep(Math.min(stated, MAX_STATED_POLL_WAIT_SECONDS * 1000, left));
+							continue;
+						}
+					}
+					// Typed, not re-thrown raw (the community-node lint requires it);
+					// describeApiError keeps the original NodeApiError and its body,
+					// so the item's catch still reads the status and the code.
+					throw describeApiError(this.getNode(), submitError, itemIndex, {
+						message: (submitError as Error).message,
+					});
+				}
 			}
 		};
 
@@ -1918,40 +2080,29 @@ export class Lenz implements INodeType {
 					// nothing. Only read when it is actually consumed — the field is
 					// hidden unless Wait for Completion is on, and a stale value behind
 					// a hidden field must not fail a submit-only run.
-					let waitSeconds = 0;
-					if (waitForCompletion) {
-						// The widget's minValue/maxValue are a UI hint and an
-						// expression walks straight past them, so the contract is
-						// enforced here too. `usableAsTool` means an LLM can supply
-						// this number directly; unclamped, `={{ 86400 }}` holds the
-						// execution open for a day. A non-numeric expression is worse
-						// than a wrong number, and this check is what stands between
-						// it and a hot loop. The poll loop is `while (true)` and ends
-						// only when waitForNextPoll sees the window spent — but a NaN
-						// Max Wait makes the deadline NaN, `NaN <= 0` is false, so the
-						// window never counts as spent, and every sleep becomes
-						// `min(backoff, NaN)`, which setTimeout runs after ~1ms.
-						// Unguarded, that polls the status endpoint about once a
-						// millisecond, indefinitely, on a verification already charged
-						// for. (This comment used to describe the pre-`while (true)`
-						// loop, where the same NaN merely reported a timeout without
-						// polling — which made the guard look far less important than
-						// it is.)
-						const requestedWait = Number(
-							this.getNodeParameter('maxWaitSeconds', itemIndex, POLL_TIMEOUT_MS / 1000),
-						);
-						if (!Number.isFinite(requestedWait)) {
-							throw new NodeOperationError(
-								this.getNode(),
-								'Max Wait (Seconds) must be a number of seconds',
-								{ itemIndex },
-							);
-						}
-						waitSeconds = Math.min(
-							MAX_WAIT_CEILING_SECONDS,
-							Math.max(MAX_WAIT_FLOOR_SECONDS, requestedWait),
-						);
-					}
+					// The widget's minValue/maxValue are a UI hint and an
+					// expression walks straight past them, so the contract is
+					// enforced here too. `usableAsTool` means an LLM can supply
+					// this number directly; unclamped, `={{ 86400 }}` holds the
+					// execution open for a day. A non-numeric expression is worse
+					// than a wrong number, and this check is what stands between
+					// it and a hot loop. The poll loop is `while (true)` and ends
+					// only when waitForNextPoll sees the window spent — but a NaN
+					// Max Wait makes the deadline NaN, `NaN <= 0` is false, so the
+					// window never counts as spent, and every sleep becomes
+					// `min(backoff, NaN)`, which setTimeout runs after ~1ms.
+					// Unguarded, that polls the status endpoint about once a
+					// millisecond, indefinitely, on a verification already charged
+					// for. (This comment used to describe the pre-`while (true)`
+					// loop, where the same NaN merely reported a timeout without
+					// polling — which made the guard look far less important than
+					// it is.)
+					const waitSeconds = waitForCompletion
+						? readWaitSeconds(
+								itemIndex,
+								this.getNodeParameter('maxWaitSeconds', itemIndex, POLL_TIMEOUT_MS / 1000),
+							)
+						: 0;
 
 					const submitBody: IDataObject = { text: claim };
 					if (language) {
@@ -1998,118 +2149,17 @@ export class Lenz implements INodeType {
 							message: 'Submitted. Poll this task_id with the Get Verify Status operation, or wait for the webhook.',
 						};
 					} else {
-						// waitSeconds was read and validated before the submit above.
-						const deadline = Date.now() + waitSeconds * 1000;
-						let terminal: IDataObject | undefined;
-						let lastObservedStatus = '';
-						let pollIdx = 0;
-						let unclassifiedRetries = 0;
-						// The last poll failure that was retried rather than thrown.
-						// Kept so a deadline reached entirely on failed polls can say
-						// so, instead of reporting a bare timeout that implies the
-						// task was observed running.
-						let lastPollError: { message: string; status: number | null } | undefined;
-						// The window is enforced by waitForNextPoll, not by the loop
-						// condition. It used to be `while (Date.now() < deadline)`,
-						// which meant a sleep clamped to the deadline was followed by
-						// the loop EXITING, never by another read — so a verification
-						// that completed during that last sleep came back as a
-						// timeout. With the ladder the unobserved tail was at most 8s;
-						// a stated poll_after_seconds can be a minute, which made it a
-						// minute. Now waitForNextPoll refuses to sleep once the window
-						// is spent, so every sleep — clamped or not — is followed by
-						// one more poll, and the final read lands at the deadline
-						// rather than being skipped.
-						while (true) {
-							let status: IDataObject;
-							try {
-								status = await lenzRequest('GET', `/verify/status/${taskId}`);
-							} catch (pollError) {
-								// The submit above already spent the credits, so a poll
-								// that fails must never be the end of the story. Before
-								// this, one 502 anywhere in ~15 polls threw straight out
-								// of the operation and took the task_id with it, leaving
-								// a paid-for verification with no handle to fetch it.
-								//
-								// What is worth retrying is narrow and deliberate. A 5xx
-								// is the status endpoint having a moment. So is a 429 —
-								// and that one matters most, because polling every 2-8s
-								// across several items is exactly what trips a rate
-								// limiter, and it self-heals in seconds. 408/425 come
-								// from an intervening proxy, not from a verdict.
-								//
-								// An error with NO status code is not evidence of
-								// anything: DNS failure, a TLS problem, a credential
-								// error, a TypeError inside the request layer all look
-								// identical here. Retrying those for the whole window
-								// and then reporting a timeout would invent a fact and
-								// throw the real error away, so they get a small bounded
-								// number of attempts and are then surfaced as-is.
-								const code = statusCodeOf(pollError);
-								const retryable =
-									code === undefined
-										? unclassifiedRetries < MAX_UNCLASSIFIED_POLL_RETRIES
-										: code >= 500 || code === 429 || code === 408 || code === 425;
-								if (!retryable) {
-									// Typed rather than re-thrown raw: the community-node
-									// lint rejects `throw pollError` here.
-									throw describeApiError(this.getNode(), pollError, itemIndex, {
-										message: (pollError as Error).message,
-									});
-								}
-								// Remember it. If the deadline runs out having seen
-								// nothing but failures, the timeout result reports this
-								// instead of implying the task was observed running.
-								lastPollError = {
-									message: (pollError as Error).message,
-									status: code ?? null,
-								};
-								if (code === undefined) {
-									unclassifiedRetries += 1;
-								}
-								// A 429 has told us when the limiter reopens. Our own
-								// 2/4/8s ladder is what tripped it, so returning on that
-								// ladder just trips it again and burns the whole window
-								// on retries that cannot succeed.
-								//
-								// Capped at MAX_STATED_POLL_WAIT_SECONDS: a daily-cap
-								// 429 states a reset hours away, and sleeping that
-								// inside the poll loop abandons a verification the
-								// caller has already been charged for. waitForNextPoll
-								// clamps to the deadline on top of this.
-								const statedWait =
-									code === 429 ? cappedPollWaitMs(statedRetryAfterMs(pollError)) : undefined;
-								if (!(await waitForNextPoll(pollIdx, deadline, statedWait))) {
-									break;
-								}
-								pollIdx += 1;
-								continue;
-							}
-							// A poll got through, so whatever went wrong before it is
-							// over. The budget is for CONSECUTIVE unclassifiable
-							// failures — left cumulative it counts blips across the
-							// whole window, so three unrelated socket hiccups minutes
-							// apart, each followed by a healthy response, would kill a
-							// perfectly live verification with most of Max Wait unused.
-							unclassifiedRetries = 0;
-							lastPollError = undefined;
-							const state = status.status as string;
-							lastObservedStatus = state || lastObservedStatus;
-							if (state === 'completed' || state === 'needs_input' || state === 'failed') {
-								terminal = status;
-								break;
-							}
-							// A processing response may say when to come back. The
-							// server knows which stage it is in and how long that
-							// stage runs; our ladder does not. Same override path the
-							// 429 handling uses, so it is clamped to the deadline the
-							// same way.
-							const statedPoll = statedPollAfterMs(status.progress);
-							if (!(await waitForNextPoll(pollIdx, deadline, statedPoll))) {
-								break;
-							}
-							pollIdx += 1;
-						}
+						// The shared loop (pollJob): the verification is already paid for,
+						// so retryable poll failures are retried for the window, stated
+						// waits are honoured within limits, and the loop ends on a read,
+						// never on a sleep. waitSeconds was validated before the submit.
+						const polled = await pollJob(`/verify/status/${taskId}`, itemIndex, waitSeconds, {
+							terminal: ['completed', 'needs_input', 'failed'],
+							pollAfterMs: (status) => statedPollAfterMs(status.progress),
+						});
+						const terminal = polled.terminal;
+						const lastObservedStatus = polled.lastStatus;
+						const lastPollError = polled.lastError;
 
 						if (!terminal) {
 							responseData = {
@@ -2527,21 +2577,22 @@ export class Lenz implements INodeType {
 						continue;
 					}
 					const wait = this.getNodeParameter('waitForCompletion', itemIndex, true) as boolean;
-					const waitSeconds = wait ? readWaitSeconds(itemIndex) : 0;
+					const options = this.getNodeParameter('reviewOptions', itemIndex, {}) as IDataObject;
+					// Everything is validated before the submit: a review is charged
+					// when it is accepted.
+					const waitSeconds = wait ? readWaitSeconds(itemIndex, options.maxWaitSeconds ?? 600) : 0;
 					const body: IDataObject = { text: draft };
 					if (language) body.language = language;
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
 					if (visibility) body.visibility = visibility;
-					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
+					const webhookUrl = String(options.webhookUrl ?? '').trim();
 					if (webhookUrl) body.webhook_url = webhookUrl;
-					const policy = reviewPolicy(
-						this.getNodeParameter('reviewOptions', itemIndex, {}) as IDataObject,
-					);
+					const policy = reviewPolicy(options, (message) => {
+						throw new NodeOperationError(this.getNode(), message, { itemIndex });
+					});
 					if (policy) body.escalate = policy;
 
-					const accepted = await lenzRequest('POST', '/review', body, {
-						idempotent: { operation, itemIndex },
-					});
+					const accepted = await submitJob('/review', body, operation, itemIndex, 'review_id');
 					const reviewId = (accepted.review_id as string) ?? '';
 					if (!reviewId) {
 						throw new NodeOperationError(
@@ -2550,6 +2601,7 @@ export class Lenz implements INodeType {
 							{ itemIndex },
 						);
 					}
+					acceptedJobs.push(`review_id ${reviewId}`);
 					pendingJob = {
 						key: 'review_id',
 						id: reviewId,
@@ -2628,17 +2680,27 @@ export class Lenz implements INodeType {
 							continue;
 						}
 						body.text = text;
-						body.max_citations = Number(this.getNodeParameter('maxCitations', itemIndex, 20));
+						// The widget's limits are a UI hint; an expression walks past them,
+						// and the API answers 422 for anything outside 1-20.
+						const rawMax = this.getNodeParameter('maxCitations', itemIndex, 20);
+						const maxCitations = Number(rawMax);
+						if (rawMax === '' || !Number.isInteger(maxCitations) || maxCitations < 1 || maxCitations > 20) {
+							throw new NodeOperationError(
+								this.getNode(),
+								'Max Citations must be a whole number from 1 to 20',
+								{ itemIndex },
+							);
+						}
+						body.max_citations = maxCitations;
 					}
 					const wait = this.getNodeParameter('waitForCompletion', itemIndex, true) as boolean;
-					const waitSeconds = wait ? readWaitSeconds(itemIndex) : 0;
+					const options = this.getNodeParameter('citationOptions', itemIndex, {}) as IDataObject;
+					const waitSeconds = wait ? readWaitSeconds(itemIndex, options.maxWaitSeconds ?? 600) : 0;
 					if (language) body.language = language;
-					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
+					const webhookUrl = String(options.webhookUrl ?? '').trim();
 					if (webhookUrl) body.webhook_url = webhookUrl;
 
-					const accepted = await lenzRequest('POST', '/citecheck', body, {
-						idempotent: { operation, itemIndex },
-					});
+					const accepted = await submitJob('/citecheck', body, operation, itemIndex, 'citecheck_id');
 					const citecheckId = (accepted.citecheck_id as string) ?? '';
 					if (!citecheckId) {
 						throw new NodeOperationError(
@@ -2647,6 +2709,7 @@ export class Lenz implements INodeType {
 							{ itemIndex },
 						);
 					}
+					acceptedJobs.push(`citecheck_id ${citecheckId}`);
 					pendingJob = {
 						key: 'citecheck_id',
 						id: citecheckId,
@@ -2706,6 +2769,26 @@ export class Lenz implements INodeType {
 					pairedItem: { item: itemIndex },
 				});
 			} catch (error) {
+				// n8n's own words for an OAuth credential that was created but never
+				// connected ("Unable to sign without access token") name a mechanism,
+				// not a fix. The request never left n8n: nothing reached Lenz and
+				// nothing was charged.
+				if (
+					credentialType === 'lenzOAuth2Api' &&
+					/unable to sign without access token/i.test((error as Error)?.message ?? '')
+				) {
+					const notConnected = 'The Lenz OAuth2 credential is not connected yet';
+					const fix =
+						'Open the credential and click Connect my account, then sign in to Lenz and click Allow. Nothing was sent to Lenz.';
+					if (this.continueOnFail()) {
+						returnData.push({
+							json: { error: notConnected, error_description: fix, code: 'oauth_not_connected' },
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					throw new NodeOperationError(this.getNode(), notConnected, { description: fix, itemIndex });
+				}
 				if (this.continueOnFail()) {
 					// This is the branch the capacity recovery pattern runs on:
 					// "On Error -> Continue (using error output)" into a Wait node
@@ -2841,7 +2924,12 @@ export class Lenz implements INodeType {
 					// constructs a FRESH error, so anything not copied across is
 					// lost, and the task id is the one thing that cannot be
 					// reconstructed afterwards.
-					const opReceipt = pendingTaskId ? submittedReceipt(pendingTaskId) : (pendingJob?.receipt ?? '');
+					const opReceipt = [
+						pendingTaskId ? submittedReceipt(pendingTaskId) : (pendingJob?.receipt ?? ''),
+						earlierJobsNote(pendingJob ? `${pendingJob.key} ${pendingJob.id}` : undefined),
+					]
+						.filter(Boolean)
+						.join(' ');
 					throw new NodeOperationError(this.getNode(), error.message, {
 						itemIndex,
 						description:
@@ -2861,9 +2949,17 @@ export class Lenz implements INodeType {
 				// a different request, which is exactly why they must not share a
 				// sentence. The receipt still reaches the caller as `task_id` on
 				// the error output, unconditionally.
+				// Earlier items' accepted jobs ride every typed message: unlike this
+				// item's own receipt (left off below, since "nothing was charged"
+				// and "submitted and charged" would contradict each other), they
+				// say nothing about this refusal, and n8n is about to drop the
+				// whole output that carried them.
+				const earlier = earlierJobsNote(pendingJob ? `${pendingJob.key} ${pendingJob.id}` : undefined);
+				const withEarlier = (text: { message: string; description: string }) =>
+					earlier ? { ...text, description: `${text.description} ${earlier}` } : text;
 				const quota = quotaMessageFor(error);
 				if (quota) {
-					throw describeApiError(this.getNode(), error, itemIndex, quota, '402');
+					throw describeApiError(this.getNode(), error, itemIndex, withEarlier(quota), '402');
 				}
 
 				// At capacity / providers down (HTTP 503 with a typed code) is
@@ -2872,7 +2968,7 @@ export class Lenz implements INodeType {
 				// automatic retry that cannot clear a 90-120s window.
 				const capacity = capacityMessageFor(error);
 				if (capacity) {
-					throw describeApiError(this.getNode(), error, itemIndex, capacity, '503');
+					throw describeApiError(this.getNode(), error, itemIndex, withEarlier(capacity), '503');
 				}
 
 				// Rate limited (HTTP 429). Left to n8n's stock text this read
@@ -2881,7 +2977,7 @@ export class Lenz implements INodeType {
 				// nothing was charged for the refusal.
 				const rateLimit = rateLimitMessageFor(error);
 				if (rateLimit) {
-					throw describeApiError(this.getNode(), error, itemIndex, rateLimit, '429');
+					throw describeApiError(this.getNode(), error, itemIndex, withEarlier(rateLimit), '429');
 				}
 
 				// Pass the ORIGINAL error object through. NodeApiError derives
@@ -2899,7 +2995,12 @@ export class Lenz implements INodeType {
 				// vanish behind our own sentence.
 				const existingDescription =
 					error instanceof NodeApiError ? (error.description ?? '') : '';
-				const receipt = pendingTaskId ? submittedReceipt(pendingTaskId) : (pendingJob?.receipt ?? '');
+				const receipt = [
+					pendingTaskId ? submittedReceipt(pendingTaskId) : (pendingJob?.receipt ?? ''),
+					earlier,
+				]
+					.filter(Boolean)
+					.join(' ');
 				throw describeApiError(this.getNode(), error, itemIndex, {
 					message: (error as Error).message,
 					...(receipt

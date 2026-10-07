@@ -2682,7 +2682,7 @@ describe('Lenz node - Review', () => {
 		const spy = jest.spyOn(Date, 'now').mockImplementation(() => (now += 4000));
 		try {
 			const { output } = await runNode(
-				{ operation: 'reviewDraft', draft: 'x', maxWaitSeconds: 10 },
+				{ operation: 'reviewDraft', draft: 'x', reviewOptions: { maxWaitSeconds: 10 } },
 				(options) =>
 					options.method === 'POST'
 						? { review_id: 'rev_1', status: 'queued' }
@@ -2700,7 +2700,10 @@ describe('Lenz node - Review', () => {
 	});
 
 	it('refuses a non-numeric Max Wait before submitting anything', async () => {
-		const ctx = createContext({ operation: 'reviewDraft', draft: 'x', maxWaitSeconds: 'soon' }, noCall);
+		const ctx = createContext(
+			{ operation: 'reviewDraft', draft: 'x', reviewOptions: { maxWaitSeconds: 'soon' } },
+			noCall,
+		);
 		await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(/Max Wait/);
 		expect(ctx.httpMock).not.toHaveBeenCalled();
 	});
@@ -2796,5 +2799,145 @@ describe('Lenz node - Check Citations', () => {
 		);
 		expect(calls[0].url).toBe('/citechecks/cc_1');
 		expect((output[0].json as IDataObject).outcome).toBe('clean');
+	});
+});
+
+describe('Lenz node - Review hardening', () => {
+	const done: IDataObject = { review_id: 'rev_1', status: 'completed', outcome: 'clean' };
+
+	it('waits for a slot when three reviews are already running, then submits', async () => {
+		let posts = 0;
+		const { output } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) => {
+			if (options.method === 'POST') {
+				posts += 1;
+				if (posts === 1) {
+					throw apiError(429, { code: 'review_in_flight', detail: 'busy', retry_after_seconds: 60 });
+				}
+				return { review_id: 'rev_1', status: 'queued' };
+			}
+			return done;
+		});
+		expect(posts).toBe(2);
+		expect((output[0].json as IDataObject).outcome).toBe('clean');
+	});
+
+	it('words the in-flight cap as a concurrency limit, not a plan limit', async () => {
+		const realNow = Date.now;
+		let now = realNow();
+		const spy = jest.spyOn(Date, 'now').mockImplementation(() => (now += 120000));
+		try {
+			const ctx = createContext({ operation: 'reviewDraft', draft: 'x' }, () => {
+				throw apiError(429, { code: 'review_in_flight', detail: 'busy', retry_after_seconds: 60 });
+			});
+			const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+			expect((err as Error).message).toMatch(/already has 3 reviews running/);
+			const description = (err as { description?: string }).description ?? '';
+			expect(description).toMatch(/not a plan limit/);
+			expect(description).not.toMatch(/raise the cap|lenz\.io\/plans/);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it('takes the job a 409 idempotency_conflict names as the accepted one', async () => {
+		const { output, calls } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) => {
+			if (options.method === 'POST') {
+				throw apiError(409, { code: 'idempotency_conflict', detail: 'creating', review_id: 'rev_9' });
+			}
+			return { ...done, review_id: 'rev_9' };
+		});
+		expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+		expect(calls[1].url).toBe('/reviews/rev_9');
+		expect((output[0].json as IDataObject).review_id).toBe('rev_9');
+	});
+
+	it('names the reviews already accepted when a later item fails for good', async () => {
+		let posts = 0;
+		const ctx = createContext(
+			{ operation: 'reviewDraft', draft: 'x', waitForCompletion: false },
+			(options) => {
+				if (options.method !== 'POST') return done;
+				posts += 1;
+				if (posts === 1) return { review_id: 'rev_first', status: 'queued' };
+				throw apiError(402, { code: 'no_credits', detail: 'No remaining credits.' });
+			},
+			false,
+			2,
+		);
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		expect((err as { description?: string }).description ?? '').toMatch(/review_id rev_first/);
+	});
+
+	it('gives citations_unavailable the transient wording, not n8n\'s retry advice', async () => {
+		const ctx = createContext(
+			{ operation: 'checkCitations', citationInput: 'text', citationText: 'See [1].' },
+			() => {
+				throw apiError(503, { code: 'citations_unavailable', detail: 'off', retry_after: 120 });
+			},
+		);
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		expect((err as Error).message).toMatch(/citation checking is switched off/);
+		expect((err as { description?: string }).description ?? '').toMatch(/Nothing was charged/);
+	});
+
+	it('reads Deep-Check Verdicts given as a comma-separated expression', async () => {
+		const { calls } = await runNode(
+			{ operation: 'reviewDraft', draft: 'x', reviewOptions: { verdicts: 'False, Mixed' } },
+			(options) => (options.method === 'POST' ? { review_id: 'rev_1', status: 'queued' } : done),
+		);
+		expect((calls[0].body as IDataObject).escalate).toEqual({ verdicts: ['False', 'Mixed'] });
+	});
+
+	it.each([
+		[{ maxVerifications: '' }, /Max Deep Checks/],
+		[{ maxVerifications: 'five' }, /Max Deep Checks/],
+		[{ maxAssessments: 21 }, /Max Quick Checks/],
+		[{ maxCitations: 2.5 }, /Max Citations/],
+	])('refuses option %j before anything is charged', async (options, message) => {
+		const ctx = createContext({ operation: 'reviewDraft', draft: 'x', reviewOptions: options }, noCall);
+		await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(message);
+		expect(ctx.httpMock).not.toHaveBeenCalled();
+	});
+
+	it.each([0, 25, ''])('refuses Max Citations %p for a text before submitting', async (maxCitations) => {
+		const ctx = createContext(
+			{ operation: 'checkCitations', citationInput: 'text', citationText: 'See [1].', maxCitations },
+			noCall,
+		);
+		await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(/Max Citations/);
+		expect(ctx.httpMock).not.toHaveBeenCalled();
+	});
+
+	it('sends the Webhook URL from Options', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'checkCitations',
+				citationInput: 'text',
+				citationText: 'See [1].',
+				waitForCompletion: false,
+				citationOptions: { webhookUrl: ' https://hooks.example/x ' },
+			},
+			() => ({ citecheck_id: 'cc_1', status: 'queued' }),
+		);
+		expect((calls[0].body as IDataObject).webhook_url).toBe('https://hooks.example/x');
+	});
+});
+
+describe('Lenz node - OAuth not connected', () => {
+	it('says to connect the credential instead of n8n\'s signing error', async () => {
+		const ctx = createContext({ operation: 'usage', authentication: 'oAuth2' }, () => {
+			throw new Error('Unable to sign without access token');
+		});
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		expect((err as Error).message).toMatch(/not connected yet/);
+		expect((err as { description?: string }).description ?? '').toMatch(/Connect my account/);
+	});
+
+	it('leaves the same text alone on an API key credential', async () => {
+		const ctx = createContext({ operation: 'usage', authentication: 'apiKey' }, () => {
+			throw new Error('Unable to sign without access token');
+		});
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		expect((err as Error).message).not.toMatch(/not connected yet/);
 	});
 });

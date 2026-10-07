@@ -52,6 +52,21 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | **List Related** | Public verifications semantically related to a given one — useful for "see also" surfaces. |
 | **Delete** | Permanently deletes one of your stored verifications. |
 
+### Review — check a whole draft, or its citations
+
+| Operation | What it does |
+|---|---|
+| **Review Draft** | Checks a whole draft (up to 50,000 characters, or one public web page by URL) in one call: finds its claims, quick-checks them (1 credit each, up to **Max Quick Checks**, default 20), deep-checks the doubtful ones (10 credits each, 5 at Low **Depth**, up to **Max Deep Checks**, default 5) and, with **Max Citations** above 0, checks whether each cited source says what the draft attributes to it (1 credit per citation). **Suggest Edits** adds the smallest edits that make the draft say what each correction says, at no extra cost. A review usually takes two to four minutes. |
+| **Get Review** | Fetches a review by `review_id`, for one that outlasted the wait. **Issues Only** leaves out the full claim and citation lists. |
+| **Check Citations** | Checks only the citations: either a **Text** with its links, DOIs or `[n]` markers and a reference list (**Max Citations**, default 20), or up to 20 **Statement-Source Pairs** you list, each with a URL or a DOI. 1 credit per citation checked; a source that could not be read is refunded. |
+| **Get Citation Check** | Fetches a citation check by `citecheck_id`. |
+
+Both hand on Lenz's result as it comes, plus `passed`: `true` only when `outcome` is `clean`, `false` for `issues_found`, `incomplete` or `unchecked`, and `null` until there is an outcome. **Branch on `outcome`** for anything finer: `issues[]` (claims Lenz found wrong, each with `verdict`, `key_finding` and `suggested_rewrite`) and `citation_issues[]` (citations whose source does not say what the text says, worst first) are the arrays to loop over, and `credits.charged` is what it cost.
+
+**Waiting.** With **Wait for Completion** on, the node polls until the job finishes, for up to **Options → Max Wait (Seconds)**, default **600**. If that runs out you get `status: "timeout"` with the `review_id` or `citecheck_id`; nothing is cancelled or lost, so fetch it later with **Get Review** / **Get Citation Check**. For long drafts, turn Wait for Completion off and use a **Webhook URL** (also under Options) or fetch it later.
+
+**Three at a time.** Lenz runs at most **3 reviews, and separately 3 citation checks, at once per account**. A fourth waits: the node holds it for up to five minutes until a slot opens, then submits it. Nothing is charged for the wait. If one item in a run fails for good, the error names the jobs earlier items already started, so a paid review is never lost with the run.
+
 ### Ask — follow-up questions
 
 | Operation | What it does |
