@@ -495,14 +495,20 @@ function conflictMessageFor(error: unknown): { message: string; description: str
 	if (statusCodeOf(error) !== 409) return undefined;
 	const body = responseBodyOf(error);
 	if (body.code !== 'idempotency_conflict') return undefined;
+	// Only Review Draft and Check Citations retry a conflict first (submitJob
+	// marks the error); any other operation gets it on its first try, and may
+	// have created no job at all.
+	const retried = (error as { lenzConflictRetried?: boolean })?.lenzConflictRetried === true;
 	return {
-		message: 'Lenz: this request is still being created from an earlier attempt.',
+		message: 'Lenz: this request is still being processed from an earlier attempt.',
 		description:
 			'HTTP 409 (idempotency_conflict). Nothing new was charged. An earlier attempt of this exact request ' +
-			'is still holding it: it may still be running, or it may have failed, and the hold lasts up to 15 minutes. ' +
-			'The node already retried for ~30 seconds, and automatic retries are spaced too closely to outlast the ' +
-			'hold. Wait, then check your Lenz account for the job before sending this input again: a new or re-run ' +
-			'execution counts as a new request and would start and charge a second one if the first went through.',
+			'is still holding it, for up to 15 minutes; it may still be running, or it may have failed. ' +
+			(retried
+				? 'The node already retried for ~30 seconds, and automatic retries are spaced too closely to outlast ' +
+					'the hold. Check your Lenz account for the job before sending this input again: '
+				: 'Wait before sending it again: ') +
+			'a new or re-run execution counts as a new request and would be charged again if the first went through.',
 	};
 }
 
@@ -794,7 +800,12 @@ function reviewPolicy(
 		if (raw === undefined) return undefined;
 		if (raw === null || raw === '') fail(`${label} resolved to an empty value`);
 		const items = Array.isArray(raw) ? raw : String(raw).split(',');
-		const cleaned = items.map((v) => String(v).trim()).filter(Boolean);
+		// null / undefined entries first: String() would turn them into
+		// 'null' / 'undefined', which survive the blank check.
+		const cleaned = items
+			.filter((v) => v !== null && v !== undefined)
+			.map((v) => String(v).trim())
+			.filter(Boolean);
 		// ' ' or ',' from an expression is as empty as '': only a real selection
 		// may be empty.
 		// A deliberate empty selection is []; a non-empty list that cleans to
@@ -2055,16 +2066,13 @@ export class Lenz implements INodeType {
 							await sleep(CONFLICT_RETRY_DELAY_MS);
 							continue;
 						}
-						// Thrown with its HTTP data intact (status 409, code), so the error
-						// output still carries code: idempotency_conflict for a workflow
-						// that routes on it; the wording comes from conflictMessageFor.
-						throw describeApiError(
-							this.getNode(),
-							submitError,
-							itemIndex,
-							conflictMessageFor(submitError) ?? { message: (submitError as Error).message },
-							'409',
-						);
+						// Marked, then thrown with its HTTP data intact (status 409, code),
+						// so the error output still carries code: idempotency_conflict and the
+						// item's catch words it through conflictMessageFor, which reads the mark.
+						(submitError as { lenzConflictRetried?: boolean }).lenzConflictRetried = true;
+						throw describeApiError(this.getNode(), submitError, itemIndex, {
+							message: (submitError as Error).message,
+						});
 					}
 					const inFlight = errBody.code === 'review_in_flight' || errBody.code === 'citecheck_in_flight';
 					if (code === 429 && inFlight) {

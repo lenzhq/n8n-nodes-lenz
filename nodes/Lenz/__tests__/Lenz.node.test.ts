@@ -3019,7 +3019,8 @@ describe('Lenz node - second review fixes', () => {
 			throw apiError(409, { code: 'idempotency_conflict', detail: 'creating' });
 		});
 		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
-		expect((err as Error).message).toMatch(/still being created from an earlier attempt/);
+		expect((err as Error).message).toMatch(/still being processed from an earlier attempt/);
+		expect((err as { description?: string }).description ?? '').toMatch(/already retried for ~30 seconds/);
 		const description = (err as { description?: string }).description ?? '';
 		expect(description).toMatch(/Nothing new was charged/);
 		expect(description).toMatch(/a new or re-run execution counts as a new request/);
@@ -3041,7 +3042,7 @@ describe('Lenz node - second review fixes', () => {
 		expect(String(json.error_description)).toMatch(/Nothing new was charged/);
 	});
 
-	it.each(['', null, ' ', ' , ', [''], [' ']])('refuses a Deep-Check expression that resolves to %p', async (verdicts) => {
+	it.each(['', null, ' ', ' , ', [''], [' '], [undefined], [null]])('refuses a Deep-Check expression that resolves to %p', async (verdicts) => {
 		const ctx = createContext({ operation: 'reviewDraft', draft: 'x', reviewOptions: { verdicts } }, noCall);
 		await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(/Deep-Check Verdicts resolved to an empty value/);
 		expect(ctx.httpMock).not.toHaveBeenCalled();
@@ -3066,5 +3067,18 @@ describe('Lenz node - second review fixes', () => {
 		} finally {
 			spy.mockRestore();
 		}
+	});
+});
+
+describe('Lenz node - conflict on an operation that does not retry', () => {
+	it('does not claim a retry or a job it never made', async () => {
+		const ctx = createContext({ operation: 'usage' }, () => {
+			throw apiError(409, { code: 'idempotency_conflict', detail: 'busy' });
+		});
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		const description = (err as { description?: string }).description ?? '';
+		expect(description).toMatch(/Nothing new was charged/);
+		expect(description).not.toMatch(/already retried/);
+		expect(description).not.toMatch(/the job/);
 	});
 });

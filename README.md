@@ -218,7 +218,7 @@ So the Wait node has a number to read, the error output carries the refusal as f
 | `status_code` | The HTTP status, e.g. `429`, `503` |
 | `cost` | Credits the refused call needed, present only on an out-of-credits refusal |
 | `credits_remaining` | Credits the account holds — `0` is a real value and is reported, not dropped |
-| `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing, capacity, rate-limit or idempotency-conflict refusal (`code: "idempotency_conflict"`: an earlier attempt of the same request is still holding it, for up to 15 minutes, and nothing new was charged) |
+| `error_message` / `error_description` | The same wording the node would have thrown, present only for a recognised billing, capacity, rate-limit or idempotency-conflict refusal (`code: "idempotency_conflict"`: an earlier attempt of the same request is still holding it, for up to 15 minutes, and nothing new was charged; Review Draft and Check Citations retry it for ~30 seconds first) |
 | `resets_in_seconds` | Seconds until a rate limit clears, when that is too long to sit in a Wait node — see [Rate limits](#rate-limits-http-429) |
 | `limit` | The limit the API stated, on a Lenz rate-limit refusal |
 | `upgrade_url` | Where that limit or plan is raised — on a Lenz rate-limit refusal, and on an out-of-credits refusal |
