@@ -500,9 +500,9 @@ function conflictMessageFor(error: unknown): { message: string; description: str
 		description:
 			'HTTP 409 (idempotency_conflict). Nothing new was charged. An earlier attempt of this exact request ' +
 			'is still holding it: it may still be running, or it may have failed, and the hold lasts up to 15 minutes. ' +
-			'Retry On Fail on this node retries inside the same execution, which is safe and returns the job if it ' +
-			'exists. Do not send it again from a new or re-run execution: that counts as a new request and would ' +
-			'start and charge a second one if the first went through.',
+			'The node already retried for ~30 seconds, and automatic retries are spaced too closely to outlast the ' +
+			'hold. Wait, then check your Lenz account for the job before sending this input again: a new or re-run ' +
+			'execution counts as a new request and would start and charge a second one if the first went through.',
 	};
 }
 
@@ -797,7 +797,11 @@ function reviewPolicy(
 		const cleaned = items.map((v) => String(v).trim()).filter(Boolean);
 		// ' ' or ',' from an expression is as empty as '': only a real selection
 		// may be empty.
-		if (!Array.isArray(raw) && !cleaned.length) fail(`${label} resolved to an empty value`);
+		// A deliberate empty selection is []; a non-empty list that cleans to
+		// nothing (['', ' ']) can only come from an expression.
+		if (!cleaned.length && (!Array.isArray(raw) || raw.length > 0)) {
+			fail(`${label} resolved to an empty value`);
+		}
 		return cleaned;
 	};
 	// An empty or non-numeric expression is refused, never sent as null: the
@@ -2058,7 +2062,7 @@ export class Lenz implements INodeType {
 							this.getNode(),
 							submitError,
 							itemIndex,
-							conflictMessageFor(submitError) as { message: string; description: string },
+							conflictMessageFor(submitError) ?? { message: (submitError as Error).message },
 							'409',
 						);
 					}

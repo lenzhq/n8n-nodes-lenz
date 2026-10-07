@@ -3023,7 +3023,8 @@ describe('Lenz node - second review fixes', () => {
 		const description = (err as { description?: string }).description ?? '';
 		expect(description).toMatch(/Nothing new was charged/);
 		expect(description).toMatch(/Do not send it again from a new or re-run execution/);
-		expect(description).toMatch(/Retry On Fail on this node retries inside the same execution/);
+		// Retry On Fail cannot outlast a 15-minute hold: never recommended.
+		expect(description).not.toMatch(/Retry On Fail/);
 	});
 
 	it('keeps code idempotency_conflict on the error output', async () => {
@@ -3040,7 +3041,7 @@ describe('Lenz node - second review fixes', () => {
 		expect(String(json.error_description)).toMatch(/Nothing new was charged/);
 	});
 
-	it.each(['', null, ' ', ' , '])('refuses a Deep-Check expression that resolves to %p', async (verdicts) => {
+	it.each(['', null, ' ', ' , ', [''], [' ']])('refuses a Deep-Check expression that resolves to %p', async (verdicts) => {
 		const ctx = createContext({ operation: 'reviewDraft', draft: 'x', reviewOptions: { verdicts } }, noCall);
 		await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(/Deep-Check Verdicts resolved to an empty value/);
 		expect(ctx.httpMock).not.toHaveBeenCalled();
