@@ -481,6 +481,29 @@ function capacityMessageFor(error: unknown): { message: string; description: str
 }
 
 /**
+ * A 409 idempotency_conflict the node gave up retrying: the same request is
+ * still being created, and the node could not learn its ID.
+ *
+ * Never advise a re-run: re-running an execution in n8n gives it a new
+ * execution ID, the Idempotency-Key is built from it, and Lenz would start and
+ * charge a second job. Lenz holds the conflicting request for up to fifteen
+ * minutes (its async lock TTL), so "a minute" would be wrong too.
+ */
+function conflictMessageFor(error: unknown): { message: string; description: string } | undefined {
+	if (statusCodeOf(error) !== 409) return undefined;
+	const body = responseBodyOf(error);
+	if (body.code !== 'idempotency_conflict') return undefined;
+	return {
+		message: 'Lenz: this request is still being created from an earlier attempt.',
+		description:
+			'HTTP 409 (idempotency_conflict). Nothing new was charged. The same request is already being ' +
+			'processed and can hold for up to 15 minutes. Do not send it again from a new or re-run execution: ' +
+			'that counts as a new request and would start and charge a second one. Wait, then check the job ' +
+			'in your Lenz account before sending this input again.',
+	};
+}
+
+/**
  * Attach our wording to the error n8n is about to show, and hand back the
  * error to throw.
  *
@@ -759,12 +782,14 @@ function reviewPolicy(
 	const policy: IDataObject = {};
 	// A multi-select arrives as an array; an expression may hand over a string,
 	// so "False, Mixed" is read as a list rather than silently dropped.
-	// An EMPTY list is a valid policy, and a deliberate one: verdicts [] with
-	// confidence ['low'] deep-checks only by confidence. Only an option the
-	// user never added (undefined) takes the API's default.
-	const list = (raw: unknown): string[] | undefined => {
+	// An empty SELECTION ([]) is a valid policy, and a deliberate one:
+	// verdicts [] with confidence ['low'] deep-checks only by confidence. An
+	// expression that resolves to nothing ('' or null) is not: it reads like a
+	// missing field, and sending [] would silently switch deep checks off.
+	// Only an option never added (undefined) takes the API's default.
+	const list = (raw: unknown, label: string): string[] | undefined => {
 		if (raw === undefined) return undefined;
-		if (raw === null || raw === '') return [];
+		if (raw === null || raw === '') fail(`${label} resolved to an empty value`);
 		const items = Array.isArray(raw) ? raw : String(raw).split(',');
 		return items.map((v) => String(v).trim()).filter(Boolean);
 	};
@@ -779,9 +804,9 @@ function reviewPolicy(
 		}
 		return n;
 	};
-	const verdicts = list(options.verdicts);
+	const verdicts = list(options.verdicts, 'Deep-Check Verdicts');
 	if (verdicts) policy.verdicts = verdicts;
-	const confidence = list(options.confidence);
+	const confidence = list(options.confidence, 'Deep-Check Confidence');
 	if (confidence) policy.confidence = confidence;
 	const maxAssessments = count(options.maxAssessments, 'Max Quick Checks', 0, 20);
 	if (maxAssessments !== undefined) policy.max_assessments = maxAssessments;
@@ -1881,8 +1906,9 @@ export class Lenz implements INodeType {
 		// and a NaN deadline would poll in a hot loop (see Verify).
 		const readWaitSeconds = (itemIndex: number, raw: unknown): number => {
 			const requested = Number(raw);
-			// '' and null read as 0 and land on the 10s floor, as Verify always
-			// did; only a non-numeric value is refused.
+			// For Verify, '' and null read as 0 and land on the 10s floor, as they
+			// always did; only a non-numeric value is refused. Review and Check
+			// Citations pass their default instead of an empty value (jobWait).
 			if (!Number.isFinite(requested)) {
 				throw new NodeOperationError(this.getNode(), 'Max Wait (Seconds) must be a number of seconds', {
 					itemIndex,
@@ -1890,6 +1916,12 @@ export class Lenz implements INodeType {
 			}
 			return Math.min(MAX_WAIT_CEILING_SECONDS, Math.max(MAX_WAIT_FLOOR_SECONDS, requested));
 		};
+
+		// A review's Max Wait from Options: empty in any form ('' from an
+		// expression, null, never added) means the default, never the 10s floor,
+		// which would time out every review.
+		const jobWait = (raw: unknown): unknown =>
+			raw === undefined || raw === null || raw === '' ? JOB_MAX_WAIT_DEFAULT_SECONDS : raw;
 
 		// Polls a review or a citation check until it is completed or failed,
 		// with the rules Verify's loop follows and for the same reasons: the
@@ -1962,13 +1994,13 @@ export class Lenz implements INodeType {
 		// failure never takes the earlier, paid-for IDs with it: n8n drops the
 		// whole output when execute() throws.
 		const acceptedJobs: string[] = [];
+		// Every ID, uncapped: when execute() throws, n8n drops the output, and
+		// this note is the only place the charged IDs survive. They are short.
 		const earlierJobsNote = (current?: string): string => {
 			const earlier = acceptedJobs.filter((job) => job !== current);
 			if (!earlier.length) return '';
-			const shown = earlier.slice(0, 10).join(', ');
-			const more = earlier.length > 10 ? ` and ${earlier.length - 10} more` : '';
 			return (
-				`Earlier items in this run were already accepted and charged: ${shown}${more}. ` +
+				`Earlier items in this run were already accepted and charged: ${earlier.join(', ')}. ` +
 				'Some may have finished; fetch them by ID (Get Status, Get Review, Get Citation Check) rather than resubmitting.'
 			);
 		};
@@ -2006,18 +2038,15 @@ export class Lenz implements INodeType {
 							await sleep(CONFLICT_RETRY_DELAY_MS);
 							continue;
 						}
-						const what = idKey === 'review_id' ? 'review' : 'citation check';
-						throw new NodeOperationError(
+						// Thrown with its HTTP data intact (status 409, code), so the error
+						// output still carries code: idempotency_conflict for a workflow
+						// that routes on it; the wording comes from conflictMessageFor.
+						throw describeApiError(
 							this.getNode(),
-							`Lenz is still creating this ${what} from an earlier attempt`,
-							{
-								itemIndex,
-								description:
-									`HTTP 409 (idempotency_conflict): this exact request was already sent and the ${what} is ` +
-									'still being created, so nothing new was charged. Do not resubmit it from a new execution: ' +
-									`that would start and charge a second ${what}. Wait a minute and re-run this execution's ` +
-									'failed item with Retry On Fail, or look for it in your Lenz account.',
-							},
+							submitError,
+							itemIndex,
+							conflictMessageFor(submitError) ?? { message: (submitError as Error).message },
+							'409',
 						);
 					}
 					const inFlight = errBody.code === 'review_in_flight' || errBody.code === 'citecheck_in_flight';
@@ -2608,7 +2637,7 @@ export class Lenz implements INodeType {
 					const options = this.getNodeParameter('reviewOptions', itemIndex, {}) as IDataObject;
 					// Everything is validated before the submit: a review is charged
 					// when it is accepted.
-					const waitSeconds = wait ? readWaitSeconds(itemIndex, options.maxWaitSeconds ?? JOB_MAX_WAIT_DEFAULT_SECONDS) : 0;
+					const waitSeconds = wait ? readWaitSeconds(itemIndex, jobWait(options.maxWaitSeconds)) : 0;
 					const body: IDataObject = { text: draft };
 					if (language) body.language = language;
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
@@ -2723,7 +2752,7 @@ export class Lenz implements INodeType {
 					}
 					const wait = this.getNodeParameter('waitForCompletion', itemIndex, true) as boolean;
 					const options = this.getNodeParameter('citationOptions', itemIndex, {}) as IDataObject;
-					const waitSeconds = wait ? readWaitSeconds(itemIndex, options.maxWaitSeconds ?? JOB_MAX_WAIT_DEFAULT_SECONDS) : 0;
+					const waitSeconds = wait ? readWaitSeconds(itemIndex, jobWait(options.maxWaitSeconds)) : 0;
 					if (language) body.language = language;
 					const webhookUrl = String(options.webhookUrl ?? '').trim();
 					if (webhookUrl) body.webhook_url = webhookUrl;
@@ -2797,6 +2826,12 @@ export class Lenz implements INodeType {
 					pairedItem: { item: itemIndex },
 				});
 			} catch (error) {
+				// This item's own job, left out of the "earlier items" note.
+				const currentJob = pendingTaskId
+					? `task_id ${pendingTaskId}`
+					: pendingJob
+						? `${pendingJob.key} ${pendingJob.id}`
+						: undefined;
 				// n8n's own words for an OAuth credential that was created but never
 				// connected ("Unable to sign without access token") name a mechanism,
 				// not a fix. The request never left n8n: nothing reached Lenz and
@@ -2925,7 +2960,10 @@ export class Lenz implements INodeType {
 						json.upgrade_url = body.upgrade_url;
 					}
 					const typed =
-						quotaMessageFor(error) ?? capacityMessageFor(error) ?? rateLimitMessageFor(error);
+						quotaMessageFor(error) ??
+						capacityMessageFor(error) ??
+						rateLimitMessageFor(error) ??
+						conflictMessageFor(error);
 					if (typed) {
 						json.error_message = typed.message;
 						json.error_description = typed.description;
@@ -2956,9 +2994,7 @@ export class Lenz implements INodeType {
 					// reconstructed afterwards.
 					const opReceipt = [
 						pendingTaskId ? submittedReceipt(pendingTaskId) : (pendingJob?.receipt ?? ''),
-						earlierJobsNote(
-					pendingTaskId ? `task_id ${pendingTaskId}` : pendingJob ? `${pendingJob.key} ${pendingJob.id}` : undefined,
-				),
+						earlierJobsNote(currentJob),
 					]
 						.filter(Boolean)
 						.join(' ');
@@ -2986,9 +3022,7 @@ export class Lenz implements INodeType {
 				// and "submitted and charged" would contradict each other), they
 				// say nothing about this refusal, and n8n is about to drop the
 				// whole output that carried them.
-				const earlier = earlierJobsNote(
-					pendingTaskId ? `task_id ${pendingTaskId}` : pendingJob ? `${pendingJob.key} ${pendingJob.id}` : undefined,
-				);
+				const earlier = earlierJobsNote(currentJob);
 				const withEarlier = (text: { message: string; description: string }) =>
 					earlier ? { ...text, description: `${text.description} ${earlier}` } : text;
 				const quota = quotaMessageFor(error);
@@ -3012,6 +3046,10 @@ export class Lenz implements INodeType {
 				const rateLimit = rateLimitMessageFor(error);
 				if (rateLimit) {
 					throw describeApiError(this.getNode(), error, itemIndex, withEarlier(rateLimit), '429');
+				}
+				const conflict = conflictMessageFor(error);
+				if (conflict) {
+					throw describeApiError(this.getNode(), error, itemIndex, withEarlier(conflict), '409');
 				}
 
 				// Pass the ORIGINAL error object through. NodeApiError derives

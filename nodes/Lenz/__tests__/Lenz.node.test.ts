@@ -2995,7 +2995,7 @@ describe('Lenz node - second review fixes', () => {
 		expect(description).toMatch(/already accepted and charged/);
 	});
 
-	it('lists at most ten earlier jobs', async () => {
+	it('lists every earlier job: the note is the only place they survive', async () => {
 		let posts = 0;
 		const ctx = createContext(
 			{ operation: 'reviewDraft', draft: 'x', waitForCompletion: false },
@@ -3010,9 +3010,8 @@ describe('Lenz node - second review fixes', () => {
 		);
 		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
 		const description = (err as { description?: string }).description ?? '';
-		expect(description).toMatch(/rev_10\b/);
-		expect(description).not.toMatch(/rev_11\b/);
-		expect(description).toMatch(/and 2 more/);
+		expect(description).toMatch(/rev_1\b/);
+		expect(description).toMatch(/rev_12\b/);
 	});
 
 	it('explains a conflict that never names the job instead of n8n\'s "Conflict"', async () => {
@@ -3020,7 +3019,51 @@ describe('Lenz node - second review fixes', () => {
 			throw apiError(409, { code: 'idempotency_conflict', detail: 'creating' });
 		});
 		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
-		expect((err as Error).message).toMatch(/still creating this review/);
-		expect((err as { description?: string }).description ?? '').toMatch(/nothing new was charged/);
+		expect((err as Error).message).toMatch(/still being created from an earlier attempt/);
+		const description = (err as { description?: string }).description ?? '';
+		expect(description).toMatch(/Nothing new was charged/);
+		expect(description).toMatch(/Do not send it again from a new or re-run execution/);
+		expect(description).not.toMatch(/Retry On Fail/);
+	});
+
+	it('keeps code idempotency_conflict on the error output', async () => {
+		const { output } = await runNode(
+			{ operation: 'reviewDraft', draft: 'x' },
+			() => {
+				throw apiError(409, { code: 'idempotency_conflict', detail: 'creating' });
+			},
+			true,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(409);
+		expect(json.code).toBe('idempotency_conflict');
+		expect(String(json.error_description)).toMatch(/Nothing new was charged/);
+	});
+
+	it.each(['', null])('refuses a Deep-Check expression that resolves to %p', async (verdicts) => {
+		const ctx = createContext({ operation: 'reviewDraft', draft: 'x', reviewOptions: { verdicts } }, noCall);
+		await expect(new Lenz().execute.call(ctx.ctx)).rejects.toThrow(/Deep-Check Verdicts resolved to an empty value/);
+		expect(ctx.httpMock).not.toHaveBeenCalled();
+	});
+
+	it.each(['', null])('reads an empty review Max Wait (%p) as the 600s default, not the floor', async (maxWaitSeconds) => {
+		const realNow = Date.now;
+		const start = realNow();
+		let now = start;
+		const spy = jest.spyOn(Date, 'now').mockImplementation(() => (now += 30000));
+		try {
+			const { output } = await runNode(
+				{ operation: 'reviewDraft', draft: 'x', reviewOptions: { maxWaitSeconds } },
+				(options) =>
+					options.method === 'POST'
+						? { review_id: 'rev_1', status: 'queued' }
+						: { review_id: 'rev_1', status: 'verifying' },
+			);
+			expect((output[0].json as IDataObject).status).toBe('timeout');
+			// 30s per clock read: a 10s floor ends after one poll, 600s after many.
+			expect(now - start).toBeGreaterThan(300000);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });
