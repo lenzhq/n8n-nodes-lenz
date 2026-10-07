@@ -319,6 +319,8 @@ const CONFLICT_MAX_RETRIES = 10;
 // what every saved review node reads. The property defaults and the execute
 // fallback both read it, so they cannot drift apart.
 const JOB_MAX_WAIT_DEFAULT_SECONDS = 600;
+// How many earlier accepted IDs a hard failure names (see earlierJobsNote).
+const EARLIER_JOBS_SHOWN = 100;
 
 // Server-side cap on POST /verify/batch and POST /verify/{task_id}/select.
 const BATCH_MAX_CLAIMS = 20;
@@ -496,10 +498,11 @@ function conflictMessageFor(error: unknown): { message: string; description: str
 	return {
 		message: 'Lenz: this request is still being created from an earlier attempt.',
 		description:
-			'HTTP 409 (idempotency_conflict). Nothing new was charged. The same request is already being ' +
-			'processed and can hold for up to 15 minutes. Do not send it again from a new or re-run execution: ' +
-			'that counts as a new request and would start and charge a second one. Wait, then check the job ' +
-			'in your Lenz account before sending this input again.',
+			'HTTP 409 (idempotency_conflict). Nothing new was charged. An earlier attempt of this exact request ' +
+			'is still holding it: it may still be running, or it may have failed, and the hold lasts up to 15 minutes. ' +
+			'Retry On Fail on this node retries inside the same execution, which is safe and returns the job if it ' +
+			'exists. Do not send it again from a new or re-run execution: that counts as a new request and would ' +
+			'start and charge a second one if the first went through.',
 	};
 }
 
@@ -791,7 +794,11 @@ function reviewPolicy(
 		if (raw === undefined) return undefined;
 		if (raw === null || raw === '') fail(`${label} resolved to an empty value`);
 		const items = Array.isArray(raw) ? raw : String(raw).split(',');
-		return items.map((v) => String(v).trim()).filter(Boolean);
+		const cleaned = items.map((v) => String(v).trim()).filter(Boolean);
+		// ' ' or ',' from an expression is as empty as '': only a real selection
+		// may be empty.
+		if (!Array.isArray(raw) && !cleaned.length) fail(`${label} resolved to an empty value`);
+		return cleaned;
 	};
 	// An empty or non-numeric expression is refused, never sent as null: the
 	// API would read null as "use the default", and the default for deep checks
@@ -1921,7 +1928,7 @@ export class Lenz implements INodeType {
 		// expression, null, never added) means the default, never the 10s floor,
 		// which would time out every review.
 		const jobWait = (raw: unknown): unknown =>
-			raw === undefined || raw === null || raw === '' ? JOB_MAX_WAIT_DEFAULT_SECONDS : raw;
+			raw === undefined || raw === null || String(raw).trim() === '' ? JOB_MAX_WAIT_DEFAULT_SECONDS : raw;
 
 		// Polls a review or a citation check until it is completed or failed,
 		// with the rules Verify's loop follows and for the same reasons: the
@@ -1994,13 +2001,19 @@ export class Lenz implements INodeType {
 		// failure never takes the earlier, paid-for IDs with it: n8n drops the
 		// whole output when execute() throws.
 		const acceptedJobs: string[] = [];
-		// Every ID, uncapped: when execute() throws, n8n drops the output, and
-		// this note is the only place the charged IDs survive. They are short.
+		// When execute() throws, n8n drops the output, and this note is the only
+		// place the charged IDs survive, so it lists them, up to a bound that
+		// keeps a huge run from flooding the error panel and the logs.
 		const earlierJobsNote = (current?: string): string => {
 			const earlier = acceptedJobs.filter((job) => job !== current);
 			if (!earlier.length) return '';
+			const shown = earlier.slice(0, EARLIER_JOBS_SHOWN).join(', ');
+			const more =
+				earlier.length > EARLIER_JOBS_SHOWN
+					? ` and ${earlier.length - EARLIER_JOBS_SHOWN} more (turn on Continue On Fail to keep every item's ID on its own output)`
+					: '';
 			return (
-				`Earlier items in this run were already accepted and charged: ${earlier.join(', ')}. ` +
+				`Earlier items in this run were already accepted and charged: ${shown}${more}. ` +
 				'Some may have finished; fetch them by ID (Get Status, Get Review, Get Citation Check) rather than resubmitting.'
 			);
 		};
@@ -2045,7 +2058,7 @@ export class Lenz implements INodeType {
 							this.getNode(),
 							submitError,
 							itemIndex,
-							conflictMessageFor(submitError) ?? { message: (submitError as Error).message },
+							conflictMessageFor(submitError) as { message: string; description: string },
 							'409',
 						);
 					}
