@@ -1,6 +1,9 @@
-// The node reads both shapes the Lenz API answers in and hands a workflow the
-// same output from either. Each case runs the recorded response bodies in
-// ./api-shapes.fixtures.ts, `legacy` and `canonical`, through the real node.
+// The node still requests the older API shape (legacy-oracle.test.ts holds it
+// to its 0.8.0 output). These tests run the same recorded responses in both
+// shapes, `legacy` and `canonical` (./api-shapes.fixtures.ts), through the real
+// node. The newer shape must never crash the node and every output key must
+// carry a sensible value; identical output from the two shapes is NOT promised
+// in this release.
 import { NodeApiError, sleep } from 'n8n-workflow';
 import type { IDataObject, IExecuteFunctions, IHttpRequestOptions } from 'n8n-workflow';
 
@@ -95,20 +98,20 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 	});
 
 	describe('a paused verification', () => {
-		it('offers each claim under both `claim` and `text`', async () => {
+		it('offers each claim under `text`, as the node always has', async () => {
 			const [json] = await run(
 				{ operation: 'verifyStatus', taskId: 'task_1' },
 				status(shapes.statusNeedsInput[shape]),
 			);
 			expect(json.status).toBe('needs_input');
-			expect(json.claims).toEqual([
-				{ claim: 'The Earth is round.', text: 'The Earth is round.', domain: 'Science' },
-				{
-					claim: 'Water boils at 100C at sea level.',
-					text: 'Water boils at 100C at sea level.',
-					domain: 'Science',
-				},
+			const claims = json.claims as IDataObject[];
+			expect(claims.map((c) => c.text)).toEqual([
+				'The Earth is round.',
+				'Water boils at 100C at sea level.',
 			]);
+			expect(claims.map((c) => c.domain)).toEqual(['Science', 'Science']);
+			// An older-shape option is passed through exactly as sent.
+			if (shape === 'legacy') expect(claims).toEqual(shapes.statusNeedsInput.legacy.claims);
 		});
 	});
 
@@ -128,7 +131,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 				status(shapes.statusCompletedCrossesMidnight[shape]),
 			);
 			expect(json.modified_at).toBe('2026-09-02T00:03:00.000000+00:00');
-			expect(json.completed_at).toBe('2026-09-02T00:03:00.000000+00:00');
+			expect(json).not.toHaveProperty('completed_at');
 		});
 
 		it('reads a stored verification the same way', async () => {
@@ -139,7 +142,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 			expect(json.status).toBe('completed');
 			expect(json.verdict).toEqual(expect.any(String));
 			expect(json).toHaveProperty('modified_at');
-			expect(json).toHaveProperty('completed_at');
+			expect(json).not.toHaveProperty('completed_at');
 		});
 	});
 
@@ -152,26 +155,27 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 			expect(json.chain_id).toBe(shape === 'legacy' ? shapes.submitReceipt.legacy.chain_id : null);
 		});
 
-		it('batch items carry the claim under `claim` and `claim_text`', async () => {
+		it('batch items carry the claim under `claim_text`', async () => {
 			const out = await run(
 				{ operation: 'verifyBatch', batchClaims: { claim: [{ text: 'a' }, { text: 'b' }] } },
 				() => shapes.batchReceipt[shape],
 			);
-			expect(out.map((j) => [j.claim, j.claim_text])).toEqual([
-				['The Earth is round.', 'The Earth is round.'],
-				['Water boils at 100C at sea level.', 'Water boils at 100C at sea level.'],
+			expect(out.map((j) => j.claim_text)).toEqual([
+				'The Earth is round.',
+				'Water boils at 100C at sea level.',
 			]);
+			expect(out.every((j) => !('claim' in j))).toBe(true);
 		});
 
-		it('select items carry the claim under `claim` and `claim_text`', async () => {
+		it('select items carry the claim under `claim_text`', async () => {
 			const out = await run(
 				{ operation: 'select', taskId: 'task_1', selectedClaims: ['a'] },
 				() => shapes.selectReceipt[shape],
 			);
 			expect(out.length).toBeGreaterThan(0);
 			for (const j of out) {
-				expect(j.claim).toEqual(expect.any(String));
-				expect(j.claim_text).toBe(j.claim);
+				expect(j.claim_text).toEqual(expect.any(String));
+				expect(j).not.toHaveProperty('claim');
 			}
 		});
 	});
@@ -213,6 +217,27 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 				confidence: 'high',
 				passed: true,
 			});
+		});
+	});
+
+	describe('Extract', () => {
+		const extractBody = (status: string, claims: IDataObject[]): IDataObject =>
+			shape === 'legacy'
+				? { status, claim: claims[0]?.claim ?? '', identified_claims: [], original_input: 'x' }
+				: { status, claims, original_input: 'x' };
+
+		it('flags an input with nothing to check', async () => {
+			const status = shape === 'legacy' ? 'not_a_claim' : 'no_checkable_claim';
+			const [json] = await run({ operation: 'extract', text: 'x' }, () => extractBody(status, []));
+			expect(json.status).toBe(status);
+			expect(json.not_a_claim).toBe(true);
+		});
+
+		it('does not flag an input with claims', async () => {
+			const [json] = await run({ operation: 'extract', text: 'x' }, () =>
+				extractBody('ready', [{ claim: 'The Earth is round.' }]),
+			);
+			expect(json.not_a_claim).toBe(false);
 		});
 	});
 

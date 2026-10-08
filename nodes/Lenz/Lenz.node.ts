@@ -20,7 +20,7 @@ export const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.8.1';
+const USER_AGENT = 'n8n-nodes-lenz/0.8.0';
 
 // Pins the Public API surface this node was built against. Lenz records it for
 // analytics today and will use it to keep v1 clients working once a v2 surface
@@ -592,16 +592,16 @@ function mapCitations(sources: unknown): IDataObject[] {
 		}));
 }
 
-// The claims a paused task offers, each with BOTH `claim` (current) and `text`
-// (older) so a workflow reading either keeps resolving. Anything else on an
-// option (its domain) passes through untouched.
+// The claims a paused task offers, passed through as the API sent them. Only
+// an option that arrives without `text` (the newer shape names it `claim`) gets
+// `text` filled in from `claim`, so a workflow reading `text` keeps resolving.
 function offeredClaims(raw: unknown): IDataObject[] {
 	if (!Array.isArray(raw)) return [];
 	return raw.map((entry) => {
-		if (!entry || typeof entry !== 'object') return entry as IDataObject;
-		const option = entry as IDataObject;
-		const claim = option.claim ?? option.text;
-		return claim === undefined ? option : { ...option, claim, text: claim };
+		const option = asObject(entry);
+		return entry && typeof entry === 'object' && option.text === undefined && option.claim !== undefined
+			? { ...option, text: option.claim }
+			: (entry as IDataObject);
 	});
 }
 
@@ -628,12 +628,15 @@ function asText(value: unknown): string {
 	return typeof value === 'string' ? value : '';
 }
 
+function isNoCheckable(value: unknown): boolean {
+	return typeof value === 'string' && NO_CHECKABLE_CODES.includes(value);
+}
+
 /**
- * The time a verification finished, in the node's long-standing `modified_at`
- * sense: the finish time when it fell on a later UTC calendar day than
- * `created_at`, else null. A body that carries `modified_at` already has that
- * value; a body that carries `completed_at` (always set once completed) has it
- * derived here so the output reads the same either way.
+ * `modified_at` as this node has always emitted it: the finish time when it
+ * fell on a later UTC calendar day than `created_at`, else null. A body that
+ * carries `modified_at` is passed through untouched. A body that carries only
+ * `completed_at` (the newer shape) has it derived here.
  */
 function modifiedAtOf(result: IDataObject): string | null {
 	if ('modified_at' in result) return (result.modified_at as string | null | undefined) ?? null;
@@ -679,10 +682,6 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 		language: result.language ?? '',
 		created_at: result.created_at ?? '',
 		modified_at: modifiedAtOf(result),
-		// When the verification finished (moved by a rerun). `completed_at` on
-		// the current shape; on the older one only `modified_at` says, and only
-		// when it differs from created_at's day.
-		completed_at: result.completed_at ?? result.modified_at ?? null,
 	};
 	if (includeAudit) {
 		mapped.audit = result.audit ?? {};
@@ -702,40 +701,41 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
  * from Get Status, or from a stored record fetched by Get.
  */
 function failureFields(record: IDataObject): IDataObject {
-	// Two shapes: a `failure` block { code, detail, hint, failure_class,
-	// retryable } (current), or the same facts at the top level beside a plain
-	// `error` sentence (older). The block is read first.
+	// A body with a `failure` block { code, detail, failure_class, retryable }
+	// is read from the block first; every other body is read exactly as before,
+	// from its top-level fields. `??` throughout: an empty string is a value.
 	const failure = asObject(record.failure);
-	const code = asText(failure.code) || asText(record.failure_reason);
+	const code = failure.code ?? record.failure_reason;
 	const detail =
-		asText(failure.detail) ||
-		(record.error ?? record.failure_detail ?? (code || undefined)) ||
-		'unknown';
+		failure.detail ?? record.error ?? record.failure_detail ?? record.failure_reason ?? code ?? 'unknown';
 	return {
-		// `failure_reason` keeps the word this node has always emitted for
-		// nothing-to-check: `not_a_claim`. Workflows branch on it.
-		failure_reason: NO_CHECKABLE_CODES.includes(code) ? 'not_a_claim' : code,
+		// The block's word for nothing-to-check is `no_checkable_claim`; this
+		// node has always said `not_a_claim` there, and workflows branch on it.
+		failure_reason: code === 'no_checkable_claim' ? 'not_a_claim' : (code ?? ''),
 		failure_class: failure.failure_class ?? record.failure_class ?? '',
 		retryable: failure.retryable ?? record.retryable ?? null,
 		message: 'Verification failed: ' + String(detail),
 		// True when the input held nothing that can be checked.
-		not_a_claim: NO_CHECKABLE_CODES.includes(code),
+		not_a_claim: isNoCheckable(code),
 	};
 }
 
 /**
- * Whether an /assess answer says nothing in the input can be checked, in either
- * shape: the top-level `status`, a top-level `error_code` or `failure.code`,
- * or (for a list) every row failing with that code.
+ * Whether an /assess answer says nothing in the input can be checked: the
+ * top-level `status`, a top-level `error_code` or `failure.code`, or (for a
+ * list) every row failing with that code.
  */
 function nothingCheckable(result: IDataObject, rows: IDataObject[]): boolean {
-	const isNone = (value: unknown) => typeof value === 'string' && NO_CHECKABLE_CODES.includes(value);
-	if (isNone(result.status) || isNone(result.error_code) || isNone(asObject(result.failure).code)) {
+	if (
+		isNoCheckable(result.status) ||
+		isNoCheckable(result.error_code) ||
+		isNoCheckable(asObject(result.failure).code)
+	) {
 		return true;
 	}
 	return (
 		rows.length > 0 &&
-		rows.every((row) => isNone(asObject(row.failure).code) || isNone(row.error_code))
+		rows.every((row) => isNoCheckable(asObject(row.failure).code) || isNoCheckable(row.error_code))
 	);
 }
 
@@ -2452,10 +2452,8 @@ export class Lenz implements INodeType {
 							json: {
 								batch_id: batchId,
 								task_id: spawned.task_id ?? '',
-								// `claim` is the current name, `claim_text` the older one;
-								// both are emitted whichever the API sent.
-								claim: spawned.claim ?? spawned.claim_text ?? '',
-								claim_text: spawned.claim ?? spawned.claim_text ?? '',
+								// The newer shape names it `claim`; the output key stays.
+								claim_text: spawned.claim_text ?? spawned.claim ?? '',
 								status: 'queued',
 								partial,
 							},
@@ -2496,10 +2494,8 @@ export class Lenz implements INodeType {
 							json: {
 								batch_id: batchId,
 								task_id: spawned.task_id ?? '',
-								// `claim` is the current name, `claim_text` the older one;
-								// both are emitted whichever the API sent.
-								claim: spawned.claim ?? spawned.claim_text ?? '',
-								claim_text: spawned.claim ?? spawned.claim_text ?? '',
+								// The newer shape names it `claim`; the output key stays.
+								claim_text: spawned.claim_text ?? spawned.claim ?? '',
 								status: 'queued',
 								partial,
 							},
@@ -2528,14 +2524,14 @@ export class Lenz implements INodeType {
 					// A failed row has no verdict on the current shape (status
 					// 'failed', verdict null); this node has always shown such a
 					// row as verdict 'Error' with confidence 'low'.
-					const rowFailed = (c: IDataObject) => c.status === 'failed' || c.verdict === 'Error';
+					const rowFailed = (c: IDataObject) => c.status === 'failed';
 					const noCheckable = nothingCheckable(result, claims);
 					if (!claims.length) {
 						responseData = {
 							status: 'no_claim',
 							message:
-								asText(asObject(result.failure).detail) ||
-								(result.error as string | null | undefined) ||
+								(asObject(result.failure).detail as string | undefined) ??
+								(result.error as string | null | undefined) ??
 								'No verifiable factual claim was detected.',
 							candidate_claims: result.candidate_claims ?? [],
 							not_a_claim: noCheckable,
@@ -2599,6 +2595,7 @@ export class Lenz implements INodeType {
 					// them. The empty list is the answer rather than a failure, but on
 					// its own it is indistinguishable from "nothing here", so name the
 					// cause and the way out.
+					responseData.not_a_claim = isNoCheckable(responseData.status);
 					if (responseData.status === 'no_match') {
 						responseData.message =
 							'Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted.';

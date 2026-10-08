@@ -428,10 +428,9 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.status).toBe('needs_input');
 		expect(json.reason).toBe('multi_claim');
 		expect(json.task_id).toBe('task_1');
-		// Each option carries `claim` (current name) beside `text` (older).
 		expect(json.claims).toEqual([
-			{ claim: 'Claim one', text: 'Claim one', domain: 'General' },
-			{ claim: 'Claim two', text: 'Claim two', domain: 'Finance' },
+			{ text: 'Claim one', domain: 'General' },
+			{ text: 'Claim two', domain: 'Finance' },
 		]);
 		expect(json.message).toContain('Select Claims');
 		expect(json).toHaveProperty('candidates', []);
@@ -651,7 +650,6 @@ describe('Lenz node - Submit Verify Batch', () => {
 		expect(output[0].json).toEqual({
 			batch_id: 'batch_1',
 			task_id: 't1',
-			claim: 'Claim one',
 			claim_text: 'Claim one',
 			status: 'queued',
 			partial: false,
@@ -808,7 +806,7 @@ describe('Lenz node - Extract Claims', () => {
 		expect(output[0].json).not.toHaveProperty('message');
 	});
 
-	it('passes through the raw extract response', async () => {
+	it('passes through the raw extract response, plus the not_a_claim flag', async () => {
 		const responder: Responder = (options) => {
 			expect(options.url).toBe('/extract');
 			return {
@@ -822,6 +820,7 @@ describe('Lenz node - Extract Claims', () => {
 			status: 'ready',
 			identified_claims: ['Claim A', 'Claim B'],
 			domain: 'General',
+			not_a_claim: false,
 		});
 	});
 });
