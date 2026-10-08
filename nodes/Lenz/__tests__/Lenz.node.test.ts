@@ -10,7 +10,7 @@ jest.mock('n8n-workflow', () => ({
 	sleep: jest.fn(async () => {}),
 }));
 
-import { Lenz, POLL_TIMEOUT_MS } from '../Lenz.node';
+import { Lenz, POLL_TIMEOUT_MS, apiVersionFor } from '../Lenz.node';
 
 // A responder receives the httpRequest options and returns the mocked response
 // body (or throws to simulate an API/transport error).
@@ -1058,6 +1058,32 @@ describe('Lenz node - client identification', () => {
 	it('pins the API version it was built against', async () => {
 		const { calls } = await runNode({ operation: 'usage' }, () => ({ plan: 'free' }));
 		expect(calls[0].headers?.['X-Lenz-API-Version']).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	});
+
+	// A saved node keeps its version, so it keeps the API version it was built
+	// against; only a node added on this release asks for the newer one.
+	it.each([
+		[1, '2026-08-05'],
+		[1.1, '2026-08-05'],
+		[1.2, '2026-08-05'],
+		[1.3, '2026-10-11'],
+	])('a version %s node asks for API version %s', async (typeVersion, apiVersion) => {
+		const { calls } = await runNode(
+			{ operation: 'usage', authentication: 'apiKey' },
+			() => ({ plan: 'free' }),
+			false,
+			1,
+			{ typeVersion },
+		);
+		expect(calls[0].headers?.['X-Lenz-API-Version']).toBe(apiVersion);
+	});
+
+	it('every node version maps to an API version', () => {
+		for (const version of new Lenz().description.version as number[]) {
+			expect(apiVersionFor(version)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		}
+		expect(apiVersionFor(undefined)).toBe('2026-08-05');
+		expect(apiVersionFor(Math.max(...(new Lenz().description.version as number[])))).toBe('2026-10-11');
 	});
 });
 
@@ -2524,6 +2550,7 @@ describe('Lenz node - Authentication', () => {
 		[1, 'lenzApi'],
 		[1.1, 'lenzApi'],
 		[1.2, 'lenzOAuth2Api'],
+		[1.3, 'lenzOAuth2Api'],
 	])('a version %s node that never saved authentication uses %s', async (typeVersion, credential) => {
 		const { httpMock } = await runNode({ operation: 'usage' }, usage, false, 1, { typeVersion });
 		expect(httpMock.mock.calls[0][0]).toBe(credential);
@@ -2575,13 +2602,14 @@ describe('Lenz node - Authentication', () => {
 		[1, 'apiKey'],
 		[1.1, 'apiKey'],
 		[1.2, 'oAuth2'],
+		[1.3, 'oAuth2'],
 	])('version %s defaults to %s', (version, expected) => {
 		expect(authenticationDefaultAt(version)).toBe(expected);
 	});
 
 	it('a new node is created at the version that defaults to OAuth', () => {
 		const versions = new Lenz().description.version as number[];
-		expect(Math.max(...versions)).toBe(1.2);
+		expect(Math.max(...versions)).toBe(1.3);
 	});
 
 	it('offers each credential only under its own authentication value', () => {

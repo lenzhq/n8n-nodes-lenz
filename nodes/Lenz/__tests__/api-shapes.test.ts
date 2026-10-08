@@ -229,7 +229,8 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		it('flags an input with nothing to check', async () => {
 			const status = shape === 'legacy' ? 'not_a_claim' : 'no_checkable_claim';
 			const [json] = await run({ operation: 'extract', text: 'x' }, () => extractBody(status, []));
-			expect(json.status).toBe(status);
+			// The node's own word, from either shape.
+			expect(json.status).toBe('not_a_claim');
 			expect(json.not_a_claim).toBe(true);
 		});
 

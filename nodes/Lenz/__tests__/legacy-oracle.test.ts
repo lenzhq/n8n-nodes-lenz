@@ -1,7 +1,8 @@
-// Release bar: against every recorded response in the shape this node still
-// requests, the node returns exactly what 0.8.0 returned, byte for byte once
-// serialized, plus one additive boolean `not_a_claim` where the answer can say
-// nothing is checkable (Assess, Extract, and a failed verification).
+// Release bar: a node on version 1 to 1.2 asks for the older API shape, and
+// against every recorded response in that shape it returns exactly what 0.8.0
+// returned, byte for byte once serialized, plus one additive boolean
+// `not_a_claim` where the answer can say nothing is checkable (Assess, Extract,
+// and a failed verification).
 import { sleep } from 'n8n-workflow';
 import type { IDataObject } from 'n8n-workflow';
 
@@ -28,14 +29,21 @@ describe('legacy responses give the 0.8.0 output plus not_a_claim', () => {
 		expect(Object.keys(legacyCases).length).toBeGreaterThan(250);
 	});
 
-	it.each(Object.keys(legacyCases))('%s', async (name) => {
+	const cases = [1, 1.1, 1.2].flatMap((version) =>
+		Object.keys(legacyCases).map((name) => [version, name] as const),
+	);
+
+	it.each(cases)('version %s: %s', async (version, name) => {
 		const expected = legacyOracle[name];
 		const c = legacyCases[name];
+		const sent: string[] = [];
 		if (expected.threw !== undefined) {
-			await expect(runLegacyCase(c)).rejects.toThrow(expected.threw);
+			await expect(runLegacyCase(c, version, sent)).rejects.toThrow(expected.threw);
+			expect(sent.filter((v) => v !== '2026-08-05')).toEqual([]);
 			return;
 		}
-		const actual = await runLegacyCase(c);
+		const actual = await runLegacyCase(c, version, sent);
+		expect(sent.filter((v) => v !== '2026-08-05')).toEqual([]);
 		expect(JSON.stringify(actual.map(withoutFlag))).toBe(JSON.stringify(expected.ok));
 		for (const item of actual) {
 			if ('not_a_claim' in item) {

@@ -18,18 +18,25 @@ function apiError(statusCode: number, body: Record<string, unknown>) {
 	);
 }
 
-export async function runLegacyCase(c: LegacyCase): Promise<IDataObject[]> {
+// `typeVersion`: the node version to run as (default 1). `sent` collects the
+// API version header of every request the node made.
+export async function runLegacyCase(
+	c: LegacyCase,
+	typeVersion = 1,
+	sent: string[] = [],
+): Promise<IDataObject[]> {
 	const failing = c.status >= 400;
 	const ctx = {
 		getInputData: jest.fn(() => [{ json: {} }]),
 		getNodeParameter: jest.fn((name: string, _i: number, fallback?: unknown) =>
 			name === 'operation' ? c.operation : name in c.params ? c.params[name] : fallback,
 		),
-		getNode: jest.fn(() => ({ name: 'Lenz', type: 'lenz', typeVersion: 1, position: [0, 0] })),
+		getNode: jest.fn(() => ({ name: 'Lenz', type: 'lenz', typeVersion, position: [0, 0] })),
 		getExecutionId: jest.fn(() => 'exec-1'),
 		continueOnFail: jest.fn(() => failing),
 		helpers: {
-			httpRequestWithAuthentication: jest.fn(async () => {
+			httpRequestWithAuthentication: jest.fn(async (_credential: string, options: { headers?: IDataObject }) => {
+				sent.push(String(options.headers?.['X-Lenz-API-Version']));
 				if (failing) throw apiError(c.status, c.body);
 				return c.body;
 			}),
