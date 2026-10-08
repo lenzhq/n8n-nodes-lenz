@@ -32,13 +32,16 @@ const USER_AGENT = 'n8n-nodes-lenz/0.9.0';
 // older shape. Version 1.3 asks for `2026-10-11`, the newer shape, and gives a
 // workflow the same output keys, with the same meaning, as 1.2 does (see
 // fillLegacyUsageKeys, fillExtractLegacyKeys, fillReviewLegacyKeys and
-// legacyErrorCode). Only a node added from this release on is on 1.3.
+// legacyErrorBody). Only a node added from this release on is on 1.3.
 //
 // Lenz also signs the webhooks of a job in the version of the request that
 // started it, so a Webhook URL set on a 1.3 node receives the newer shape.
+// The version node versions 1 to 1.2 send, answered in the older shape.
+const LEGACY_API_VERSION = '2026-08-05';
+
 export const API_VERSION_BY_NODE_VERSION: ReadonlyArray<readonly [number, string]> = [
 	[1.3, '2026-10-11'],
-	[1, '2026-08-05'],
+	[1, LEGACY_API_VERSION],
 ];
 
 /** The API version a node at `typeVersion` sends. */
@@ -418,18 +421,6 @@ function responseBodyOf(error: unknown): IDataObject {
 }
 
 /**
- * The credits left, from a 402. Its `credits_remaining`; else, where one unit
- * of the refused work costs exactly one credit (a citation), `remaining`,
- * which counts those units and so is the same number. The newer shape of a
- * citation check's 402 sends only `remaining`.
- */
-function creditsRemainingOf(body: IDataObject): number | undefined {
-	if (typeof body.credits_remaining === 'number') return body.credits_remaining;
-	if (body.cost === 1 && typeof body.remaining === 'number') return body.remaining;
-	return undefined;
-}
-
-/**
  * Build the user-facing text for an out-of-credits rejection, or undefined if
  * this error isn't one.
  *
@@ -454,7 +445,8 @@ function quotaMessageFor(error: unknown): { message: string; description: string
 	// and this costs 10" from "you have nothing" — the first is one top-up away,
 	// the second is a plan decision.
 	const cost = typeof body.cost === 'number' ? body.cost : undefined;
-	const creditsRemaining = creditsRemainingOf(body);
+	const creditsRemaining =
+		typeof body.credits_remaining === 'number' ? body.credits_remaining : undefined;
 
 	let description = '';
 	if (cost !== undefined && creditsRemaining !== undefined) {
@@ -1064,22 +1056,228 @@ function fillLegacyUsageKeys(body: IDataObject): IDataObject {
 }
 
 /**
- * The `code` a refusal carried in the older shape, where the newer one names
- * it differently: a blank item in an Assess list was `blank_item`, and a blank
- * draft or an unsupported language on Review Draft was `validation_error`.
- * Every other code is the same in both shapes.
+ * A refusal answered in the newer shape, rewritten IN PLACE as the older shape
+ * (legacyErrorBody), so everything that reads the error afterwards (the
+ * messages, the error output's fields, the retry logic) sees what a version
+ * 1.2 node sees. n8n has already built the error's `description` from the
+ * body; where it did, it is rebuilt the same way from the rewritten body.
  */
-function legacyErrorCode(operation: string, status: number | undefined, body: IDataObject): unknown {
-	const code = body.code;
-	if (status !== 422 || !Array.isArray(body.errors)) return code;
-	const loc = asObject(body.errors[0]).loc;
-	if (operation === 'assess' && code === 'blank_input' && Array.isArray(loc) && (loc as unknown[]).includes('claims')) {
-		return 'blank_item';
+function readAsLegacyError(node: INode, error: unknown, method: string, path: string): void {
+	const status = statusCodeOf(error);
+	const body = responseBodyOf(error);
+	if (status === undefined || status < 400 || !Object.keys(body).length) return;
+	const legacy = legacyErrorBody(status, body, method, path.split('?')[0]);
+	const before = bodyDescription(node, body, status);
+	for (const key of Object.keys(body)) delete body[key];
+	Object.assign(body, legacy);
+	const e = error as { description?: string | null };
+	if (before !== undefined && e && typeof e === 'object' && e.description === before) {
+		e.description = bodyDescription(node, legacy, status) ?? null;
 	}
-	if (operation === 'reviewDraft' && (code === 'blank_input' || code === 'unsupported_language')) {
-		return 'validation_error';
+}
+
+/** The description n8n derives from an error body, if it finds one. */
+function bodyDescription(node: INode, body: IDataObject, status: number): string | undefined {
+	const derived = new NodeApiError(node, { ...body } as JsonObject, { httpCode: String(status) })
+		.description;
+	return typeof derived === 'string' && derived ? derived : undefined;
+}
+
+// Codes the newer shape sends where the older error carried no `code`
+// (outside /review and /citecheck, which always sent one).
+const CODELESS = new Set([
+	'not_authenticated',
+	'not_found',
+	'idempotency_body_mismatch',
+	'idempotency_conflict',
+	'malformed_body',
+	'method_not_allowed',
+	'validation_error',
+	'blank_input',
+	'unsupported_language',
+	'too_many_items',
+	'internal_error',
+	'invalid_request',
+]);
+
+// Codes whose older refusal repeated the code as `error`.
+const ERROR_ECHO_CODES = new Set([
+	'framing_failed',
+	'extraction_failed',
+	'ask_failed',
+	'private_claim',
+	'invalid_selection',
+	'no_selection_pending',
+]);
+
+const isReviewFamily = (path: string): boolean =>
+	path === '/review' ||
+	path.startsWith('/reviews/') ||
+	path === '/citecheck' ||
+	path.startsWith('/citechecks/');
+
+/** `from` renamed to `to` when only the newer name is there. */
+function renameKey(o: IDataObject, from: string, to: string): void {
+	if (from in o && !(to in o)) {
+		o[to] = o[from];
+		delete o[from];
 	}
-	return code;
+}
+
+/** The older names of a wait and a docs link. */
+function legacyWaitAndLink(o: IDataObject, status: number): void {
+	const code = o.code;
+	if (status === 429 && code === 'extract_daily_limit') renameKey(o, 'retry_after', 'reset_in_seconds');
+	if (status === 429 && (code === 'review_in_flight' || code === 'citecheck_in_flight')) {
+		renameKey(o, 'retry_after', 'retry_after_seconds');
+	}
+	if (status === 402 || status === 429 || status === 503) renameKey(o, 'docs_url', 'doc_url');
+}
+
+/** A field validation item in the older order: `type`, `loc`, `msg`, then the rest. */
+function validationItem(item: unknown): unknown {
+	if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+	const from = item as IDataObject;
+	const out: IDataObject = {};
+	for (const key of ['type', 'loc', 'msg']) if (key in from) out[key] = from[key];
+	for (const [key, value] of Object.entries(from)) if (!(key in out)) out[key] = value;
+	return out;
+}
+
+/**
+ * An error body in the newer shape (`{ detail, code, errors? }` on every
+ * refusal), read as the older shape the node was built on, so every field and
+ * message it shows keeps its older value. Only what the newer shape alone
+ * sends is rewritten, by endpoint; an older-shape body comes back unchanged.
+ *
+ *  - outside /review and /citecheck: no `errors` list; no `code` where the
+ *    older error had none; a schema error's `detail` is the list of field
+ *    items; Assess's blank list item is `blank_item`; a blank claim's older
+ *    sentence; `error` repeating the code where the older body had it;
+ *  - /review and /citecheck: field items `{ loc, msg }`, a schema error's
+ *    `detail` spelled from the field's path, a blank text or an unsupported
+ *    language on /review is `validation_error` (the language one with its
+ *    `language: ` prefix);
+ *  - waits and links by their older names (`reset_in_seconds`,
+ *    `retry_after_seconds`, `doc_url`); a citation check's 402 states its
+ *    balance as `credits_remaining` (one credit a citation).
+ */
+export function legacyErrorBody(
+	status: number,
+	body: IDataObject,
+	method: string,
+	path: string,
+): IDataObject {
+	const out: IDataObject = { ...body };
+	const code = typeof out.code === 'string' ? out.code : '';
+	const errors = Array.isArray(out.errors) ? (out.errors as unknown[]) : null;
+	const firstLoc = (): unknown => asObject(errors?.[0]).loc;
+	if (isReviewFamily(path)) {
+		if (code === 'not_authenticated') delete out.code;
+		if (status === 422) {
+			const detail = out.detail;
+			if (method === 'POST' && path === '/review' && typeof detail === 'string') {
+				if (code === 'blank_input' || code === 'unsupported_language') {
+					out.code = 'validation_error';
+					if (code === 'unsupported_language' && !detail.startsWith('language: ')) {
+						out.detail = `language: ${detail}`;
+					}
+				}
+			}
+			if (errors) {
+				const first = errors.find((e) => e && typeof e === 'object') as IDataObject | undefined;
+				const loc = first?.loc;
+				if (Array.isArray(loc) && loc[1] === 'payload' && typeof first?.msg === 'string') {
+					out.detail = `${loc.slice(1).join('.')}: ${first.msg}`;
+				}
+				out.errors = errors.map((item) => {
+					if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+					const from = item as IDataObject;
+					const o: IDataObject = {};
+					if ('loc' in from) o.loc = from.loc;
+					if ('msg' in from) {
+						o.msg = from.msg === detail && out.detail !== detail ? out.detail : from.msg;
+					}
+					return o;
+				}) as IDataObject[];
+			} else if (code === 'idempotency_body_mismatch') {
+				out.errors = [{ loc: ['header'], msg: out.detail }] as IDataObject[];
+			}
+		}
+		if (
+			status === 402 &&
+			method === 'POST' &&
+			path === '/citecheck' &&
+			!('credits_remaining' in out) &&
+			typeof out.remaining === 'number'
+		) {
+			out.credits_remaining = out.remaining;
+		}
+		legacyWaitAndLink(out, status);
+		return out;
+	}
+	if (status === 422 && code === 'blank_input' && path === '/assess') {
+		const loc = firstLoc();
+		if (Array.isArray(loc) && (loc as unknown[]).includes('claims')) {
+			out.code = 'blank_item';
+			delete out.errors;
+			return out;
+		}
+	}
+	// A batch item's unsupported language named its item in `detail`.
+	if (status === 422 && code === 'unsupported_language' && path === '/verify/batch') {
+		const loc = firstLoc();
+		const detail = out.detail;
+		if (Array.isArray(loc) && loc[1] === 'claims' && typeof loc[2] === 'number') {
+			const prefix = `claims[${loc[2]}].`;
+			if (typeof detail === 'string' && !detail.startsWith(prefix)) out.detail = prefix + detail;
+		}
+	}
+	const schemaItems =
+		status === 422 &&
+		code === 'validation_error' &&
+		errors !== null &&
+		errors.length > 0 &&
+		errors.every(
+			(e) =>
+				e && typeof e === 'object' && typeof (e as IDataObject).type === 'string' && (e as IDataObject).type !== code,
+		);
+	if (schemaItems && errors) {
+		const legacy: IDataObject = { detail: errors.map(validationItem) as IDataObject[] };
+		for (const [key, value] of Object.entries(out)) {
+			if (key === 'detail' || key === 'code' || key === 'errors') continue;
+			legacy[key === 'docs_url' ? 'doc_url' : key] = value;
+		}
+		return legacy;
+	}
+	// A blank claim: the older sentence named the field the older body sent.
+	if (status === 422 && code === 'blank_input' && typeof out.detail === 'string') {
+		const loc = firstLoc();
+		const field = Array.isArray(loc) ? loc[loc.length - 1] : undefined;
+		if ((path === '/verify' || path === '/assess') && field === 'claim') {
+			out.detail = 'Text is required.';
+		} else if (/^\/verify\/[^/]+\/select$/.test(path) && field === 'claims') {
+			out.detail = 'texts is required and must be non-empty.';
+		}
+	}
+	// Assess sent `too_many_items`; Ask sent no code for an unfinished
+	// verification.
+	const codeless =
+		(CODELESS.has(code) && !(code === 'too_many_items' && path === '/assess')) ||
+		(code === 'verification_not_ready' && path.startsWith('/ask/'));
+	if (codeless) delete out.code;
+	delete out.errors;
+	legacyWaitAndLink(out, status);
+	// These refusals repeated their code as `error`, right after it.
+	if (ERROR_ECHO_CODES.has(code) && !('error' in out)) {
+		const echoed: IDataObject = {};
+		for (const [key, value] of Object.entries(out)) {
+			echoed[key] = value;
+			if (key === 'code') echoed.error = value;
+		}
+		return echoed;
+	}
+	return out;
 }
 
 // The review policy (`escalate`) from the node's Options, sending only what
@@ -2218,11 +2416,22 @@ export class Lenz implements INodeType {
 			if (extra?.qs !== undefined) {
 				options.qs = extra.qs;
 			}
-			return (await this.helpers.httpRequestWithAuthentication.call(
-				this,
-				credentialType,
-				options,
-			)) as IDataObject;
+			const send = async () =>
+				(await this.helpers.httpRequestWithAuthentication.call(
+					this,
+					credentialType,
+					options,
+				)) as IDataObject;
+			// Versions 1 to 1.2 get the older shape already: their errors pass
+			// through untouched.
+			if (apiVersion === LEGACY_API_VERSION) return await send();
+			try {
+				return await send();
+			} catch (error) {
+				readAsLegacyError(node, error, method, path);
+				// A NodeApiError (what n8n throws here) comes back as itself.
+				throw new NodeApiError(node, error as JsonObject);
+			}
 		};
 
 		// Max Wait, validated BEFORE anything is submitted: a non-numeric value
@@ -2424,12 +2633,8 @@ export class Lenz implements INodeType {
 			// The same, for a review or a citation check: its id and the sentence
 			// that tells the caller how to fetch it.
 			let pendingJob: { key: 'review_id' | 'citecheck_id'; id: string; receipt: string } | undefined;
-			// The operation, for the error output: a refusal's `code` is given in
-			// the older shape's word, which depended on the operation.
-			let errorOperation = '';
 			try {
 				const operation = this.getNodeParameter('operation', itemIndex) as string;
-				errorOperation = operation;
 				const language = (this.getNodeParameter('language', itemIndex, '') as string) || undefined;
 
 				// List-shaped operations push their own items and `continue`, so this
@@ -3232,9 +3437,8 @@ export class Lenz implements INodeType {
 						json.status_code = status;
 					}
 					const body = responseBodyOf(error);
-					const code = legacyErrorCode(errorOperation, status, body);
-					if (typeof code === 'string' && code) {
-						json.code = code;
+					if (typeof body.code === 'string' && body.code) {
+						json.code = body.code;
 					}
 					// Both spellings, via the shared parser. This used to read
 					// `body.retry_after` alone — a key a 429 does not carry, so
@@ -3278,9 +3482,8 @@ export class Lenz implements INodeType {
 					if (typeof body.cost === 'number') {
 						json.cost = body.cost;
 					}
-					const creditsRemaining = status === 402 ? creditsRemainingOf(body) : body.credits_remaining;
-					if (typeof creditsRemaining === 'number') {
-						json.credits_remaining = creditsRemaining;
+					if (typeof body.credits_remaining === 'number') {
+						json.credits_remaining = body.credits_remaining;
 					}
 					// Rate-limit facts, carried as fields rather than left in the
 					// prose. Without them a 45-second burst limit and a nine-hour

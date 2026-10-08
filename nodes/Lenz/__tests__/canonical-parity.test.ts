@@ -16,7 +16,7 @@ jest.mock('n8n-workflow', () => ({
 import { canonicalCases } from './canonical-bodies.fixtures';
 import { legacyCases } from './legacy-bodies.fixtures';
 import { legacyOracle } from './legacy-oracle.fixtures';
-import { runLegacyCase } from './legacy-harness';
+import { runLegacyCase, thrownBy } from './legacy-harness';
 
 void sleep;
 
@@ -121,5 +121,32 @@ describe('version 1.3 gives the version 1.2 output from the newer shape', () => 
 		const known = KNOWN[name] ?? {};
 		// Exact: a listed difference that no longer differs must leave the list.
 		expect(differences(actual, expected.ok).sort()).toEqual(Object.keys(known).sort());
+	});
+});
+
+// With Continue On Fail off a refusal throws, and the workflow shows its
+// message and description. A version 1.3 node shows what a 1.2 node shows for
+// the same refusal: the newer error body is read as the older one first.
+const KNOWN_THROWN: Record<string, string> = {
+	review__delete_not_a_route:
+		'the older answer was not JSON, so n8n showed its generic text; the newer one is a JSON 405',
+};
+
+describe('version 1.3 throws what version 1.2 throws', () => {
+	const failing = Object.keys(canonicalCases).filter((name) => canonicalCases[name].status >= 400);
+
+	it('covers the recorded refusals', () => {
+		expect(failing.length).toBeGreaterThan(80);
+		for (const name of Object.keys(KNOWN_THROWN)) expect(failing).toContain(name);
+	});
+
+	it.each(failing)('%s', async (name) => {
+		const older = await thrownBy(legacyCases[name], 1.2);
+		const newer = await thrownBy(canonicalCases[name], 1.3);
+		if (name in KNOWN_THROWN) {
+			expect(newer).not.toEqual(older);
+			return;
+		}
+		expect(newer).toEqual(older);
 	});
 });
