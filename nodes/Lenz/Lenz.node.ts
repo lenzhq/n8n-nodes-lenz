@@ -116,14 +116,16 @@ function submittedReceipt(taskId: string): string {
  * milliseconds turns a stated 45-second reset into a 45ms one and hammers the
  * limiter for the whole window.
  *
- * Two spellings because the API uses two: a 503 states `retry_after`, while the
- * 429 rate-limit body states `reset_in_seconds`. A value that is absent,
+ * Several spellings because the API has used several: `retry_after` (every
+ * 503, and every refusal in the current shape), `reset_in_seconds` (a 429
+ * rate-limit body) and `retry_after_seconds` (the in-flight caps). `retry_after`
+ * is read first. A value that is absent,
  * non-numeric or non-positive returns undefined so the caller falls back to its
  * own backoff — a stated wait of 0 is not a reason to hammer.
  */
 function statedWaitSeconds(body: IDataObject): number | undefined {
-	// Two spellings, one meaning: a 503 states `retry_after`, the 429
-	// rate-limit body states `reset_in_seconds`. Read from the BODY and never
+	// Several spellings, one meaning: `retry_after` first, then the older
+	// `reset_in_seconds` of a 429 rate-limit body. Read from the BODY and never
 	// from a header — the API sends `Retry-After` on a 429, but by the time the
 	// error reaches this node the header is gone. n8n's
 	// httpRequestWithAuthentication wraps every failure in a NodeApiError, and
@@ -131,8 +133,8 @@ function statedWaitSeconds(body: IDataObject): number | undefined {
 	// while discarding `response` entirely. Verified against n8n-workflow:
 	// walking the caught error finds no header anywhere on it. A header
 	// fallback here would be code that can never run.
-	// A third spelling: the per-account in-flight cap on /review and /citecheck
-	// (429 review_in_flight / citecheck_in_flight) states `retry_after_seconds`.
+	// And `retry_after_seconds`, the older spelling of the per-account in-flight
+	// cap on /review and /citecheck (429 review_in_flight / citecheck_in_flight).
 	for (const raw of [body.retry_after, body.reset_in_seconds, body.retry_after_seconds]) {
 		const seconds = Number(raw);
 		if (Number.isFinite(seconds) && seconds > 0) {
@@ -590,6 +592,19 @@ function mapCitations(sources: unknown): IDataObject[] {
 		}));
 }
 
+// The claims a paused task offers, passed through as the API sent them. Only
+// an option that arrives without `text` (the newer shape names it `claim`) gets
+// `text` filled in from `claim`, so a workflow reading `text` keeps resolving.
+function offeredClaims(raw: unknown): IDataObject[] {
+	if (!Array.isArray(raw)) return [];
+	return raw.map((entry) => {
+		const option = asObject(entry);
+		return entry && typeof entry === 'object' && option.text === undefined && option.claim !== undefined
+			? { ...option, text: option.claim }
+			: (entry as IDataObject);
+	});
+}
+
 // The one needs_input reason is multi_claim, resolved with the Select Claims
 // operation. Any other reason gets a generic message rather than a next step
 // the API may not honour.
@@ -598,6 +613,38 @@ function needsInputMessage(reason?: string): string {
 		return 'The text contains several distinct claims. Pick one or more of "claims" and run the Select Claims operation with this task ID.';
 	}
 	return 'This verification needs caller input before it can continue.';
+}
+
+// "Nothing here can be checked" has had three spellings: `no_checkable_claim`
+// (current), `not_a_claim` (Verify, Extract) and `no_claim` (Assess). Any of
+// them means the same thing.
+const NO_CHECKABLE_CODES = ['no_checkable_claim', 'not_a_claim', 'no_claim'];
+
+function asObject(value: unknown): IDataObject {
+	return value && typeof value === 'object' && !Array.isArray(value) ? (value as IDataObject) : {};
+}
+
+function asText(value: unknown): string {
+	return typeof value === 'string' ? value : '';
+}
+
+function isNoCheckable(value: unknown): boolean {
+	return typeof value === 'string' && NO_CHECKABLE_CODES.includes(value);
+}
+
+/**
+ * `modified_at` as this node has always emitted it: the finish time when it
+ * fell on a later UTC calendar day than `created_at`, else null. A body that
+ * carries `modified_at` is passed through untouched. A body that carries only
+ * `completed_at` (the newer shape) has it derived here.
+ */
+function modifiedAtOf(result: IDataObject): string | null {
+	if ('modified_at' in result) return (result.modified_at as string | null | undefined) ?? null;
+	const created = Date.parse(asText(result.created_at));
+	const completed = Date.parse(asText(result.completed_at));
+	if (!Number.isFinite(created) || !Number.isFinite(completed)) return null;
+	const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+	return day(completed) > day(created) ? asText(result.completed_at) : null;
 }
 
 function mapCompletedVerification(result: IDataObject, includeAudit: boolean): IDataObject {
@@ -634,7 +681,7 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 		depth: result.depth ?? '',
 		language: result.language ?? '',
 		created_at: result.created_at ?? '',
-		modified_at: result.modified_at ?? null,
+		modified_at: modifiedAtOf(result),
 	};
 	if (includeAudit) {
 		mapped.audit = result.audit ?? {};
@@ -654,13 +701,42 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
  * from Get Status, or from a stored record fetched by Get.
  */
 function failureFields(record: IDataObject): IDataObject {
-	const detail = record.error ?? record.failure_detail ?? record.failure_reason ?? 'unknown';
+	// A body with a `failure` block { code, detail, failure_class, retryable }
+	// is read from the block first; every other body is read exactly as before,
+	// from its top-level fields. `??` throughout: an empty string is a value.
+	const failure = asObject(record.failure);
+	const code = failure.code ?? record.failure_reason;
+	const detail =
+		failure.detail ?? record.error ?? record.failure_detail ?? record.failure_reason ?? code ?? 'unknown';
 	return {
-		failure_reason: record.failure_reason ?? '',
-		failure_class: record.failure_class ?? '',
-		retryable: record.retryable ?? null,
+		// The block's word for nothing-to-check is `no_checkable_claim`; this
+		// node has always said `not_a_claim` there, and workflows branch on it.
+		failure_reason: code === 'no_checkable_claim' ? 'not_a_claim' : (code ?? ''),
+		failure_class: failure.failure_class ?? record.failure_class ?? '',
+		retryable: failure.retryable ?? record.retryable ?? null,
 		message: 'Verification failed: ' + String(detail),
+		// True when the input held nothing that can be checked.
+		not_a_claim: isNoCheckable(code),
 	};
+}
+
+/**
+ * Whether an /assess answer says nothing in the input can be checked: the
+ * top-level `status`, a top-level `error_code` or `failure.code`, or (for a
+ * list) every row failing with that code.
+ */
+function nothingCheckable(result: IDataObject, rows: IDataObject[]): boolean {
+	if (
+		isNoCheckable(result.status) ||
+		isNoCheckable(result.error_code) ||
+		isNoCheckable(asObject(result.failure).code)
+	) {
+		return true;
+	}
+	return (
+		rows.length > 0 &&
+		rows.every((row) => isNoCheckable(asObject(row.failure).code) || isNoCheckable(row.error_code))
+	);
 }
 
 // Shared by the inline Verify (Deep) poll loop and the standalone Get Verify
@@ -687,10 +763,9 @@ function mapVerifyStatus(status: IDataObject, taskId: string, includeAudit: bool
 			passed: null,
 			reason: reason ?? null,
 			task_id: taskId,
-			claims: status.claims ?? [],
+			claims: offeredClaims(status.claims),
 			// Deprecated: always empty. The API no longer sends either field;
 			// both keys stay so saved workflows that read them keep working.
-			// Removal planned 2026-11-29.
 			candidates: [],
 			similar_claims: [],
 			message: needsInputMessage(reason),
@@ -779,7 +854,113 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 // plus `passed` for an IF node — true only for a completed `clean` outcome,
 // null until there is an outcome, like Verify's.
 function withPassed(job: IDataObject): IDataObject {
-	return { passed: job.status === 'completed' ? job.outcome === 'clean' : null, ...job };
+	const filled = fillReviewLegacyKeys(job);
+	return { passed: filled.status === 'completed' ? filled.outcome === 'clean' : null, ...filled };
+}
+
+// The word the older review and citation-check bodies use for nothing-to-check
+// is `no_claim`; the newer one is `no_checkable_claim`.
+const legacyCode = (code: unknown): unknown => (code === 'no_checkable_claim' ? 'no_claim' : code);
+
+/**
+ * A review or citation check in the newer shape, given the keys the older shape
+ * carries, so a workflow reading them finds them. Only an ABSENT key is filled,
+ * so an older-shape body passes through untouched; the newer shape's own keys
+ * stay too.
+ *
+ *  - every `failure` block gets `failure_reason` (from `code`);
+ *  - `summary.claim_limit_reached` (claims found >= the limit) and
+ *    `summary.citation_limit_reached` (citations found > the limit);
+ *  - each claim's `assessment` gets `error_code`, `hint` and
+ *    `identified_claims` (from `failure` and `more_claims`);
+ *  - each claim's `verification` gets `modified_at` (see modifiedAtOf).
+ */
+function fillReviewLegacyKeys(body: IDataObject): IDataObject {
+	const fillFailures = (node: unknown): void => {
+		if (Array.isArray(node)) {
+			node.forEach(fillFailures);
+			return;
+		}
+		if (!node || typeof node !== 'object') return;
+		const obj = node as IDataObject;
+		const failure = obj.failure;
+		if (failure && typeof failure === 'object' && !Array.isArray(failure)) {
+			const block = failure as IDataObject;
+			if (!('failure_reason' in block) && typeof block.code === 'string') {
+				block.failure_reason = legacyCode(block.code) as string;
+			}
+		}
+		Object.values(obj).forEach(fillFailures);
+	};
+	fillFailures(body);
+
+	const summary = asObject(body.summary);
+	const count = (value: unknown): number | undefined =>
+		typeof value === 'number' ? value : undefined;
+	if (body.summary && typeof body.summary === 'object' && !Array.isArray(body.summary)) {
+		if (!('claim_limit_reached' in summary) && 'claim_limit_exceeded' in summary) {
+			const found = count(summary.claims_found);
+			const limit = count(summary.claim_limit);
+			summary.claim_limit_reached =
+				found !== undefined && limit !== undefined
+					? found >= limit
+					: (summary.claim_limit_exceeded as boolean | null);
+		}
+		if (!('citation_limit_reached' in summary) && 'citation_limit_exceeded' in summary) {
+			const found = count(summary.citations_found);
+			const limit = count(summary.citation_limit);
+			summary.citation_limit_reached =
+				found !== undefined && limit !== undefined
+					? found > limit
+					: (summary.citation_limit_exceeded as boolean | null);
+		}
+	}
+
+	if (Array.isArray(body.claims)) {
+		for (const entry of body.claims) {
+			const claim = asObject(entry);
+			const assessment = claim.assessment;
+			if (assessment && typeof assessment === 'object' && !Array.isArray(assessment)) {
+				const row = assessment as IDataObject;
+				const failure = asObject(row.failure);
+				if (!('error_code' in row)) {
+					row.error_code = typeof failure.code === 'string' ? (legacyCode(failure.code) as string) : null;
+				}
+				if (!('hint' in row)) row.hint = (failure.hint as string | null | undefined) ?? null;
+				if (!('identified_claims' in row)) {
+					row.identified_claims = (row.more_claims as IDataObject[] | undefined) ?? [];
+				}
+			}
+			const verification = claim.verification;
+			if (verification && typeof verification === 'object' && !Array.isArray(verification)) {
+				const record = verification as IDataObject;
+				if (!('modified_at' in record) && 'completed_at' in record) {
+					record.modified_at = modifiedAtOf(record);
+				}
+			}
+		}
+	}
+	return body;
+}
+
+/**
+ * An /extract answer in the newer shape (`claims: [{ claim, positions }]`),
+ * given the keys the older shape carries: `claim` (the first claim, or ''),
+ * `identified_claims` (every claim when there are several, else []),
+ * `candidate_claims` (always []) and `locations` (the claims that have
+ * positions, else null). Older-shape bodies are left untouched.
+ */
+function fillExtractLegacyKeys(body: IDataObject): void {
+	if (!Array.isArray(body.claims) || 'identified_claims' in body) return;
+	const claims = body.claims.map((entry) => asObject(entry));
+	const texts = claims.map((c) => (c.claim as string | undefined) ?? '');
+	body.claim = texts[0] ?? '';
+	body.identified_claims = texts.length > 1 ? texts : [];
+	body.candidate_claims = [];
+	const located = claims.filter((c) => c.positions !== undefined && c.positions !== null);
+	body.locations = located.length
+		? located.map((c) => ({ claim: c.claim, positions: c.positions }))
+		: null;
 }
 
 // The review policy (`escalate`) from the node's Options, sending only what
@@ -2227,6 +2408,7 @@ export class Lenz implements INodeType {
 						responseData = {
 							status: (accepted.status as string) ?? 'queued',
 							task_id: taskId,
+							// Kept for saved workflows; null when the API sends none.
 							chain_id: accepted.chain_id ?? null,
 							message: 'Submitted. Poll this task_id with the Get Verify Status operation, or wait for the webhook.',
 						};
@@ -2376,7 +2558,8 @@ export class Lenz implements INodeType {
 							json: {
 								batch_id: batchId,
 								task_id: spawned.task_id ?? '',
-								claim_text: spawned.claim_text ?? '',
+								// The newer shape names it `claim`; the output key stays.
+								claim_text: spawned.claim_text ?? spawned.claim ?? '',
 								status: 'queued',
 								partial,
 							},
@@ -2417,7 +2600,8 @@ export class Lenz implements INodeType {
 							json: {
 								batch_id: batchId,
 								task_id: spawned.task_id ?? '',
-								claim_text: spawned.claim_text ?? '',
+								// The newer shape names it `claim`; the output key stays.
+								claim_text: spawned.claim_text ?? spawned.claim ?? '',
 								status: 'queued',
 								partial,
 							},
@@ -2443,19 +2627,29 @@ export class Lenz implements INodeType {
 						idempotent: { operation, itemIndex },
 					});
 					const claims = (result.claims ?? []) as IDataObject[];
+					// A failed row has no verdict on the current shape (status
+					// 'failed', verdict null); this node has always shown such a
+					// row as verdict 'Error' with confidence 'low'.
+					const rowFailed = (c: IDataObject) => c.status === 'failed';
+					const noCheckable = nothingCheckable(result, claims);
 					if (!claims.length) {
 						responseData = {
 							status: 'no_claim',
-							message: result.error ?? 'No verifiable factual claim was detected.',
+							message:
+								(asObject(result.failure).detail as string | undefined) ??
+								(result.error as string | null | undefined) ??
+								'No verifiable factual claim was detected.',
 							candidate_claims: result.candidate_claims ?? [],
+							not_a_claim: noCheckable,
 						};
 					} else {
 						responseData = {
 							status: 'ok',
+							not_a_claim: noCheckable,
 							claims: claims.map((c) => ({
 								claim: c.claim ?? '',
-								verdict: c.verdict ?? null,
-								confidence: c.confidence ?? null,
+								verdict: c.verdict ?? (rowFailed(c) ? 'Error' : null),
+								confidence: c.confidence ?? (rowFailed(c) ? 'low' : null),
 								passed: isPassingVerdict(c.verdict as string | undefined),
 								language: c.language ?? '',
 								verification_url: c.verification_url ?? null,
@@ -2507,6 +2701,8 @@ export class Lenz implements INodeType {
 					// them. The empty list is the answer rather than a failure, but on
 					// its own it is indistinguishable from "nothing here", so name the
 					// cause and the way out.
+					fillExtractLegacyKeys(responseData);
+					responseData.not_a_claim = isNoCheckable(responseData.status);
 					if (responseData.status === 'no_match') {
 						responseData.message =
 							'Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted.';
@@ -2612,6 +2808,11 @@ export class Lenz implements INodeType {
 						for (const verification of pageItems) {
 							if (collected >= limit) {
 								break;
+							}
+							// A newer-shape item has `completed_at` where this node's
+							// output has always had `modified_at`.
+							if (!('modified_at' in verification) && 'completed_at' in verification) {
+								verification.modified_at = modifiedAtOf(verification);
 							}
 							returnData.push({
 								json: verification,

@@ -806,7 +806,7 @@ describe('Lenz node - Extract Claims', () => {
 		expect(output[0].json).not.toHaveProperty('message');
 	});
 
-	it('passes through the raw extract response', async () => {
+	it('passes through the raw extract response, plus the not_a_claim flag', async () => {
 		const responder: Responder = (options) => {
 			expect(options.url).toBe('/extract');
 			return {
@@ -820,6 +820,7 @@ describe('Lenz node - Extract Claims', () => {
 			status: 'ready',
 			identified_claims: ['Claim A', 'Claim B'],
 			domain: 'General',
+			not_a_claim: false,
 		});
 	});
 });
