@@ -159,6 +159,22 @@ describe('Lenz node - Assess (Fast)', () => {
 		expect(claims[0].language).toBe('es');
 	});
 
+	it('passes on the reviewers\' rationale and dissent, null when a row has neither', async () => {
+		const responder: Responder = () => ({
+			claims: [
+				{ claim: 'A', verdict: 'True', confidence: 'high', rationale: 'Agrees.', dissent: 'Disagrees.' },
+				{ claim: 'B', verdict: 'False', confidence: 'high', rationale: 'Agrees.', dissent: null },
+				// A response stored before the API added the fields replays without them
+				{ claim: 'C', verdict: 'Mixed', confidence: 'low' },
+			],
+		});
+		const { output } = await runNode({ operation: 'assess', text: 'some text' }, responder);
+		const claims = (output[0].json as IDataObject).claims as IDataObject[];
+		expect(claims[0]).toMatchObject({ rationale: 'Agrees.', dissent: 'Disagrees.' });
+		expect(claims[1]).toMatchObject({ rationale: 'Agrees.', dissent: null });
+		expect(claims[2]).toMatchObject({ rationale: null, dissent: null });
+	});
+
 	it('skips empty text input instead of failing the batch', async () => {
 		const { output, httpMock } = await runNode({ operation: 'assess', text: '   ' }, noCall);
 		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
