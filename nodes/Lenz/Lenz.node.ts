@@ -854,7 +854,113 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 // plus `passed` for an IF node — true only for a completed `clean` outcome,
 // null until there is an outcome, like Verify's.
 function withPassed(job: IDataObject): IDataObject {
-	return { passed: job.status === 'completed' ? job.outcome === 'clean' : null, ...job };
+	const filled = fillReviewLegacyKeys(job);
+	return { passed: filled.status === 'completed' ? filled.outcome === 'clean' : null, ...filled };
+}
+
+// The word the older review and citation-check bodies use for nothing-to-check
+// is `no_claim`; the newer one is `no_checkable_claim`.
+const legacyCode = (code: unknown): unknown => (code === 'no_checkable_claim' ? 'no_claim' : code);
+
+/**
+ * A review or citation check in the newer shape, given the keys the older shape
+ * carries, so a workflow reading them finds them. Only an ABSENT key is filled,
+ * so an older-shape body passes through untouched; the newer shape's own keys
+ * stay too.
+ *
+ *  - every `failure` block gets `failure_reason` (from `code`);
+ *  - `summary.claim_limit_reached` (claims found >= the limit) and
+ *    `summary.citation_limit_reached` (citations found > the limit);
+ *  - each claim's `assessment` gets `error_code`, `hint` and
+ *    `identified_claims` (from `failure` and `more_claims`);
+ *  - each claim's `verification` gets `modified_at` (see modifiedAtOf).
+ */
+function fillReviewLegacyKeys(body: IDataObject): IDataObject {
+	const fillFailures = (node: unknown): void => {
+		if (Array.isArray(node)) {
+			node.forEach(fillFailures);
+			return;
+		}
+		if (!node || typeof node !== 'object') return;
+		const obj = node as IDataObject;
+		const failure = obj.failure;
+		if (failure && typeof failure === 'object' && !Array.isArray(failure)) {
+			const block = failure as IDataObject;
+			if (!('failure_reason' in block) && typeof block.code === 'string') {
+				block.failure_reason = legacyCode(block.code) as string;
+			}
+		}
+		Object.values(obj).forEach(fillFailures);
+	};
+	fillFailures(body);
+
+	const summary = asObject(body.summary);
+	const count = (value: unknown): number | undefined =>
+		typeof value === 'number' ? value : undefined;
+	if (body.summary && typeof body.summary === 'object' && !Array.isArray(body.summary)) {
+		if (!('claim_limit_reached' in summary) && 'claim_limit_exceeded' in summary) {
+			const found = count(summary.claims_found);
+			const limit = count(summary.claim_limit);
+			summary.claim_limit_reached =
+				found !== undefined && limit !== undefined
+					? found >= limit
+					: (summary.claim_limit_exceeded as boolean | null);
+		}
+		if (!('citation_limit_reached' in summary) && 'citation_limit_exceeded' in summary) {
+			const found = count(summary.citations_found);
+			const limit = count(summary.citation_limit);
+			summary.citation_limit_reached =
+				found !== undefined && limit !== undefined
+					? found > limit
+					: (summary.citation_limit_exceeded as boolean | null);
+		}
+	}
+
+	if (Array.isArray(body.claims)) {
+		for (const entry of body.claims) {
+			const claim = asObject(entry);
+			const assessment = claim.assessment;
+			if (assessment && typeof assessment === 'object' && !Array.isArray(assessment)) {
+				const row = assessment as IDataObject;
+				const failure = asObject(row.failure);
+				if (!('error_code' in row)) {
+					row.error_code = typeof failure.code === 'string' ? (legacyCode(failure.code) as string) : null;
+				}
+				if (!('hint' in row)) row.hint = (failure.hint as string | null | undefined) ?? null;
+				if (!('identified_claims' in row)) {
+					row.identified_claims = (row.more_claims as IDataObject[] | undefined) ?? [];
+				}
+			}
+			const verification = claim.verification;
+			if (verification && typeof verification === 'object' && !Array.isArray(verification)) {
+				const record = verification as IDataObject;
+				if (!('modified_at' in record) && 'completed_at' in record) {
+					record.modified_at = modifiedAtOf(record);
+				}
+			}
+		}
+	}
+	return body;
+}
+
+/**
+ * An /extract answer in the newer shape (`claims: [{ claim, positions }]`),
+ * given the keys the older shape carries: `claim` (the first claim, or ''),
+ * `identified_claims` (every claim when there are several, else []),
+ * `candidate_claims` (always []) and `locations` (the claims that have
+ * positions, else null). Older-shape bodies are left untouched.
+ */
+function fillExtractLegacyKeys(body: IDataObject): void {
+	if (!Array.isArray(body.claims) || 'identified_claims' in body) return;
+	const claims = body.claims.map((entry) => asObject(entry));
+	const texts = claims.map((c) => (c.claim as string | undefined) ?? '');
+	body.claim = texts[0] ?? '';
+	body.identified_claims = texts.length > 1 ? texts : [];
+	body.candidate_claims = [];
+	const located = claims.filter((c) => c.positions !== undefined && c.positions !== null);
+	body.locations = located.length
+		? located.map((c) => ({ claim: c.claim, positions: c.positions }))
+		: null;
 }
 
 // The review policy (`escalate`) from the node's Options, sending only what
@@ -2595,6 +2701,7 @@ export class Lenz implements INodeType {
 					// them. The empty list is the answer rather than a failure, but on
 					// its own it is indistinguishable from "nothing here", so name the
 					// cause and the way out.
+					fillExtractLegacyKeys(responseData);
 					responseData.not_a_claim = isNoCheckable(responseData.status);
 					if (responseData.status === 'no_match') {
 						responseData.message =
@@ -2701,6 +2808,11 @@ export class Lenz implements INodeType {
 						for (const verification of pageItems) {
 							if (collected >= limit) {
 								break;
+							}
+							// A newer-shape item has `completed_at` where this node's
+							// output has always had `modified_at`.
+							if (!('modified_at' in verification) && 'completed_at' in verification) {
+								verification.modified_at = modifiedAtOf(verification);
 							}
 							returnData.push({
 								json: verification,
