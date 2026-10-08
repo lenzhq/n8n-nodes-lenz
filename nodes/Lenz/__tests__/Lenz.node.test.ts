@@ -428,9 +428,10 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.status).toBe('needs_input');
 		expect(json.reason).toBe('multi_claim');
 		expect(json.task_id).toBe('task_1');
+		// Each option carries `claim` (current name) beside `text` (older).
 		expect(json.claims).toEqual([
-			{ text: 'Claim one', domain: 'General' },
-			{ text: 'Claim two', domain: 'Finance' },
+			{ claim: 'Claim one', text: 'Claim one', domain: 'General' },
+			{ claim: 'Claim two', text: 'Claim two', domain: 'Finance' },
 		]);
 		expect(json.message).toContain('Select Claims');
 		expect(json).toHaveProperty('candidates', []);
@@ -650,6 +651,7 @@ describe('Lenz node - Submit Verify Batch', () => {
 		expect(output[0].json).toEqual({
 			batch_id: 'batch_1',
 			task_id: 't1',
+			claim: 'Claim one',
 			claim_text: 'Claim one',
 			status: 'queued',
 			partial: false,
