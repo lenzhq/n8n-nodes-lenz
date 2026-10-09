@@ -825,6 +825,52 @@ describe('Lenz node - Extract Claims', () => {
 	});
 });
 
+// `auto` is a request value the API understands on assess, verify and ask. The
+// field is free text, so the node has to send it exactly as typed, and keep
+// sending no `language` key at all when the field is empty.
+describe('Lenz node - Language "auto"', () => {
+	const verifyResponder: Responder = (options) => {
+		if (options.method === 'POST' && options.url === '/verify') return { task_id: 'task_1' };
+		if (options.method === 'GET' && options.url === '/verify/status/task_1') {
+			return { status: 'completed', result: { verification_id: 'ver_1', claim: 'c', verdict: 'True' } };
+		}
+		throw new Error(`unexpected request: ${options.method} ${options.url}`);
+	};
+	const assessResponder: Responder = () => ({
+		claims: [{ claim: 'A', verdict: 'True', confidence: 'high', verification_url: null }],
+	});
+	const askResponder: Responder = () => ({ role: 'expert', content: 'An answer.' });
+
+	const cases: Array<[string, Record<string, unknown>, Responder, string]> = [
+		['assess', { operation: 'assess', text: 'Berlin ist die Hauptstadt.' }, assessResponder, '/assess'],
+		['verify', { operation: 'verify', claim: 'Berlin ist die Hauptstadt.' }, verifyResponder, '/verify'],
+		['ask', { operation: 'ask', verificationId: 'ver_1', question: 'Warum?' }, askResponder, '/ask/ver_1'],
+	];
+
+	it('stays a free-text field whose description names auto and the operations that take it', () => {
+		const field = new Lenz().description.properties.find(
+			(p) => p.name === 'language' && p.displayOptions?.show?.operation !== undefined,
+		);
+		expect(field?.type).toBe('string');
+		expect(field?.default).toBe('');
+		expect(field?.description).toContain('`auto`');
+		expect(field?.description).toContain('Assess, Verify and Ask');
+	});
+
+	it.each(cases)('sends auto unchanged as body.language on %s', async (_op, params, responder, url) => {
+		const { calls } = await runNode({ ...params, language: 'auto' }, responder);
+		const submit = calls.find((c) => c.method === 'POST' && c.url === url);
+		expect((submit?.body as IDataObject).language).toBe('auto');
+	});
+
+	it.each(cases)('sends no language key on %s when the field is empty', async (_op, params, responder, url) => {
+		const { calls } = await runNode({ ...params, language: '' }, responder);
+		const submit = calls.find((c) => c.method === 'POST' && c.url === url);
+		expect(submit?.body).toBeDefined();
+		expect(submit?.body as IDataObject).not.toHaveProperty('language');
+	});
+});
+
 describe('Lenz node - Ask Follow-Up', () => {
 	it('returns the answer text from a completed verification', async () => {
 		const responder: Responder = (options) => {
