@@ -291,6 +291,12 @@ it later. Add an error branch for it only if the user asked for one.
      `passed` reports every one of those as "the claim is false" — a provider
      outage becomes a debunking. Gate on `status` first, route the non-verdict
      statuses somewhere of their own, and only then branch on `passed`.
+7. **`language` is an ISO 639-1 code, or `auto` on three operations.** Leave it
+   out for English. `auto` answers in the language of the submitted text, and is
+   accepted by `assess`, `verify` and `ask` only; on `ask` it means the language
+   of the claim being discussed, and on `assess` with several claims one
+   language is chosen for the whole request, so name a code for a list in mixed
+   languages. Every other operation needs a code, not `auto`.
 
 ## Before you answer
 
