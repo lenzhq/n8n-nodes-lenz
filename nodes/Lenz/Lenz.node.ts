@@ -2447,7 +2447,8 @@ export class Lenz implements INodeType {
 						// so retryable poll failures are retried for the window, stated
 						// waits are honoured within limits, and the loop ends on a read,
 						// never on a sleep. waitSeconds was validated before the submit.
-						const polled = await pollJob(`/verify/status/${encodeURIComponent(taskId)}`, itemIndex, waitSeconds, {
+						const statusPath = `/verify/status/${encodeURIComponent(taskId)}`;
+						const polled = await pollJob(statusPath, itemIndex, waitSeconds, {
 							terminal: ['completed', 'needs_input', 'failed'],
 							pollAfterMs: (status) => statedPollAfterMs(status.progress),
 						});
@@ -2542,10 +2543,10 @@ export class Lenz implements INodeType {
 					const body: IDataObject = {
 						claims: entries.map((entry) => {
 							const claimBody: IDataObject = { text: textOf(entry.text) ?? '' };
-							const entryLanguage = (textOf(entry.language) ?? '');
-							const entrySourceUrl = (textOf(entry.sourceUrl) ?? '');
-							const entryVisibility = (textOf(entry.visibility) ?? '');
-							const entryDepth = (textOf(entry.depth) ?? '');
+							const entryLanguage = textOf(entry.language) ?? '';
+							const entrySourceUrl = textOf(entry.sourceUrl) ?? '';
+							const entryVisibility = textOf(entry.visibility) ?? '';
+							const entryDepth = textOf(entry.depth) ?? '';
 							if (entryLanguage) {
 								claimBody.language = entryLanguage;
 							}
