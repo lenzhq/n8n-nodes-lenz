@@ -159,20 +159,24 @@ describe('Lenz node - Assess (Fast)', () => {
 		expect(claims[0].language).toBe('es');
 	});
 
-	it('passes on the reviewers\' rationale and dissent, null when a row has neither', async () => {
+	it('passes on the reviewer\'s rationale, null when a row has none, and never a dissent', async () => {
 		const responder: Responder = () => ({
 			claims: [
-				{ claim: 'A', verdict: 'True', confidence: 'high', rationale: 'Agrees.', dissent: 'Disagrees.' },
-				{ claim: 'B', verdict: 'False', confidence: 'high', rationale: 'Agrees.', dissent: null },
-				// A response stored before the API added the fields replays without them
+				{ claim: 'A', verdict: 'True', confidence: 'high', rationale: 'Agrees.', dissent: null },
+				// The API stopped filling dissent; a row still carrying one does not reach the output
+				{ claim: 'B', verdict: 'False', confidence: 'high', rationale: 'Agrees.', dissent: 'Disagrees.' },
+				// A response stored before the API added the field replays without it
 				{ claim: 'C', verdict: 'Mixed', confidence: 'low' },
+				{ claim: 'D', verdict: 'Error', confidence: 'low', rationale: null },
 			],
 		});
 		const { output } = await runNode({ operation: 'assess', text: 'some text' }, responder);
 		const claims = (output[0].json as IDataObject).claims as IDataObject[];
-		expect(claims[0]).toMatchObject({ rationale: 'Agrees.', dissent: 'Disagrees.' });
-		expect(claims[1]).toMatchObject({ rationale: 'Agrees.', dissent: null });
-		expect(claims[2]).toMatchObject({ rationale: null, dissent: null });
+		expect(claims[0].rationale).toBe('Agrees.');
+		expect(claims[1].rationale).toBe('Agrees.');
+		expect(claims[2].rationale).toBeNull();
+		expect(claims[3].rationale).toBeNull();
+		for (const row of claims) expect('dissent' in row).toBe(false);
 	});
 
 	it('skips empty text input instead of failing the batch', async () => {

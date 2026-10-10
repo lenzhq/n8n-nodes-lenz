@@ -2,7 +2,7 @@
 // requests, the node returns exactly what 0.8.0 returned, byte for byte once
 // serialized, plus one additive boolean `not_a_claim` where the answer can say
 // nothing is checkable (Assess, Extract, and a failed verification), and the
-// reviewers' notes `rationale` and `dissent` on each Assess row (Lenz#705).
+// reviewer's note `rationale` on each Assess row (Lenz#705).
 import { sleep } from 'n8n-workflow';
 import type { IDataObject } from 'n8n-workflow';
 
@@ -17,7 +17,7 @@ import { runLegacyCase } from './legacy-harness';
 
 void sleep;
 
-const NOTES = ['rationale', 'dissent'];
+const NOTES = ['rationale'];
 
 const withoutFlag = (json: IDataObject): IDataObject => {
 	const rest = { ...json };
