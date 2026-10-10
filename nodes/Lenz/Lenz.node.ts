@@ -20,38 +20,18 @@ export const BASE_URL = 'https://lenz.io/api/v1';
 // Identifies requests coming from this node so the Lenz backend can attribute
 // API usage to the n8n integration (via the User-Agent header). Keep the
 // version in sync with package.json on each release.
-const USER_AGENT = 'n8n-nodes-lenz/0.9.0';
+const USER_AGENT = 'n8n-nodes-lenz/0.10.0';
 
-// The Lenz API version each node version asks for, in the
-// `X-Lenz-API-Version` header. Lenz answers in the shape of the version a
-// request names, so a saved node keeps receiving exactly what it was built
-// against: n8n stores a node's version in the workflow, and a node already in
-// a workflow never moves to a newer one by itself.
+// The Lenz API version every request asks for, in the `X-Lenz-API-Version`
+// header, on every node version. Lenz answers in the shape of the version a
+// request names, and also signs the webhooks of a job in it.
 //
-// Node versions 1 to 1.2 ask for `2026-08-05`, which Lenz answers in the
-// older shape. Version 1.3 asks for `2026-10-11`, the newer shape, and gives a
-// workflow the same output keys, with the same meaning, as 1.2 does (see
-// fillLegacyUsageKeys, fillExtractLegacyKeys, fillReviewLegacyKeys and
-// legacyErrorBody). Only a node added from this release on is on 1.3.
-//
-// Lenz also signs the webhooks of a job in the version of the request that
-// started it, so a Webhook URL set on a 1.3 node receives the newer shape.
-// The version node versions 1 to 1.2 send, answered in the older shape.
-const LEGACY_API_VERSION = '2026-08-05';
-
-export const API_VERSION_BY_NODE_VERSION: ReadonlyArray<readonly [number, string]> = [
-	[1.3, '2026-10-11'],
-	[1, LEGACY_API_VERSION],
-];
-
-/** The API version a node at `typeVersion` sends. */
-export function apiVersionFor(typeVersion: number | undefined): string {
-	const version = typeof typeVersion === 'number' && Number.isFinite(typeVersion) ? typeVersion : 1;
-	for (const [from, apiVersion] of API_VERSION_BY_NODE_VERSION) {
-		if (version >= from) return apiVersion;
-	}
-	return API_VERSION_BY_NODE_VERSION[API_VERSION_BY_NODE_VERSION.length - 1][1];
-}
+// Each node version keeps its own output keys: n8n stores a node's version in
+// the workflow and runs the newest package code for it, so a node added on an
+// older release gets exactly the keys it always had, rebuilt from this shape
+// (fillUsageOutputKeys, fillExtractOutputKeys, fillReviewOutputKeys and
+// errorBodyAsNodeReads). The node reads no other shape.
+export const API_VERSION = '2026-10-11';
 
 // Verify (Deep) is async server-side: submit returns a task_id, then we poll
 // the status endpoint until it reaches a terminal state. Backoff mirrors the
@@ -141,16 +121,16 @@ function submittedReceipt(taskId: string): string {
  * milliseconds turns a stated 45-second reset into a 45ms one and hammers the
  * limiter for the whole window.
  *
- * Several spellings because the API has used several: `retry_after` (every
- * 503, and every refusal in the current shape), `reset_in_seconds` (a 429
- * rate-limit body) and `retry_after_seconds` (the in-flight caps). `retry_after`
- * is read first. A value that is absent,
+ * Several spellings because the node reads a refusal under its own names
+ * (errorBodyAsNodeReads): `retry_after` (most refusals), `reset_in_seconds`
+ * (the /extract daily cap) and `retry_after_seconds` (the in-flight caps).
+ * `retry_after` is read first. A value that is absent,
  * non-numeric or non-positive returns undefined so the caller falls back to its
  * own backoff — a stated wait of 0 is not a reason to hammer.
  */
 function statedWaitSeconds(body: IDataObject): number | undefined {
-	// Several spellings, one meaning: `retry_after` first, then the older
-	// `reset_in_seconds` of a 429 rate-limit body. Read from the BODY and never
+	// Several spellings, one meaning: `retry_after` first, then
+	// `reset_in_seconds` of the /extract daily cap. Read from the BODY and never
 	// from a header — the API sends `Retry-After` on a 429, but by the time the
 	// error reaches this node the header is gone. n8n's
 	// httpRequestWithAuthentication wraps every failure in a NodeApiError, and
@@ -158,7 +138,7 @@ function statedWaitSeconds(body: IDataObject): number | undefined {
 	// while discarding `response` entirely. Verified against n8n-workflow:
 	// walking the caught error finds no header anywhere on it. A header
 	// fallback here would be code that can never run.
-	// And `retry_after_seconds`, the older spelling of the per-account in-flight
+	// And `retry_after_seconds`, this node's name for the per-account in-flight
 	// cap on /review and /citecheck (429 review_in_flight / citecheck_in_flight).
 	for (const raw of [body.retry_after, body.reset_in_seconds, body.retry_after_seconds]) {
 		const seconds = Number(raw);
@@ -626,14 +606,14 @@ function mapCitations(sources: unknown): IDataObject[] {
 		}));
 }
 
-// The claims a paused task offers, passed through as the API sent them. Only
-// an option that arrives without `text` (the newer shape names it `claim`) gets
-// `text` filled in from `claim`, so a workflow reading `text` keeps resolving.
+// The claims a paused task offers, passed through as the API sent them, with
+// `text` (this node's name for an option's claim) filled in from `claim`, so a
+// workflow reading `text` keeps resolving.
 function offeredClaims(raw: unknown): IDataObject[] {
 	if (!Array.isArray(raw)) return [];
 	return raw.map((entry) => {
 		const option = asObject(entry);
-		return entry && typeof entry === 'object' && option.text === undefined && option.claim !== undefined
+		return entry && typeof entry === 'object' && option.claim !== undefined
 			? { ...option, text: option.claim }
 			: (entry as IDataObject);
 	});
@@ -649,10 +629,9 @@ function needsInputMessage(reason?: string): string {
 	return 'This verification needs caller input before it can continue.';
 }
 
-// "Nothing here can be checked" has had three spellings: `no_checkable_claim`
-// (current), `not_a_claim` (Verify, Extract) and `no_claim` (Assess). Any of
-// them means the same thing.
-const NO_CHECKABLE_CODES = ['no_checkable_claim', 'not_a_claim', 'no_claim'];
+// The API's word for "nothing here can be checked". This node's own outputs
+// say `not_a_claim` (Verify, Extract) and `no_claim` (Assess, reviews) for it.
+const NO_CHECKABLE_CODE = 'no_checkable_claim';
 
 function asObject(value: unknown): IDataObject {
 	return value && typeof value === 'object' && !Array.isArray(value) ? (value as IDataObject) : {};
@@ -663,17 +642,15 @@ function asText(value: unknown): string {
 }
 
 function isNoCheckable(value: unknown): boolean {
-	return typeof value === 'string' && NO_CHECKABLE_CODES.includes(value);
+	return value === NO_CHECKABLE_CODE;
 }
 
 /**
- * `modified_at` as this node has always emitted it: the finish time when it
- * fell on a later UTC calendar day than `created_at`, else null. A body that
- * carries `modified_at` is passed through untouched. A body that carries only
- * `completed_at` (the newer shape) has it derived here.
+ * `modified_at` as this node has always emitted it: the finish time
+ * (`completed_at`) when it fell on a later UTC calendar day than `created_at`,
+ * else null.
  */
 function modifiedAtOf(result: IDataObject): string | null {
-	if ('modified_at' in result) return (result.modified_at as string | null | undefined) ?? null;
 	const created = Date.parse(asText(result.created_at));
 	const completed = Date.parse(asText(result.completed_at));
 	if (!Number.isFinite(created) || !Number.isFinite(completed)) return null;
@@ -735,19 +712,17 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
  * from Get Status, or from a stored record fetched by Get.
  */
 function failureFields(record: IDataObject): IDataObject {
-	// A body with a `failure` block { code, detail, failure_class, retryable }
-	// is read from the block first; every other body is read exactly as before,
-	// from its top-level fields. `??` throughout: an empty string is a value.
+	// Read from the `failure` block { code, detail, failure_class, retryable }.
+	// `??` throughout: an empty string is a value.
 	const failure = asObject(record.failure);
-	const code = failure.code ?? record.failure_reason;
-	const detail =
-		failure.detail ?? record.error ?? record.failure_detail ?? record.failure_reason ?? code ?? 'unknown';
+	const code = failure.code;
+	const detail = failure.detail ?? code ?? 'unknown';
 	return {
 		// The block's word for nothing-to-check is `no_checkable_claim`; this
 		// node has always said `not_a_claim` there, and workflows branch on it.
-		failure_reason: code === 'no_checkable_claim' ? 'not_a_claim' : (code ?? ''),
-		failure_class: failure.failure_class ?? record.failure_class ?? '',
-		retryable: failure.retryable ?? record.retryable ?? null,
+		failure_reason: isNoCheckable(code) ? 'not_a_claim' : (code ?? ''),
+		failure_class: failure.failure_class ?? '',
+		retryable: failure.retryable ?? null,
 		message: 'Verification failed: ' + String(detail),
 		// True when the input held nothing that can be checked.
 		not_a_claim: isNoCheckable(code),
@@ -756,21 +731,14 @@ function failureFields(record: IDataObject): IDataObject {
 
 /**
  * Whether an /assess answer says nothing in the input can be checked: the
- * top-level `status`, a top-level `error_code` or `failure.code`, or (for a
- * list) every row failing with that code.
+ * top-level `status` or `failure.code`, or (for a list) every row failing with
+ * that code.
  */
 function nothingCheckable(result: IDataObject, rows: IDataObject[]): boolean {
-	if (
-		isNoCheckable(result.status) ||
-		isNoCheckable(result.error_code) ||
-		isNoCheckable(asObject(result.failure).code)
-	) {
+	if (isNoCheckable(result.status) || isNoCheckable(asObject(result.failure).code)) {
 		return true;
 	}
-	return (
-		rows.length > 0 &&
-		rows.every((row) => isNoCheckable(asObject(row.failure).code) || isNoCheckable(row.error_code))
-	);
+	return rows.length > 0 && rows.every((row) => isNoCheckable(asObject(row.failure).code));
 }
 
 // Shared by the inline Verify (Deep) poll loop and the standalone Get Verify
@@ -888,19 +856,17 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 // plus `passed` for an IF node — true only for a completed `clean` outcome,
 // null until there is an outcome, like Verify's.
 function withPassed(job: IDataObject): IDataObject {
-	const filled = fillReviewLegacyKeys(job);
+	const filled = fillReviewOutputKeys(job);
 	return { passed: filled.status === 'completed' ? filled.outcome === 'clean' : null, ...filled };
 }
 
-// The word the older review and citation-check bodies use for nothing-to-check
-// is `no_claim`; the newer one is `no_checkable_claim`.
-const legacyCode = (code: unknown): unknown => (code === 'no_checkable_claim' ? 'no_claim' : code);
+// This node's word, on reviews and citation checks, for the API's
+// `no_checkable_claim`: `no_claim`.
+const nodeNoClaimWord = (code: unknown): unknown => (isNoCheckable(code) ? 'no_claim' : code);
 
 /**
- * A review or citation check in the newer shape, given the keys the older shape
- * carries, so a workflow reading them finds them. Only an ABSENT key is filled,
- * so an older-shape body passes through untouched; the newer shape's own keys
- * stay too.
+ * A review or citation check as the API sends it, given the keys this node has
+ * always output beside the API's own, so a workflow reading them finds them:
  *
  *  - every `failure` block gets `failure_reason` (from `code`);
  *  - `summary.claim_limit_reached` (claims found >= the limit) and
@@ -909,7 +875,7 @@ const legacyCode = (code: unknown): unknown => (code === 'no_checkable_claim' ? 
  *    (null) and `identified_claims` (from `more_claims`);
  *  - each claim's `verification` gets `modified_at` (see modifiedAtOf).
  */
-function fillReviewLegacyKeys(body: IDataObject): IDataObject {
+function fillReviewOutputKeys(body: IDataObject): IDataObject {
 	const fillFailures = (node: unknown): void => {
 		if (Array.isArray(node)) {
 			node.forEach(fillFailures);
@@ -920,8 +886,8 @@ function fillReviewLegacyKeys(body: IDataObject): IDataObject {
 		const failure = obj.failure;
 		if (failure && typeof failure === 'object' && !Array.isArray(failure)) {
 			const block = failure as IDataObject;
-			if (!('failure_reason' in block) && typeof block.code === 'string') {
-				block.failure_reason = legacyCode(block.code) as string;
+			if (typeof block.code === 'string') {
+				block.failure_reason = nodeNoClaimWord(block.code) as string;
 			}
 		}
 		Object.values(obj).forEach(fillFailures);
@@ -932,7 +898,7 @@ function fillReviewLegacyKeys(body: IDataObject): IDataObject {
 	const count = (value: unknown): number | undefined =>
 		typeof value === 'number' ? value : undefined;
 	if (body.summary && typeof body.summary === 'object' && !Array.isArray(body.summary)) {
-		if (!('claim_limit_reached' in summary) && 'claim_limit_exceeded' in summary) {
+		if ('claim_limit_exceeded' in summary) {
 			const found = count(summary.claims_found);
 			const limit = count(summary.claim_limit);
 			summary.claim_limit_reached =
@@ -940,7 +906,7 @@ function fillReviewLegacyKeys(body: IDataObject): IDataObject {
 					? found >= limit
 					: (summary.claim_limit_exceeded as boolean | null);
 		}
-		if (!('citation_limit_reached' in summary) && 'citation_limit_exceeded' in summary) {
+		if ('citation_limit_exceeded' in summary) {
 			const found = count(summary.citations_found);
 			const limit = count(summary.citation_limit);
 			summary.citation_limit_reached =
@@ -957,21 +923,17 @@ function fillReviewLegacyKeys(body: IDataObject): IDataObject {
 			if (assessment && typeof assessment === 'object' && !Array.isArray(assessment)) {
 				const row = assessment as IDataObject;
 				const failure = asObject(row.failure);
-				if (!('error_code' in row)) {
-					row.error_code = typeof failure.code === 'string' ? (legacyCode(failure.code) as string) : null;
-				}
-				// A review row's own hint, which the newer shape dropped: Lenz
+				row.error_code = typeof failure.code === 'string' ? (nodeNoClaimWord(failure.code) as string) : null;
+				// A review row's own hint, which the API no longer sends: Lenz
 				// stores none for the rows a review checks (a failed row's hint
 				// is its failure block's, which stays where it is).
-				if (!('hint' in row)) row.hint = null;
-				if (!('identified_claims' in row)) {
-					row.identified_claims = (row.more_claims as IDataObject[] | undefined) ?? [];
-				}
+				row.hint = null;
+				row.identified_claims = (row.more_claims as IDataObject[] | undefined) ?? [];
 			}
 			const verification = claim.verification;
 			if (verification && typeof verification === 'object' && !Array.isArray(verification)) {
 				const record = verification as IDataObject;
-				if (!('modified_at' in record) && 'completed_at' in record) {
+				if ('completed_at' in record) {
 					record.modified_at = modifiedAtOf(record);
 				}
 			}
@@ -981,16 +943,15 @@ function fillReviewLegacyKeys(body: IDataObject): IDataObject {
 }
 
 /**
- * An /extract answer in the newer shape (`claims: [{ claim, positions }]`),
- * given the keys the older shape carries: `claim` (the first claim, or ''),
+ * An /extract answer (`claims: [{ claim, positions }]`), given the keys this
+ * node has always output: `claim` (the first claim, or ''),
  * `identified_claims` (every claim when there are several, else []),
  * `candidate_claims` (always []) and `locations` (every claim with its
- * positions when every claim has them, else null), and `status` in the older
- * word: `not_a_claim` where the newer shape says `no_checkable_claim`.
- * Older-shape bodies (they carry `claim`) are left untouched.
+ * positions when every claim has them, else null), and `status` in this
+ * node's word: `not_a_claim` where the API says `no_checkable_claim`.
  */
-function fillExtractLegacyKeys(body: IDataObject): void {
-	if (!Array.isArray(body.claims) || 'claim' in body || 'identified_claims' in body) return;
+function fillExtractOutputKeys(body: IDataObject): void {
+	if (!Array.isArray(body.claims)) return;
 	const claims = body.claims.filter((entry) => entry && typeof entry === 'object').map((entry) => asObject(entry));
 	const texts = claims.map((c) => asText(c.claim));
 	if (body.status === 'no_checkable_claim') body.status = 'not_a_claim';
@@ -1003,23 +964,22 @@ function fillExtractLegacyKeys(body: IDataObject): void {
 			: null;
 }
 
-// The per-capability blocks of the older /me/usage shape, in the order it
-// sent them: each capability's share of the credit pool at that capability's
+// The per-capability blocks this node has always output for /me/usage, in
+// that order: each capability's share of the credit pool at that capability's
 // price. `used` is derived as total - remaining, as Lenz derives it.
 const USAGE_BLOCKS = ['verify', 'ask', 'assess'] as const;
 const DEFAULT_COSTS: Record<(typeof USAGE_BLOCKS)[number], number> = { verify: 10, ask: 1, assess: 1 };
 
 /**
- * A /me/usage answer in the newer shape (the credit pool, `credits`, and the
- * prices, `costs`), given the keys the older shape carries: `quota_resets_at`
+ * A /me/usage answer (the credit pool, `credits`, and the prices, `costs`),
+ * given the keys this node has always output: `quota_resets_at`
  * (= `credits.resets_at`), `credits.bonus` (= `credits.extra`) and the
- * `verify`, `ask` and `assess` blocks. Returned as a new object in the older
- * key order; an older-shape body (it carries `quota_resets_at`) is returned
- * as it is.
+ * `verify`, `ask` and `assess` blocks. Returned as a new object in this
+ * node's key order.
  */
-function fillLegacyUsageKeys(body: IDataObject): IDataObject {
+function fillUsageOutputKeys(body: IDataObject): IDataObject {
 	const pool = body.credits;
-	if ('quota_resets_at' in body || !pool || typeof pool !== 'object' || Array.isArray(pool)) return body;
+	if (!pool || typeof pool !== 'object' || Array.isArray(pool)) return body;
 	const credits = pool as IDataObject;
 	const whole = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 	const costs = asObject(body.costs);
@@ -1042,17 +1002,15 @@ function fillLegacyUsageKeys(body: IDataObject): IDataObject {
 	for (const [key, value] of Object.entries(body)) {
 		if (key === 'credits') {
 			out.quota_resets_at = credits.resets_at ?? null;
-			const legacyCredits: IDataObject = {};
+			const outCredits: IDataObject = {};
 			for (const [k, v] of Object.entries(credits)) {
-				if (k === 'resets_at' && !('bonus' in credits)) legacyCredits.bonus = credits.extra ?? 0;
-				legacyCredits[k] = v;
+				if (k === 'resets_at') outCredits.bonus = credits.extra ?? 0;
+				outCredits[k] = v;
 			}
-			if (!('bonus' in legacyCredits)) legacyCredits.bonus = credits.extra ?? 0;
-			out.credits = legacyCredits;
+			if (!('bonus' in outCredits)) outCredits.bonus = credits.extra ?? 0;
+			out.credits = outCredits;
 		} else if (key === 'extract') {
-			for (const capability of USAGE_BLOCKS) {
-				if (!(capability in body)) out[capability] = block(capability);
-			}
+			for (const capability of USAGE_BLOCKS) out[capability] = block(capability);
 			out[key] = value;
 		} else {
 			out[key] = value;
@@ -1065,23 +1023,23 @@ function fillLegacyUsageKeys(body: IDataObject): IDataObject {
 }
 
 /**
- * A refusal answered in the newer shape, rewritten IN PLACE as the older shape
- * (legacyErrorBody), so everything that reads the error afterwards (the
- * messages, the error output's fields, the retry logic) sees what a version
- * 1.2 node sees. n8n has already built the error's `description` from the
+ * A refusal, rewritten IN PLACE as this node has always read it
+ * (errorBodyAsNodeReads), so everything that reads the error afterwards (the
+ * messages, the error output's fields, the retry logic) sees the fields and
+ * words it was built on, on every node version. n8n has already built the error's `description` from the
  * body; where it did, it is rebuilt the same way from the rewritten body.
  */
-function readAsLegacyError(node: INode, error: unknown, method: string, path: string): void {
+function readErrorAsNodeReads(node: INode, error: unknown, method: string, path: string): void {
 	const status = statusCodeOf(error);
 	const body = responseBodyOf(error);
 	if (status === undefined || status < 400 || !Object.keys(body).length) return;
-	const legacy = legacyErrorBody(status, body, method, path.split('?')[0]);
+	const read = errorBodyAsNodeReads(status, body, method, path.split('?')[0]);
 	const before = bodyDescription(node, body, status);
 	for (const key of Object.keys(body)) delete body[key];
-	Object.assign(body, legacy);
+	Object.assign(body, read);
 	const e = error as { description?: string | null };
 	if (before !== undefined && e && typeof e === 'object' && e.description === before) {
-		e.description = bodyDescription(node, legacy, status) ?? null;
+		e.description = bodyDescription(node, read, status) ?? null;
 	}
 }
 
@@ -1092,8 +1050,8 @@ function bodyDescription(node: INode, body: IDataObject, status: number): string
 	return typeof derived === 'string' && derived ? derived : undefined;
 }
 
-// Codes the newer shape sends where the older error carried no `code`
-// (outside /review and /citecheck, which always sent one).
+// Codes the API sends that this node's error output has never carried
+// (outside /review and /citecheck, which always had one).
 const CODELESS = new Set([
 	'not_authenticated',
 	'not_found',
@@ -1109,7 +1067,7 @@ const CODELESS = new Set([
 	'invalid_request',
 ]);
 
-// Codes whose older refusal repeated the code as `error`.
+// Codes this node's error output repeats as `error`.
 const ERROR_ECHO_CODES = new Set([
 	'framing_failed',
 	'extraction_failed',
@@ -1125,16 +1083,16 @@ const isReviewFamily = (path: string): boolean =>
 	path === '/citecheck' ||
 	path.startsWith('/citechecks/');
 
-/** `from` renamed to `to` when only the newer name is there. */
+/** `from` renamed to `to`. */
 function renameKey(o: IDataObject, from: string, to: string): void {
-	if (from in o && !(to in o)) {
+	if (from in o) {
 		o[to] = o[from];
 		delete o[from];
 	}
 }
 
-/** The older names of a wait and a docs link. */
-function legacyWaitAndLink(o: IDataObject, status: number): void {
+/** This node's names for a wait and a docs link. */
+function nodeWaitAndLink(o: IDataObject, status: number): void {
 	const code = o.code;
 	if (status === 429 && code === 'extract_daily_limit') renameKey(o, 'retry_after', 'reset_in_seconds');
 	if (status === 429 && (code === 'review_in_flight' || code === 'citecheck_in_flight')) {
@@ -1143,7 +1101,7 @@ function legacyWaitAndLink(o: IDataObject, status: number): void {
 	if (status === 402 || status === 429 || status === 503) renameKey(o, 'docs_url', 'doc_url');
 }
 
-/** A field validation item in the older order: `type`, `loc`, `msg`, then the rest. */
+/** A field validation item in this node's order: `type`, `loc`, `msg`, then the rest. */
 function validationItem(item: unknown): unknown {
 	if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
 	const from = item as IDataObject;
@@ -1154,24 +1112,23 @@ function validationItem(item: unknown): unknown {
 }
 
 /**
- * An error body in the newer shape (`{ detail, code, errors? }` on every
- * refusal), read as the older shape the node was built on, so every field and
- * message it shows keeps its older value. Only what the newer shape alone
- * sends is rewritten, by endpoint; an older-shape body comes back unchanged.
+ * An error body (`{ detail, code, errors? }` on every refusal), read as this
+ * node was built to read it, so every field and message it shows keeps the
+ * value it always had. Rewritten by endpoint:
  *
- *  - outside /review and /citecheck: no `errors` list; no `code` where the
- *    older error had none; a schema error's `detail` is the list of field
- *    items; Assess's blank list item is `blank_item`; a blank claim's older
- *    sentence; `error` repeating the code where the older body had it;
+ *  - outside /review and /citecheck: no `errors` list; no `code` where this
+ *    node's error had none; a schema error's `detail` is the list of field
+ *    items; Assess's blank list item is `blank_item`; a blank claim's own
+ *    sentence; `error` repeating the code where this node's error had it;
  *  - /review and /citecheck: field items `{ loc, msg }`, a schema error's
  *    `detail` spelled from the field's path, a blank text or an unsupported
  *    language on /review is `validation_error` (the language one with its
  *    `language: ` prefix);
- *  - waits and links by their older names (`reset_in_seconds`,
+ *  - waits and links by this node's names (`reset_in_seconds`,
  *    `retry_after_seconds`, `doc_url`); a citation check's 402 states its
  *    balance as `credits_remaining` (one credit a citation).
  */
-export function legacyErrorBody(
+export function errorBodyAsNodeReads(
 	status: number,
 	body: IDataObject,
 	method: string,
@@ -1217,12 +1174,11 @@ export function legacyErrorBody(
 			status === 402 &&
 			method === 'POST' &&
 			path === '/citecheck' &&
-			!('credits_remaining' in out) &&
 			typeof out.remaining === 'number'
 		) {
 			out.credits_remaining = out.remaining;
 		}
-		legacyWaitAndLink(out, status);
+		nodeWaitAndLink(out, status);
 		return out;
 	}
 	if (status === 422 && code === 'blank_input' && path === '/assess') {
@@ -1252,14 +1208,14 @@ export function legacyErrorBody(
 				e && typeof e === 'object' && typeof (e as IDataObject).type === 'string' && (e as IDataObject).type !== code,
 		);
 	if (schemaItems && errors) {
-		const legacy: IDataObject = { detail: errors.map(validationItem) as IDataObject[] };
+		const items: IDataObject = { detail: errors.map(validationItem) as IDataObject[] };
 		for (const [key, value] of Object.entries(out)) {
 			if (key === 'detail' || key === 'code' || key === 'errors') continue;
-			legacy[key === 'docs_url' ? 'doc_url' : key] = value;
+			items[key === 'docs_url' ? 'doc_url' : key] = value;
 		}
-		return legacy;
+		return items;
 	}
-	// A blank claim: the older sentence named the field the older body sent.
+	// A blank claim: this node's sentence names the field it sends.
 	if (status === 422 && code === 'blank_input' && typeof out.detail === 'string') {
 		const loc = firstLoc();
 		const field = Array.isArray(loc) ? loc[loc.length - 1] : undefined;
@@ -1276,9 +1232,9 @@ export function legacyErrorBody(
 		(code === 'verification_not_ready' && path.startsWith('/ask/'));
 	if (codeless) delete out.code;
 	delete out.errors;
-	legacyWaitAndLink(out, status);
+	nodeWaitAndLink(out, status);
 	// These refusals repeated their code as `error`, right after it.
-	if (ERROR_ECHO_CODES.has(code) && !('error' in out)) {
+	if (ERROR_ECHO_CODES.has(code)) {
 		const echoed: IDataObject = {};
 		for (const [key, value] of Object.entries(out)) {
 			echoed[key] = value;
@@ -2410,8 +2366,6 @@ export class Lenz implements INodeType {
 			(this.getNodeParameter('authentication', 0, 'apiKey') as string) === 'oAuth2'
 				? 'lenzOAuth2Api'
 				: 'lenzApi';
-		// Read once, like the credential: one node, one API version.
-		const apiVersion = apiVersionFor(node.typeVersion);
 		const lenzRequest = async (
 			method: IHttpRequestMethods,
 			path: string,
@@ -2420,7 +2374,7 @@ export class Lenz implements INodeType {
 		): Promise<IDataObject> => {
 			const headers: IDataObject = {
 				'User-Agent': USER_AGENT,
-				'X-Lenz-API-Version': apiVersion,
+				'X-Lenz-API-Version': API_VERSION,
 			};
 			if (extra?.idempotent) {
 				const key = buildIdempotencyKey(
@@ -2452,15 +2406,21 @@ export class Lenz implements INodeType {
 					credentialType,
 					options,
 				)) as IDataObject;
-			// Versions 1 to 1.2 get the older shape already: their errors pass
-			// through untouched.
-			if (apiVersion === LEGACY_API_VERSION) return await send();
 			try {
 				return await send();
 			} catch (error) {
-				readAsLegacyError(node, error, method, path);
-				// A NodeApiError (what n8n throws here) comes back as itself.
-				throw new NodeApiError(node, error as JsonObject);
+				readErrorAsNodeReads(node, error, method, path);
+				// A NodeApiError (what n8n throws here) comes back as itself. A raw
+				// transport error (an older n8n build) is wrapped, and its body
+				// travels on the wrapper's `context.data`, where responseBodyOf
+				// reads it first: the wrapper would otherwise drop it, and with it
+				// the wording the error handling below builds from it.
+				const wrapped = new NodeApiError(node, error as JsonObject);
+				if (wrapped !== error) {
+					const body = responseBodyOf(error);
+					if (Object.keys(body).length) wrapped.context = { ...(wrapped.context ?? {}), data: body };
+				}
+				throw wrapped;
 			}
 		};
 
@@ -2768,8 +2728,8 @@ export class Lenz implements INodeType {
 						responseData = {
 							status: (accepted.status as string) ?? 'queued',
 							task_id: taskId,
-							// Kept for saved workflows; null when the API sends none.
-							chain_id: accepted.chain_id ?? null,
+							// Kept for saved workflows; the API sends none.
+							chain_id: null,
 							message: 'Submitted. Poll this task_id with the Get Verify Status operation, or wait for the webhook.',
 						};
 					} else {
@@ -2919,8 +2879,8 @@ export class Lenz implements INodeType {
 							json: {
 								batch_id: batchId,
 								task_id: spawned.task_id ?? '',
-								// The newer shape names it `claim`; the output key stays.
-								claim_text: spawned.claim_text ?? spawned.claim ?? '',
+								// The API names it `claim`; the output key stays.
+								claim_text: spawned.claim ?? '',
 								status: 'queued',
 								partial,
 							},
@@ -2961,8 +2921,8 @@ export class Lenz implements INodeType {
 							json: {
 								batch_id: batchId,
 								task_id: spawned.task_id ?? '',
-								// The newer shape names it `claim`; the output key stays.
-								claim_text: spawned.claim_text ?? spawned.claim ?? '',
+								// The API names it `claim`; the output key stays.
+								claim_text: spawned.claim ?? '',
 								status: 'queued',
 								partial,
 							},
@@ -2996,14 +2956,13 @@ export class Lenz implements INodeType {
 					if (!claims.length) {
 						responseData = {
 							status: 'no_claim',
-							// The older shape's sentence for a no-claim answer: the newer
-							// one carries a `failure` block instead of `error`.
+							// This node's sentence for a no-claim answer.
 							message:
-								(result.error as string | null | undefined) ??
-								(result.failure && typeof result.failure === 'object'
+								result.failure && typeof result.failure === 'object'
 									? 'No verifiable claim detected'
-									: 'No verifiable factual claim was detected.'),
-							candidate_claims: result.candidate_claims ?? [],
+									: 'No verifiable factual claim was detected.',
+							// Always empty; the key stays for saved workflows.
+							candidate_claims: [],
 							not_a_claim: noCheckable,
 						};
 					} else {
@@ -3069,8 +3028,9 @@ export class Lenz implements INodeType {
 					// them. The empty list is the answer rather than a failure, but on
 					// its own it is indistinguishable from "nothing here", so name the
 					// cause and the way out.
-					fillExtractLegacyKeys(responseData);
-					responseData.not_a_claim = isNoCheckable(responseData.status);
+					const nothing = isNoCheckable(responseData.status);
+					fillExtractOutputKeys(responseData);
+					responseData.not_a_claim = nothing;
 					if (responseData.status === 'no_match') {
 						responseData.message =
 							'Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted.';
@@ -3184,9 +3144,9 @@ export class Lenz implements INodeType {
 							if (collected >= limit) {
 								break;
 							}
-							// A newer-shape item has `completed_at` where this node's
-							// output has always had `modified_at`.
-							if (!('modified_at' in verification) && 'completed_at' in verification) {
+							// The API sends `completed_at` where this node's output has
+							// always had `modified_at`.
+							if ('completed_at' in verification) {
 								verification.modified_at = modifiedAtOf(verification);
 							}
 							returnData.push({
@@ -3403,7 +3363,7 @@ export class Lenz implements INodeType {
 						await lenzRequest('GET', `/citechecks/${encodeURIComponent(citecheckId)}`),
 					);
 				} else if (operation === 'usage') {
-					responseData = fillLegacyUsageKeys(await lenzRequest('GET', '/me/usage'));
+					responseData = fillUsageOutputKeys(await lenzRequest('GET', '/me/usage'));
 				} else if (operation === 'webhookSecret') {
 					// Lenz mints an OAuth connection's signing secret on this first
 					// read and refuses a webhook_url until then; an API key's secret

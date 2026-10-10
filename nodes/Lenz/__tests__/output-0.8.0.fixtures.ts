@@ -1,9 +1,10 @@
-// What the node returned for each case in ./legacy-bodies.fixtures.ts, recorded
-// from the node as published in 0.8.0, before it learned to read the newer API
-// shape. Frozen: the node must keep returning exactly this for these responses
-// (plus the one additive `not_a_claim` flag, checked in legacy-oracle.test.ts).
+// What the node returned in 0.8.0 for each case in ./canonical-bodies.fixtures.ts,
+// recorded then from the same response in the older API shape (2026-05-13),
+// which every node version received until this release. Frozen: it is what a
+// saved workflow got before, and canonical-parity.test.ts holds every node
+// version to it, difference by named difference.
 /* eslint-disable */
-export const legacyOracle: Record<string, { ok?: any[]; threw?: string }> = {
+export const output080: Record<string, { ok?: any[]; threw?: string }> = {
  "account__me_usage_extra_credits": {
   "ok": [
    {
@@ -1149,23 +1150,6 @@ export const legacyOracle: Record<string, { ok?: any[]; threw?: string }> = {
       "claim": "The Pacific is the deepest ocean.",
       "verdict": "Mostly True",
       "confidence": "medium",
-      "passed": true,
-      "language": "en",
-      "verification_url": null
-     }
-    ]
-   }
-  ]
- },
- "assess__stored_replay_200": {
-  "ok": [
-   {
-    "status": "ok",
-    "claims": [
-     {
-      "claim": "The Earth orbits the Sun.",
-      "verdict": "True",
-      "confidence": "high",
       "passed": true,
       "language": "en",
       "verification_url": null
@@ -3084,33 +3068,6 @@ export const legacyOracle: Record<string, { ok?: any[]; threw?: string }> = {
   ]
  },
  "extract__ready_several_claims": {
-  "ok": [
-   {
-    "status": "ready",
-    "claim": "Alpha rose 5% in 2024.",
-    "identified_claims": [
-     "Alpha rose 5% in 2024.",
-     "Beta fell 3% last year."
-    ],
-    "candidate_claims": [],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
-     }
-    ],
-    "presumed_intent": "Verify reported figures",
-    "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year.",
-    "locations": null
-   }
-  ]
- },
- "extract__stored_replay_200": {
   "ok": [
    {
     "status": "ready",
@@ -9099,14 +9056,6 @@ export const legacyOracle: Record<string, { ok?: any[]; threw?: string }> = {
    }
   ]
  },
- "verify__batch_item_webhook_url_null_422": {
-  "ok": [
-   {
-    "error": "Your request is invalid or could not be processed by the service",
-    "status_code": 422
-   }
-  ]
- },
  "verify__batch_no_credits_402": {
   "ok": [
    {
@@ -9133,14 +9082,6 @@ export const legacyOracle: Record<string, { ok?: any[]; threw?: string }> = {
   ]
  },
  "verify__batch_too_many_422": {
-  "ok": [
-   {
-    "error": "Your request is invalid or could not be processed by the service",
-    "status_code": 422
-   }
-  ]
- },
- "verify__batch_webhook_url_null_422": {
   "ok": [
    {
     "error": "Your request is invalid or could not be processed by the service",
@@ -9989,16 +9930,6 @@ export const legacyOracle: Record<string, { ok?: any[]; threw?: string }> = {
      "elapsed_seconds": "12",
      "poll_after_seconds": 5
     }
-   }
-  ]
- },
- "verify__stored_replay_202": {
-  "ok": [
-   {
-    "status": "queued",
-    "task_id": "87b803ba1e33748ece71d934b011522a",
-    "chain_id": "26c077de422857b6",
-    "message": "Submitted. Poll this task_id with the Get Verify Status operation, or wait for the webhook."
    }
   ]
  },
@@ -11611,22 +11542,6 @@ export const legacyOracle: Record<string, { ok?: any[]; threw?: string }> = {
     "error": "Your request is invalid or could not be processed by the service",
     "status_code": 422,
     "code": "webhook_secret_missing"
-   }
-  ]
- },
- "verify__webhook_url_null_422": {
-  "ok": [
-   {
-    "error": "Your request is invalid or could not be processed by the service",
-    "status_code": 422
-   }
-  ]
- },
- "verify__webhook_url_null_and_missing_claim_422": {
-  "ok": [
-   {
-    "error": "Your request is invalid or could not be processed by the service",
-    "status_code": 422
    }
   ]
  }
