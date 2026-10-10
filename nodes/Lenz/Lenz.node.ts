@@ -1985,7 +1985,7 @@ export class Lenz implements INodeType {
 				type: 'string',
 				default: '',
 				placeholder: 'Es',
-				description: 'Optional ISO 639-1 response language code. Defaults to English. Assess, Verify and Ask also accept `auto`, which answers in the language of the submitted text (for Ask, the language of the claim being discussed). With several claims in one Assess request, Auto picks one language for the whole request, the one most items agree on and otherwise English; enter a language code to avoid that for a list in mixed languages. Other operations need a language code, not `auto`.',
+				description: 'Optional ISO 639-1 response language code. Defaults to English. Assess, Verify, Ask and Review Draft also accept `auto`, which answers in the language of the submitted text (for Ask, the language of the claim being discussed; for Review Draft, the language of the draft, one language for the whole review). With several claims in one Assess request, Auto picks one language for the whole request, the one most items agree on and otherwise English; enter a language code to avoid that for a list in mixed languages. Extract, Select, Verify Batch and Check Citations need a language code, not `auto`.',
 				displayOptions: {
 					show: {
 						operation: ['ask', 'assess', 'extract', 'verify', 'verifyBatch', 'reviewDraft', 'checkCitations'],
