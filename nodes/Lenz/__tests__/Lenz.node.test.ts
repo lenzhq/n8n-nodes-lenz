@@ -184,6 +184,73 @@ describe('Lenz node - Assess (Fast)', () => {
 	});
 });
 
+describe('Lenz node - what an expression hands a text field', () => {
+	// n8n passes an expression's raw result to a string field: {{ $json.claim }}
+	// on an item without `claim` gives undefined, {{ $json.count }} a number.
+	const ID_OPERATIONS: Array<[string, Record<string, unknown>]> = [
+		['verifyStatus', { taskId: undefined }],
+		['getVerification', { verificationId: undefined }],
+		['deleteVerification', { verificationId: undefined }],
+		['listRelated', { verificationId: undefined }],
+		['askHistory', { verificationId: undefined }],
+		['resetAsk', { verificationId: undefined }],
+		['ask', { verificationId: undefined, question: 'Why?' }],
+		['ask', { verificationId: 'ver_1', question: undefined }],
+		['getReview', { reviewId: undefined }],
+		['getCitationCheck', { citecheckId: undefined }],
+	];
+
+	it.each(ID_OPERATIONS)('%s skips an input that is missing, without a request', async (operation, params) => {
+		for (const missing of [undefined, null, '', '   ']) {
+			const filled = Object.fromEntries(
+				Object.entries(params).map(([key, value]) => [key, value === undefined ? missing : value]),
+			);
+			const { output, httpMock } = await runNode({ operation, ...filled }, noCall);
+			expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
+			expect(httpMock).not.toHaveBeenCalled();
+		}
+	});
+
+	it.each([
+		['verify', 'claim'],
+		['assess', 'text'],
+		['extract', 'text'],
+		['reviewDraft', 'draft'],
+	])('%s skips a missing %s, without a request', async (operation, field) => {
+		for (const missing of [undefined, null]) {
+			const { output, httpMock } = await runNode({ operation, [field]: missing }, noCall);
+			expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
+			expect(httpMock).not.toHaveBeenCalled();
+		}
+	});
+
+	it('sends a number as its text', async () => {
+		const { calls } = await runNode({ operation: 'assess', text: 42 }, () => ({
+			claims: [{ claim: '42', verdict: 'True', confidence: 'high' }],
+		}));
+		expect(calls[0].body).toMatchObject({ text: '42' });
+	});
+
+	it('refuses an object with a message naming the field', async () => {
+		await expect(runNode({ operation: 'assess', text: { a: 1 } }, noCall)).rejects.toThrow(
+			/"text" must be text or a number, but the expression returned an object/,
+		);
+	});
+
+	it.each([
+		['getVerification', { verificationId: 'a/b?c' }, '/verifications/a%2Fb%3Fc'],
+		['deleteVerification', { verificationId: 'a/b' }, '/verifications/a%2Fb'],
+		['listRelated', { verificationId: 'a/b' }, '/verifications/a%2Fb/related'],
+		['askHistory', { verificationId: 'a/b' }, '/ask/a%2Fb'],
+		['resetAsk', { verificationId: 'a/b' }, '/ask/a%2Fb'],
+		['ask', { verificationId: 'a/b', question: 'Why?' }, '/ask/a%2Fb'],
+		['verifyStatus', { taskId: 'a/b' }, '/verify/status/a%2Fb'],
+	])('%s encodes the ID into the path', async (operation, params, path) => {
+		const { calls } = await runNode({ operation, ...params }, () => ({ status: 'processing' }), true);
+		expect(calls[0].url).toBe(path);
+	});
+});
+
 describe('Lenz node - Verify (Deep)', () => {
 	// Submit returns a task_id; the status endpoint returns the terminal state
 	// on the first poll (so no real waiting happens in tests).
@@ -655,6 +722,35 @@ describe('Lenz node - Submit Verify Batch', () => {
 			partial: false,
 		});
 		expect((output[1].json as IDataObject).task_id).toBe('t2');
+	});
+
+	it('sends each row\'s own options, and the batch-wide ones, only when set', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'verifyBatch',
+				webhookUrl: ' https://example.com/hook ',
+				visibility: 'private',
+				depth: 'low',
+				batchClaims: {
+					claim: [
+						{ text: ' Claim one ', sourceUrl: 'https://src.example', visibility: 'unlisted', depth: 'standard' },
+						{ text: 'Claim two', sourceUrl: '', visibility: '', depth: '' },
+						{ text: 42 },
+					],
+				},
+			},
+			() => ({ batch_id: 'b', items: [] }),
+		);
+		expect(calls[0].body).toEqual({
+			claims: [
+				{ text: 'Claim one', source_url: 'https://src.example', visibility: 'unlisted', depth: 'standard' },
+				{ text: 'Claim two' },
+				{ text: '42' },
+			],
+			webhook_url: 'https://example.com/hook',
+			visibility: 'private',
+			depth: 'low',
+		});
 	});
 
 	it('flags a partial fan-out so the caller can retry the missing claims', async () => {
@@ -2780,6 +2876,17 @@ describe('Lenz node - Review', () => {
 		expect(calls[0].url).toBe('/reviews/rev%2F1');
 		expect(calls[0].qs).toEqual({ view: 'issues' });
 		expect((output[0].json as IDataObject).passed).toBe(true);
+	});
+});
+
+describe('Lenz node - a job accepted without its ID', () => {
+	it.each([
+		['reviewDraft', { draft: 'x' }, /returned no review_id/],
+		['checkCitations', { citationInput: 'text', citationText: 'See [1].' }, /returned no citecheck_id/],
+	])('%s fails with a message instead of polling an empty ID', async (operation, params, message) => {
+		const { calls, output } = await runNode({ operation, ...params }, () => ({ status: 'queued' }), true);
+		expect(calls).toHaveLength(1);
+		expect(String((output[0].json as IDataObject).error)).toMatch(message);
 	});
 });
 

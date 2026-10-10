@@ -574,6 +574,15 @@ function bodyFingerprint(body?: IDataObject): string {
 // Sources without a URL can't be cited, so they're dropped. The rest are passed
 // through in full — snippet and source_name are what make a citation quotable
 // rather than merely linkable.
+// A parameter value as trimmed text: null and undefined read as '', a number or
+// boolean as its text. Undefined for an object or list, which has no text.
+function textOf(value: unknown): string | undefined {
+	if (value === undefined || value === null) return '';
+	if (typeof value === 'string') return value.trim();
+	if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+	return undefined;
+}
+
 function mapCitations(sources: unknown): IDataObject[] {
 	// Guarded rather than cast. A verification is paid for and finished by the
 	// time this runs, so throwing here would fail the item *after* the money was
@@ -2055,6 +2064,27 @@ export class Lenz implements INodeType {
 				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint({ path, body })}`
 				: '';
 
+		// A text parameter, trimmed. n8n hands a string field an expression's raw
+		// result: {{ $json.claim }} on an item without `claim` gives undefined, and
+		// {{ $json.count }} a number. Missing reads as '' so the operation skips
+		// with empty_input; a number or boolean is sent as its text; an object or
+		// list is refused here rather than failing later as "trim is not a function".
+		const readText = (name: string, itemIndex: number, fallback?: string): string => {
+			const raw =
+				fallback === undefined
+					? this.getNodeParameter(name, itemIndex)
+					: this.getNodeParameter(name, itemIndex, fallback);
+			const text = textOf(raw);
+			if (text === undefined) {
+				throw new NodeOperationError(
+					this.getNode(),
+					`"${name}" must be text or a number, but the expression returned ${Array.isArray(raw) ? 'a list' : 'an object'}`,
+					{ itemIndex },
+				);
+			}
+			return text;
+		};
+
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
 		// n8n. No third-party SDK — this is the required shape for a verified
 		// community node (zero runtime dependencies).
@@ -2312,7 +2342,7 @@ export class Lenz implements INodeType {
 				let responseData: IDataObject;
 
 				if (operation === 'verify') {
-					const claim = (this.getNodeParameter('claim', itemIndex) as string).trim();
+					const claim = readText('claim', itemIndex);
 					if (!claim) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2327,8 +2357,8 @@ export class Lenz implements INodeType {
 						itemIndex,
 						true,
 					) as boolean;
-					const sourceUrl = (this.getNodeParameter('sourceUrl', itemIndex, '') as string).trim();
-					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
+					const sourceUrl = readText('sourceUrl', itemIndex, '');
+					const webhookUrl = readText('webhookUrl', itemIndex, '');
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
 					const depth = this.getNodeParameter('depth', itemIndex, 'standard') as string;
 
@@ -2417,7 +2447,8 @@ export class Lenz implements INodeType {
 						// so retryable poll failures are retried for the window, stated
 						// waits are honoured within limits, and the loop ends on a read,
 						// never on a sleep. waitSeconds was validated before the submit.
-						const polled = await pollJob(`/verify/status/${taskId}`, itemIndex, waitSeconds, {
+						const statusPath = `/verify/status/${encodeURIComponent(taskId)}`;
+						const polled = await pollJob(statusPath, itemIndex, waitSeconds, {
 							terminal: ['completed', 'needs_input', 'failed'],
 							pollAfterMs: (status) => statedPollAfterMs(status.progress),
 						});
@@ -2474,7 +2505,7 @@ export class Lenz implements INodeType {
 						}
 					}
 				} else if (operation === 'verifyStatus') {
-					const taskId = (this.getNodeParameter('taskId', itemIndex) as string).trim();
+					const taskId = readText('taskId', itemIndex);
 					if (!taskId) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2483,12 +2514,12 @@ export class Lenz implements INodeType {
 						continue;
 					}
 					const includeAudit = this.getNodeParameter('includeAudit', itemIndex, false) as boolean;
-					const status = await lenzRequest('GET', `/verify/status/${taskId}`);
+					const status = await lenzRequest('GET', `/verify/status/${encodeURIComponent(taskId)}`);
 					responseData = mapVerifyStatus(status, taskId, includeAudit);
 				} else if (operation === 'verifyBatch') {
 					const batchUi = this.getNodeParameter('batchClaims', itemIndex, {}) as IDataObject;
 					const entries = ((batchUi.claim ?? []) as IDataObject[]).filter(
-						(entry) => (((entry.text as string) ?? '') as string).trim() !== '',
+						(entry) => (textOf(entry.text) ?? '') !== '',
 					);
 					if (!entries.length) {
 						returnData.push({
@@ -2505,17 +2536,17 @@ export class Lenz implements INodeType {
 						);
 					}
 
-					const webhookUrl = (this.getNodeParameter('webhookUrl', itemIndex, '') as string).trim();
+					const webhookUrl = readText('webhookUrl', itemIndex, '');
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
 					const depth = this.getNodeParameter('depth', itemIndex, 'standard') as string;
 
 					const body: IDataObject = {
 						claims: entries.map((entry) => {
-							const claimBody: IDataObject = { text: (entry.text as string).trim() };
-							const entryLanguage = (((entry.language as string) ?? '') as string).trim();
-							const entrySourceUrl = (((entry.sourceUrl as string) ?? '') as string).trim();
-							const entryVisibility = (((entry.visibility as string) ?? '') as string).trim();
-							const entryDepth = (((entry.depth as string) ?? '') as string).trim();
+							const claimBody: IDataObject = { text: textOf(entry.text) ?? '' };
+							const entryLanguage = textOf(entry.language) ?? '';
+							const entrySourceUrl = textOf(entry.sourceUrl) ?? '';
+							const entryVisibility = textOf(entry.visibility) ?? '';
+							const entryDepth = textOf(entry.depth) ?? '';
 							if (entryLanguage) {
 								claimBody.language = entryLanguage;
 							}
@@ -2568,7 +2599,7 @@ export class Lenz implements INodeType {
 					}
 					continue;
 				} else if (operation === 'select') {
-					const taskId = (this.getNodeParameter('taskId', itemIndex) as string).trim();
+					const taskId = readText('taskId', itemIndex);
 					const selected = ((this.getNodeParameter('selectedClaims', itemIndex, []) as string[]) ?? [])
 						.map((text) => (text ?? '').trim())
 						.filter((text) => text !== '');
@@ -2589,7 +2620,7 @@ export class Lenz implements INodeType {
 
 					const accepted = await lenzRequest(
 						'POST',
-						`/verify/${taskId}/select`,
+						`/verify/${encodeURIComponent(taskId)}/select`,
 						{ texts: selected },
 						{ idempotent: { operation, itemIndex } },
 					);
@@ -2610,7 +2641,7 @@ export class Lenz implements INodeType {
 					}
 					continue;
 				} else if (operation === 'assess') {
-					const text = (this.getNodeParameter('text', itemIndex) as string).trim();
+					const text = readText('text', itemIndex);
 					if (!text) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2657,7 +2688,7 @@ export class Lenz implements INodeType {
 						};
 					}
 				} else if (operation === 'extract') {
-					const text = (this.getNodeParameter('text', itemIndex) as string).trim();
+					const text = readText('text', itemIndex);
 					if (!text) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2708,8 +2739,15 @@ export class Lenz implements INodeType {
 							'Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted.';
 					}
 				} else if (operation === 'ask') {
-					const verificationId = this.getNodeParameter('verificationId', itemIndex) as string;
-					const question = this.getNodeParameter('question', itemIndex) as string;
+					const verificationId = readText('verificationId', itemIndex);
+					const question = readText('question', itemIndex);
+					if (!verificationId || !question) {
+						returnData.push({
+							json: { skipped: true, reason: 'empty_input' },
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
 
 					const body: IDataObject = { message: question };
 					if (language) {
@@ -2722,14 +2760,14 @@ export class Lenz implements INodeType {
 					// replays the first answer instead. A retry that arrives while the
 					// first question is still being answered gets a 409: there is no
 					// answer yet to replay.
-					const reply = await lenzRequest('POST', `/ask/${verificationId}`, body, {
+					const reply = await lenzRequest('POST', `/ask/${encodeURIComponent(verificationId)}`, body, {
 						idempotent: { operation, itemIndex },
 					});
 					responseData = {
 						answer: reply.content ?? '',
 					};
 				} else if (operation === 'askHistory') {
-					const verificationId = (this.getNodeParameter('verificationId', itemIndex) as string).trim();
+					const verificationId = readText('verificationId', itemIndex);
 					if (!verificationId) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2737,9 +2775,9 @@ export class Lenz implements INodeType {
 						});
 						continue;
 					}
-					responseData = await lenzRequest('GET', `/ask/${verificationId}`);
+					responseData = await lenzRequest('GET', `/ask/${encodeURIComponent(verificationId)}`);
 				} else if (operation === 'resetAsk') {
-					const verificationId = (this.getNodeParameter('verificationId', itemIndex) as string).trim();
+					const verificationId = readText('verificationId', itemIndex);
 					if (!verificationId) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2747,9 +2785,9 @@ export class Lenz implements INodeType {
 						});
 						continue;
 					}
-					responseData = await lenzRequest('DELETE', `/ask/${verificationId}`);
+					responseData = await lenzRequest('DELETE', `/ask/${encodeURIComponent(verificationId)}`);
 				} else if (operation === 'getVerification') {
-					const verificationId = (this.getNodeParameter('verificationId', itemIndex) as string).trim();
+					const verificationId = readText('verificationId', itemIndex);
 					if (!verificationId) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2758,7 +2796,7 @@ export class Lenz implements INodeType {
 						continue;
 					}
 					const includeAudit = this.getNodeParameter('includeAudit', itemIndex, false) as boolean;
-					const detail = await lenzRequest('GET', `/verifications/${verificationId}`);
+					const detail = await lenzRequest('GET', `/verifications/${encodeURIComponent(verificationId)}`);
 					// A stored record can be a failure too — reporting that as
 					// `completed` with a null verdict hides why it stopped, and
 					// drops the fields an IF node is supposed to branch on.
@@ -2771,7 +2809,7 @@ export class Lenz implements INodeType {
 								}
 							: mapCompletedVerification(detail, includeAudit);
 				} else if (operation === 'deleteVerification') {
-					const verificationId = (this.getNodeParameter('verificationId', itemIndex) as string).trim();
+					const verificationId = readText('verificationId', itemIndex);
 					if (!verificationId) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2779,7 +2817,7 @@ export class Lenz implements INodeType {
 						});
 						continue;
 					}
-					responseData = await lenzRequest('DELETE', `/verifications/${verificationId}`);
+					responseData = await lenzRequest('DELETE', `/verifications/${encodeURIComponent(verificationId)}`);
 				} else if (operation === 'listVerifications') {
 					const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
 					const limit = returnAll
@@ -2828,7 +2866,7 @@ export class Lenz implements INodeType {
 					}
 					continue;
 				} else if (operation === 'listRelated') {
-					const verificationId = (this.getNodeParameter('verificationId', itemIndex) as string).trim();
+					const verificationId = readText('verificationId', itemIndex);
 					if (!verificationId) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2839,7 +2877,7 @@ export class Lenz implements INodeType {
 					const relatedLimit = this.getNodeParameter('relatedLimit', itemIndex, 5) as number;
 					const response = await lenzRequest(
 						'GET',
-						`/verifications/${verificationId}/related`,
+						`/verifications/${encodeURIComponent(verificationId)}/related`,
 						undefined,
 						{ qs: { limit: relatedLimit } },
 					);
@@ -2851,7 +2889,7 @@ export class Lenz implements INodeType {
 					}
 					continue;
 				} else if (operation === 'reviewDraft') {
-					const draft = (this.getNodeParameter('draft', itemIndex) as string).trim();
+					const draft = readText('draft', itemIndex);
 					if (!draft) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2907,7 +2945,7 @@ export class Lenz implements INodeType {
 							: jobTimeout('review_id', reviewId, 'Get Review', polled);
 					}
 				} else if (operation === 'getReview') {
-					const reviewId = (this.getNodeParameter('reviewId', itemIndex) as string).trim();
+					const reviewId = readText('reviewId', itemIndex);
 					if (!reviewId) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
@@ -2954,7 +2992,7 @@ export class Lenz implements INodeType {
 						}
 						body.pairs = pairs;
 					} else {
-						const text = (this.getNodeParameter('citationText', itemIndex) as string).trim();
+						const text = readText('citationText', itemIndex);
 						if (!text) {
 							returnData.push({
 								json: { skipped: true, reason: 'empty_input' },
@@ -3016,7 +3054,7 @@ export class Lenz implements INodeType {
 							: jobTimeout('citecheck_id', citecheckId, 'Get Citation Check', polled);
 					}
 				} else if (operation === 'getCitationCheck') {
-					const citecheckId = (this.getNodeParameter('citecheckId', itemIndex) as string).trim();
+					const citecheckId = readText('citecheckId', itemIndex);
 					if (!citecheckId) {
 						returnData.push({
 							json: { skipped: true, reason: 'empty_input' },
