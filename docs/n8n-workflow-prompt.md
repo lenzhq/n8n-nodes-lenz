@@ -352,13 +352,14 @@ it later. Add an error branch for it only if the user asked for one.
      `passed` reports every one of those as "the claim is false" — a provider
      outage becomes a debunking. Gate on `status` first, route the non-verdict
      statuses somewhere of their own, and only then branch on `passed`.
-7. **`language` is an ISO 639-1 code, or `auto` on four operations.** Leave it
+7. **`language` is an ISO 639-1 code, or `auto` on five operations.** Leave it
    out for English. `auto` answers in the language of the submitted text, and is
-   accepted by `assess`, `verify`, `ask` and `reviewDraft` only; on `ask` it means
+   accepted by `assess`, `verify`, `ask`, `extract` and `reviewDraft` only; on `extract` it means
+   the language of the text (of the page when the input is a URL), English for a text too short to tell; on `ask` it means
    the language of the claim being discussed, on `reviewDraft` the language of
    the draft (one language for the whole review), and on `assess` with several claims one
    language is chosen for the whole request, so name a code for a list in mixed
-   languages. Extract, Select, Verify Batch and Check Citations need a code, not `auto`.
+   languages. Select, Verify Batch and Check Citations need a code, not `auto`.
 
 ## Before you answer
 

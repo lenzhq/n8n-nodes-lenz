@@ -941,7 +941,7 @@ describe('Lenz node - Extract Claims', () => {
 	});
 });
 
-// `auto` is a request value the API understands on assess, verify and ask. The
+// `auto` is a request value the API understands on assess, verify, ask and extract. The
 // field is free text, so the node has to send it exactly as typed, and keep
 // sending no `language` key at all when the field is empty.
 describe('Lenz node - Language "auto"', () => {
@@ -956,11 +956,17 @@ describe('Lenz node - Language "auto"', () => {
 		claims: [{ claim: 'A', verdict: 'True', confidence: 'high', verification_url: null }],
 	});
 	const askResponder: Responder = () => ({ role: 'expert', content: 'An answer.' });
+	const extractResponder: Responder = () => ({
+		status: 'ok',
+		language: 'de',
+		claims: [{ claim: 'Berlin ist die Hauptstadt.' }],
+	});
 
 	const cases: Array<[string, Record<string, unknown>, Responder, string]> = [
 		['assess', { operation: 'assess', text: 'Berlin ist die Hauptstadt.' }, assessResponder, '/assess'],
 		['verify', { operation: 'verify', claim: 'Berlin ist die Hauptstadt.' }, verifyResponder, '/verify'],
 		['ask', { operation: 'ask', verificationId: 'ver_1', question: 'Warum?' }, askResponder, '/ask/ver_1'],
+		['extract', { operation: 'extract', text: 'Berlin ist die Hauptstadt.' }, extractResponder, '/extract'],
 	];
 
 	it('stays a free-text field whose description names auto and the operations that take it', () => {
@@ -970,13 +976,21 @@ describe('Lenz node - Language "auto"', () => {
 		expect(field?.type).toBe('string');
 		expect(field?.default).toBe('');
 		expect(field?.description).toContain('`auto`');
-		expect(field?.description).toContain('Assess, Verify, Ask and Review Draft');
+		expect(field?.description).toContain('Assess, Verify, Ask, Extract and Review Draft');
 	});
 
 	it.each(cases)('sends auto unchanged as body.language on %s', async (_op, params, responder, url) => {
 		const { calls } = await runNode({ ...params, language: 'auto' }, responder);
 		const submit = calls.find((c) => c.method === 'POST' && c.url === url);
 		expect((submit?.body as IDataObject).language).toBe('auto');
+	});
+
+	it('returns the language Extract reports for its claims', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Berlin ist die Hauptstadt.', language: 'auto' },
+			extractResponder,
+		);
+		expect(output[0].json.language).toBe('de');
 	});
 
 	it.each(cases)('sends no language key on %s when the field is empty', async (_op, params, responder, url) => {
