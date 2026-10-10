@@ -1394,8 +1394,8 @@ export const canonicalCases: Record<string, LegacyCase> = {
    "docs_url": "https://lenz.io/docs/errors#quota",
    "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
    "wall_id": "3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
+   "remaining": 100,
    "resets_at": "2026-09-01T10:00:00+00:00",
-   "credits_remaining": 100,
    "cost": 1
   }
  },
@@ -7211,7 +7211,7 @@ export const canonicalCases: Record<string, LegacyCase> = {
      "verification": {
       "status": "completed",
       "content_status": "available",
-      "task_id": "0967f5e7366af816da05f25b93a09765",
+      "task_id": "e2d16a8a325b3db21aeb6788312fb7ea",
       "verification_id": "545628ac",
       "claim": "The Eiffel Tower is in Berlin.",
       "language": "en",
@@ -7513,7 +7513,7 @@ export const canonicalCases: Record<string, LegacyCase> = {
      },
      "verification": {
       "verification_id": null,
-      "task_id": "e2d16a8a325b3db21aeb6788312fb7ea",
+      "task_id": "ec0340b28cc6c8a4a114dd563c1889ee",
       "claim": null,
       "language": null,
       "visibility": null,
@@ -10269,7 +10269,7 @@ export const canonicalCases: Record<string, LegacyCase> = {
      "language": "en"
     },
     {
-     "verification_id": "467bdde5",
+     "verification_id": "0f67b4fc",
      "claim": "The Earth is round.",
      "domain": "Science",
      "entities": [],

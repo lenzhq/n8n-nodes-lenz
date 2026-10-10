@@ -1,4 +1,5 @@
-// The newer shape of the API, run through the node, must fill every output key
+// The newer shape of the API, run through a version 1.3 node (the one that asks
+// for it), must fill every output key
 // the older shape's output has (it may carry more: the newer names stay). The
 // same recorded cases as legacy-oracle.test.ts, in both shapes. Exact parity of
 // values is not promised in this release; the values that carry meaning are
@@ -42,7 +43,7 @@ describe('the newer shape fills every key the older shape has', () => {
 
 	it.each(names)('%s', async (name) => {
 		const legacy = await runLegacyCase(legacyCases[name]);
-		const canonical = await runLegacyCase(canonicalCases[name]);
+		const canonical = await runLegacyCase(canonicalCases[name], 1.3);
 		const have = new Set(keyPaths(canonical));
 		const missing = [...new Set(keyPaths(legacy))].filter((k) => !have.has(k));
 		expect(missing).toEqual([]);
@@ -76,7 +77,7 @@ describe('the keys filled from the newer names carry the older shape\'s values',
 
 	it.each(reviewAndExtract)('%s', async (name) => {
 		const legacy = await runLegacyCase(legacyCases[name]);
-		const canonical = await runLegacyCase(canonicalCases[name]);
+		const canonical = await runLegacyCase(canonicalCases[name], 1.3);
 		for (const path of watched) {
 			// An extract whose claims were all dropped by the locator reads
 			// `locations: []` in the older shape and nothing in the newer one.

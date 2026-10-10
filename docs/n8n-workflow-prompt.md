@@ -26,7 +26,7 @@ your assumptions in one line underneath.
 | Field | Value |
 |---|---|
 | Node type | `n8n-nodes-lenz.lenz` |
-| `typeVersion` | `1.2` |
+| `typeVersion` | `1.3` |
 | Credential type | `lenzOAuth2Api` — **omit the `credentials` block entirely** (see rules) |
 | `authentication` | Omit it: the node defaults to `oAuth2` (`lenzOAuth2Api`). Set `"apiKey"` only if asked to use `lenzApi` |
 | Inputs / outputs | 1 main in, 1 main out |

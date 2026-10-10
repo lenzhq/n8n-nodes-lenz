@@ -7,30 +7,46 @@ import type { IDataObject, IExecuteFunctions } from 'n8n-workflow';
 import { Lenz } from '../Lenz.node';
 import type { LegacyCase } from './legacy-bodies.fixtures';
 
-function apiError(statusCode: number, body: Record<string, unknown>) {
+function apiError(statusCode: number, body: Record<string, unknown>, describeFromBody = false) {
 	const transport = Object.assign(new Error(`Request failed with status code ${statusCode}`), {
 		statusCode,
 		response: { status: statusCode, data: body },
 	});
-	return new NodeApiError(
-		{ name: 'Lenz', type: 'lenz', typeVersion: 1, position: [0, 0] } as never,
-		transport as never,
-	);
+	const node = { name: 'Lenz', type: 'lenz', typeVersion: 1, position: [0, 0] } as never;
+	const error = new NodeApiError(node, transport as never);
+	// n8n can describe a failed request by the JSON body it got back (its
+	// `detail`, a list's messages, ...): the description a user then sees.
+	if (describeFromBody) {
+		error.description = new NodeApiError(node, { ...body } as never, {
+			httpCode: String(statusCode),
+		}).description;
+	}
+	return error;
 }
 
-export async function runLegacyCase(c: LegacyCase): Promise<IDataObject[]> {
+// `typeVersion`: the node version to run as (default 1). `sent` collects the
+// API version header of every request the node made.
+export async function runLegacyCase(
+	c: LegacyCase,
+	typeVersion = 1,
+	sent: string[] = [],
+	// false: run with Continue On Fail off, so a refusal throws as it does in a
+	// workflow; the error's description is then the one n8n builds from the body.
+	continueOnFail = true,
+): Promise<IDataObject[]> {
 	const failing = c.status >= 400;
 	const ctx = {
 		getInputData: jest.fn(() => [{ json: {} }]),
 		getNodeParameter: jest.fn((name: string, _i: number, fallback?: unknown) =>
 			name === 'operation' ? c.operation : name in c.params ? c.params[name] : fallback,
 		),
-		getNode: jest.fn(() => ({ name: 'Lenz', type: 'lenz', typeVersion: 1, position: [0, 0] })),
+		getNode: jest.fn(() => ({ name: 'Lenz', type: 'lenz', typeVersion, position: [0, 0] })),
 		getExecutionId: jest.fn(() => 'exec-1'),
-		continueOnFail: jest.fn(() => failing),
+		continueOnFail: jest.fn(() => failing && continueOnFail),
 		helpers: {
-			httpRequestWithAuthentication: jest.fn(async () => {
-				if (failing) throw apiError(c.status, c.body);
+			httpRequestWithAuthentication: jest.fn(async (_credential: string, options: { headers?: IDataObject }) => {
+				sent.push(String(options.headers?.['X-Lenz-API-Version']));
+				if (failing) throw apiError(c.status, c.body, !continueOnFail);
 				return c.body;
 			}),
 		},
@@ -44,4 +60,21 @@ export async function runLegacyCase(c: LegacyCase): Promise<IDataObject[]> {
 	} finally {
 		spy.mockRestore();
 	}
+}
+
+/**
+ * What a workflow shows for a refusal with Continue On Fail off, or null when
+ * the node handles the refusal itself and returns an item.
+ */
+export async function thrownBy(
+	c: LegacyCase,
+	typeVersion: number,
+): Promise<{ message: string; description: string | null; httpCode: string | null } | null> {
+	try {
+		await runLegacyCase(c, typeVersion, [], false);
+	} catch (error) {
+		const e = error as { message: string; description?: string | null; httpCode?: string | null };
+		return { message: e.message, description: e.description ?? null, httpCode: e.httpCode ?? null };
+	}
+	return null;
 }
