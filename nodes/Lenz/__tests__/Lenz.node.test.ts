@@ -854,7 +854,7 @@ describe('Lenz node - Language "auto"', () => {
 		expect(field?.type).toBe('string');
 		expect(field?.default).toBe('');
 		expect(field?.description).toContain('`auto`');
-		expect(field?.description).toContain('Assess, Verify and Ask');
+		expect(field?.description).toContain('Assess, Verify, Ask and Review Draft');
 	});
 
 	it.each(cases)('sends auto unchanged as body.language on %s', async (_op, params, responder, url) => {
