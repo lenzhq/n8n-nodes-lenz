@@ -66,7 +66,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `askHistory` | Retrieve the follow-up conversation and remaining follow-up questions | `verificationId`**\*** |
+| `askHistory` | Retrieve the follow-up conversation, how many questions were used and whether another can be asked | `verificationId`**\*** |
 | `resetAsk` | Delete the follow-up conversation stored for a verification | `verificationId`**\*** |
 | `ask` | Ask a grounded follow-up question about a completed Verify (Deep) result | `verificationId`**\***, `question`**\***, `language` |
 

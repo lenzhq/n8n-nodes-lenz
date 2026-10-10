@@ -1266,7 +1266,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Get History',
 						value: 'askHistory',
-						description: 'Retrieve the follow-up conversation and remaining follow-up questions',
+						description: 'Retrieve the follow-up conversation, how many questions were used and whether another can be asked',
 						action: 'Get ask history for a verification',
 					},
 					{

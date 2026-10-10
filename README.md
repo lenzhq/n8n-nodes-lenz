@@ -72,7 +72,7 @@ Both hand on Lenz's result as it comes, plus `passed`: `true` only when `outcome
 | Operation | What it does |
 |---|---|
 | **Send** | Asks a question grounded in the full research behind a completed **Verify (Deep)** result. Requires the `verification_id` that Verify returns — not usable standalone. |
-| **Get History** | Returns the stored conversation for a verification plus how many follow-up questions are left. |
+| **Get History** | Returns the stored conversation for a verification, with `exchanges_used`, `exchange_limit` and `can_send` (whether another follow-up question can be asked). |
 | **Reset History** | Deletes the stored conversation for a verification. |
 
 ### Account
