@@ -10,7 +10,7 @@ jest.mock('n8n-workflow', () => ({
 	sleep: jest.fn(async () => {}),
 }));
 
-import { Lenz, POLL_TIMEOUT_MS, apiVersionFor } from '../Lenz.node';
+import { API_VERSION, Lenz, POLL_TIMEOUT_MS } from '../Lenz.node';
 
 // A responder receives the httpRequest options and returns the mocked response
 // body (or throws to simulate an API/transport error).
@@ -186,21 +186,32 @@ describe('Lenz node - Assess (Fast)', () => {
 	});
 
 	it('returns status "no_claim" when no verifiable claim is found', async () => {
-		const responder: Responder = () => ({ claims: [], error: 'No claim found' });
+		const responder: Responder = () => ({
+			status: 'no_checkable_claim',
+			claims: [],
+			failure: { code: 'no_checkable_claim', detail: 'No claim found' },
+			more_claims: [],
+		});
 		const { output } = await runNode({ operation: 'assess', text: 'just chatting' }, responder);
-		expect(output[0].json.status).toBe('no_claim');
+		expect(output[0].json).toEqual({
+			status: 'no_claim',
+			message: 'No verifiable claim detected',
+			candidate_claims: [],
+			not_a_claim: true,
+		});
 	});
 
-	it('keeps candidate_claims on a no_claim result, whatever the error_code', async () => {
+	it('keeps candidate_claims, always empty, on a no_claim result whatever the failure code', async () => {
 		const responder: Responder = () => ({
+			status: 'failed',
 			claims: [],
-			error: 'No claim found',
-			error_code: 'framing_failed',
-			candidate_claims: [],
+			failure: { code: 'framing_failed', detail: 'No claim found' },
+			more_claims: [{ claim: 'A' }],
 		});
 		const { output } = await runNode({ operation: 'assess', text: 'vague text' }, responder);
 		expect(output[0].json.status).toBe('no_claim');
 		expect((output[0].json as IDataObject).candidate_claims).toEqual([]);
+		expect((output[0].json as IDataObject).not_a_claim).toBe(false);
 	});
 });
 
@@ -482,7 +493,7 @@ describe('Lenz node - Verify (Deep)', () => {
 			{ operation: 'verify', claim: 'Some claim', waitForCompletion: false },
 			(options) => {
 				if (options.url === '/verify') {
-					return { task_id: 'task_1', status: 'queued', chain_id: 'c1' };
+					return { task_id: 'task_1', status: 'queued' };
 				}
 				throw new Error(`unexpected request: ${options.method} ${options.url}`);
 			},
@@ -490,7 +501,8 @@ describe('Lenz node - Verify (Deep)', () => {
 		const json = output[0].json as IDataObject;
 		expect(json.status).toBe('queued');
 		expect(json.task_id).toBe('task_1');
-		expect(json.chain_id).toBe('c1');
+		// Kept for saved workflows; the API sends no chain_id.
+		expect(json.chain_id).toBeNull();
 		// submit only — no status poll
 		expect(calls).toHaveLength(1);
 	});
@@ -506,8 +518,8 @@ describe('Lenz node - Verify (Deep)', () => {
 			status: 'needs_input',
 			reason: 'multi_claim',
 			claims: [
-				{ text: 'Claim one', domain: 'General' },
-				{ text: 'Claim two', domain: 'Finance' },
+				{ claim: 'Claim one', domain: 'General' },
+				{ claim: 'Claim two', domain: 'Finance' },
 			],
 		});
 		const { output } = await runNode({ operation: 'verify', claim: 'two claims' }, responder);
@@ -515,9 +527,10 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.status).toBe('needs_input');
 		expect(json.reason).toBe('multi_claim');
 		expect(json.task_id).toBe('task_1');
+		// `text` is this node's name for an option's claim.
 		expect(json.claims).toEqual([
-			{ text: 'Claim one', domain: 'General' },
-			{ text: 'Claim two', domain: 'Finance' },
+			{ claim: 'Claim one', domain: 'General', text: 'Claim one' },
+			{ claim: 'Claim two', domain: 'Finance', text: 'Claim two' },
 		]);
 		expect(json.message).toContain('Select Claims');
 		expect(json).toHaveProperty('candidates', []);
@@ -527,10 +540,12 @@ describe('Lenz node - Verify (Deep)', () => {
 	it('maps a failed terminal state to a status: failed result, not a thrown error', async () => {
 		const responder = verifyResponder({
 			status: 'failed',
-			error: 'Pipeline stopped at: research_empty',
-			failure_reason: 'research_empty',
-			failure_class: 'upstream_unavailable',
-			retryable: true,
+			failure: {
+				code: 'research_empty',
+				detail: 'Pipeline stopped at: research_empty',
+				failure_class: 'upstream_unavailable',
+				retryable: true,
+			},
 		});
 		const { output } = await runNode({ operation: 'verify', claim: 'broken claim' }, responder);
 		const json = output[0].json as IDataObject;
@@ -541,16 +556,6 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.failure_class).toBe('upstream_unavailable');
 		expect(json.retryable).toBe(true);
 		expect(json.message).toContain('research_empty');
-	});
-
-	it('tolerates a legacy failed body without the 2026-08 failure fields', async () => {
-		const responder = verifyResponder({ status: 'failed', error: 'bad input' });
-		const { output } = await runNode({ operation: 'verify', claim: 'broken claim' }, responder);
-		const json = output[0].json as IDataObject;
-		expect(json.status).toBe('failed');
-		expect(json.failure_reason).toBe('');
-		expect(json.failure_class).toBe('');
-		expect(json.retryable).toBeNull();
 	});
 
 	it('fails clearly when submit returns no task_id instead of polling a bad URL', async () => {
@@ -719,8 +724,8 @@ describe('Lenz node - Submit Verify Batch', () => {
 			return {
 				batch_id: 'batch_1',
 				items: [
-					{ task_id: 't1', claim_text: 'Claim one' },
-					{ task_id: 't2', claim_text: 'Claim two' },
+					{ task_id: 't1', claim: 'Claim one' },
+					{ task_id: 't2', claim: 'Claim two' },
 				],
 			};
 		};
@@ -776,7 +781,7 @@ describe('Lenz node - Submit Verify Batch', () => {
 	it('flags a partial fan-out so the caller can retry the missing claims', async () => {
 		const responder: Responder = () => ({
 			batch_id: 'batch_2',
-			items: [{ task_id: 't1', claim_text: 'Claim one' }],
+			items: [{ task_id: 't1', claim: 'Claim one' }],
 			partial: true,
 		});
 		const { output } = await runNode(
@@ -840,8 +845,8 @@ describe('Lenz node - Select Claims', () => {
 			return {
 				batch_id: 'batch_3',
 				items: [
-					{ task_id: 't1', claim_text: 'Claim one' },
-					{ task_id: 't2', claim_text: 'Claim two' },
+					{ task_id: 't1', claim: 'Claim one' },
+					{ task_id: 't2', claim: 'Claim two' },
 				],
 			};
 		};
@@ -906,7 +911,7 @@ describe('Lenz node - Extract Claims', () => {
 	it('explains a no_match instead of returning a bare empty list', async () => {
 		const { output } = await runNode(
 			{ operation: 'extract', text: 'Some text', focus: 'unrelated topic' },
-			() => ({ status: 'no_match', claim: '', identified_claims: [] }),
+			() => ({ status: 'no_match', claims: [] }),
 		);
 		const json = output[0].json as IDataObject;
 		expect(json.status).toBe('no_match');
@@ -917,27 +922,41 @@ describe('Lenz node - Extract Claims', () => {
 	it('adds no message to an extraction that did match', async () => {
 		const { output } = await runNode(
 			{ operation: 'extract', text: 'Some text' },
-			() => ({ status: 'ready', identified_claims: ['A'] }),
+			() => ({ status: 'ready', claims: [{ claim: 'A' }] }),
 		);
 		expect(output[0].json).not.toHaveProperty('message');
 	});
 
-	it('passes through the raw extract response, plus the not_a_claim flag', async () => {
+	it('passes through the raw extract response, plus its own keys and the not_a_claim flag', async () => {
 		const responder: Responder = (options) => {
 			expect(options.url).toBe('/extract');
 			return {
 				status: 'ready',
-				identified_claims: ['Claim A', 'Claim B'],
+				claims: [{ claim: 'Claim A' }, { claim: 'Claim B' }],
 				domain: 'General',
 			};
 		};
 		const { output } = await runNode({ operation: 'extract', text: 'Claim A. Claim B.' }, responder);
-		expect(output[0].json).toEqual({
-			status: 'ready',
-			identified_claims: ['Claim A', 'Claim B'],
-			domain: 'General',
-			not_a_claim: false,
-		});
+		expect(JSON.stringify(output[0].json)).toBe(
+			JSON.stringify({
+				status: 'ready',
+				claims: [{ claim: 'Claim A' }, { claim: 'Claim B' }],
+				domain: 'General',
+				claim: 'Claim A',
+				identified_claims: ['Claim A', 'Claim B'],
+				candidate_claims: [],
+				locations: null,
+				not_a_claim: false,
+			}),
+		);
+	});
+
+	it('says not_a_claim, its own word, when nothing can be checked', async () => {
+		const { output } = await runNode({ operation: 'extract', text: 'Hello.' }, () => ({
+			status: 'no_checkable_claim',
+			claims: [],
+		}));
+		expect(output[0].json).toMatchObject({ status: 'not_a_claim', claim: '', not_a_claim: true });
 	});
 });
 
@@ -1082,10 +1101,12 @@ describe('Lenz node - stored verifications', () => {
 		const responder: Responder = () => ({
 			verification_id: 'ver_9',
 			status: 'failed',
-			error: 'Pipeline stopped at: research_empty',
-			failure_reason: 'research_empty',
-			failure_class: 'upstream_unavailable',
-			retryable: true,
+			failure: {
+				code: 'research_empty',
+				detail: 'Pipeline stopped at: research_empty',
+				failure_class: 'upstream_unavailable',
+				retryable: true,
+			},
 		});
 		const { output } = await runNode(
 			{ operation: 'getVerification', verificationId: 'ver_9' },
@@ -1233,33 +1254,29 @@ describe('Lenz node - client identification', () => {
 
 	it('pins the API version it was built against', async () => {
 		const { calls } = await runNode({ operation: 'usage' }, () => ({ plan: 'free' }));
-		expect(calls[0].headers?.['X-Lenz-API-Version']).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		expect(calls[0].headers?.['X-Lenz-API-Version']).toBe('2026-10-11');
+		expect(API_VERSION).toBe('2026-10-11');
 	});
 
-	// A saved node keeps its version, so it keeps the API version it was built
-	// against; only a node added on this release asks for the newer one.
-	it.each([
-		[1, '2026-08-05'],
-		[1.1, '2026-08-05'],
-		[1.2, '2026-08-05'],
-		[1.3, '2026-10-11'],
-	])('a version %s node asks for API version %s', async (typeVersion, apiVersion) => {
-		const { calls } = await runNode(
-			{ operation: 'usage', authentication: 'apiKey' },
-			() => ({ plan: 'free' }),
-			false,
-			1,
-			{ typeVersion },
-		);
-		expect(calls[0].headers?.['X-Lenz-API-Version']).toBe(apiVersion);
-	});
-
-	it('every node version maps to an API version', () => {
-		for (const version of new Lenz().description.version as number[]) {
-			expect(apiVersionFor(version)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	// n8n keeps a saved node on the version it was added with and runs this
+	// package's code for it, so every version asks for the same API version and
+	// keeps its own output keys.
+	it('every node version asks for API version 2026-10-11', async () => {
+		const versions = new Lenz().description.version as number[];
+		expect(versions).toEqual([1, 1.1, 1.2, 1.3]);
+		for (const typeVersion of [...versions, undefined]) {
+			for (const operation of ['usage', 'assess', 'verify']) {
+				const { calls } = await runNode(
+					{ operation, authentication: 'apiKey', text: 'x', claim: 'x', waitForCompletion: false },
+					() => ({ plan: 'free', task_id: 't1', status: 'queued', claims: [] }),
+					false,
+					1,
+					{ typeVersion },
+				);
+				expect(calls.length).toBeGreaterThan(0);
+				for (const call of calls) expect(call.headers?.['X-Lenz-API-Version']).toBe('2026-10-11');
+			}
 		}
-		expect(apiVersionFor(undefined)).toBe('2026-08-05');
-		expect(apiVersionFor(Math.max(...(new Lenz().description.version as number[])))).toBe('2026-10-11');
 	});
 });
 
@@ -2125,15 +2142,15 @@ describe('Lenz node - Verify poll resilience', () => {
 	});
 
 	it('reads the rate-limit body’s own spelling of the wait', async () => {
-		// A 503 states `retry_after`; the 429 rate-limit body states
-		// `reset_in_seconds`. Both are seconds and both must be honoured.
+		// The 429 daily-cap body states `retry_after`, which the node reads under
+		// its own name, `reset_in_seconds`. Seconds, and honoured.
 		await runNode(
 			{ operation: 'verify', claim: 'Some claim' },
 			polling([
 				() => {
 					throw apiError(
 						429,
-						{ code: 'rate_limited', reset_in_seconds: 45 },
+						{ code: 'extract_daily_limit', retry_after: 45 },
 						'Too many requests',
 					);
 				},
@@ -2149,7 +2166,7 @@ describe('Lenz node - Verify poll resilience', () => {
 			{ operation: 'verify', claim: 'Some claim' },
 			polling([
 				() => {
-					throw apiError(429, { code: 'rate_limited' }, 'Too many requests');
+					throw apiError(429, { code: 'extract_daily_limit' }, 'Too many requests');
 				},
 				completed,
 			]),
@@ -2322,12 +2339,12 @@ describe('Lenz node - Verify poll resilience', () => {
 	});
 
 	// A poll 429 carrying a daily-cap reset. The status endpoint can answer with
-	// the same limiter body the /extract cap uses, and `reset_in_seconds` there
-	// runs to hours. The loop honours a stated 429 wait so as not to re-trip a
+	// the same limiter body the /extract cap uses, and its wait there runs to
+	// hours. The loop honours a stated 429 wait so as not to re-trip a
 	// limiter on its own 2/4/8s ladder — but uncapped, "honour" meant sleeping
 	// the whole remaining Max Wait in one go on a verification already charged.
 	const dailyCapPoll = () => {
-		throw apiError(429, { detail: 'Rate limited.', code: 'rate_limited', reset_in_seconds: 32400 });
+		throw apiError(429, { detail: 'Rate limited.', code: 'extract_daily_limit', retry_after: 32400 });
 	};
 
 	it('caps a stated poll 429 wait instead of sleeping away the window', async () => {
@@ -2396,21 +2413,23 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 	// error output carried no `retry_after`, because the branch read
 	// `body.retry_after` and a 429 states `reset_in_seconds` instead.
 	//
-	// The real body shape, per the API: { detail, code, limit,
-	// reset_in_seconds, upgrade_url }.
+	// The real body shape, per the API: { detail, code, limit, retry_after,
+	// upgrade_url }; the node reads the wait under its own name,
+	// `reset_in_seconds`, and hands it on as `retry_after` or
+	// `resets_in_seconds`.
 	const dailyCap = {
 		detail: 'Daily extract cap reached.',
-		code: 'rate_limited',
+		code: 'extract_daily_limit',
 		limit: 1000,
-		reset_in_seconds: 32400,
+		retry_after: 32400,
 		upgrade_url: 'https://lenz.io/plans',
 	};
 
 	const burst = {
 		detail: 'Too many requests.',
-		code: 'rate_limited',
+		code: 'extract_daily_limit',
 		limit: 60,
-		reset_in_seconds: 45,
+		retry_after: 45,
 	};
 
 	async function expectRateLimitError(body: Record<string, unknown>) {
@@ -2464,7 +2483,7 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		expect(err.description).toContain('retry_after');
 	});
 
-	it('carries retry_after on the error output, read from reset_in_seconds', async () => {
+	it('carries retry_after on the error output, read from the body\'s wait', async () => {
 		// The headline bug: the documented Wait-node recovery fed the Wait node
 		// `undefined`, because the error output only ever read `retry_after`.
 		const { output } = await runNode(
@@ -2478,7 +2497,7 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		const json = output[0].json as IDataObject;
 		expect(json.retry_after).toBe(45);
 		expect(json.status_code).toBe(429);
-		expect(json.code).toBe('rate_limited');
+		expect(json.code).toBe('extract_daily_limit');
 		expect(json.error_message).toContain('Too many requests');
 		expect(json.error_description).toContain('Nothing was charged');
 	});
@@ -2498,7 +2517,7 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		const { output } = await runNode(
 			{ operation: 'extract', text: 'Some text' },
 			() => {
-				throw apiError(429, { detail: 'Slow down.', code: 'rate_limited' });
+				throw apiError(429, { detail: 'Slow down.', code: 'extract_daily_limit' });
 			},
 			true, // continueOnFail
 		);
@@ -2548,7 +2567,7 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 
 	it('still offers the upgrade path for a Lenz limit that states no wait', async () => {
 		// The mirror, so the gate above cannot pass by never offering it.
-		const err = await expectRateLimitError({ detail: 'Slow down.', code: 'rate_limited' });
+		const err = await expectRateLimitError({ detail: 'Slow down.', code: 'extract_daily_limit' });
 		expect(err.description).toContain('raise the cap');
 	});
 
@@ -2558,8 +2577,8 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		// 45-hour wait for anyone who leaves the unit alone.
 		const err = await expectRateLimitError({
 			detail: 'Too many requests.',
-			code: 'rate_limited',
-			reset_in_seconds: 45,
+			code: 'extract_daily_limit',
+			retry_after: 45,
 		});
 		expect(err.description).toContain('Wait Unit set to Seconds');
 		expect(err.description).toContain('defaults to Hours');
@@ -2591,8 +2610,8 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		// be told the execution "stays pending for hours".
 		const err = await expectRateLimitError({
 			detail: 'Too many requests.',
-			code: 'rate_limited',
-			reset_in_seconds: 600,
+			code: 'extract_daily_limit',
+			retry_after: 600,
 		});
 		expect(err.description).toContain('~10 minutes');
 		expect(err.description).not.toContain('hours');
@@ -2648,8 +2667,8 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 	it('does not render an empty detail as a bare full stop', async () => {
 		const err = await expectRateLimitError({
 			detail: '',
-			code: 'rate_limited',
-			reset_in_seconds: 45,
+			code: 'extract_daily_limit',
+			retry_after: 45,
 		});
 		expect(err.message).not.toContain('Lenz: .');
 		expect(err.message).toContain('Rate limit reached');
@@ -2680,8 +2699,8 @@ describe('Lenz node - rate limit (HTTP 429)', () => {
 		// render as "Lenz: Rate limit exceeded Resets in ~9 hours."
 		const err = await expectRateLimitError({
 			detail: 'Rate limit exceeded',
-			code: 'rate_limited',
-			reset_in_seconds: 32400,
+			code: 'extract_daily_limit',
+			retry_after: 32400,
 		});
 		expect(err.message).toContain('Rate limit exceeded. Resets in');
 		expect(err.message).not.toContain('exceeded Resets');
@@ -2864,7 +2883,7 @@ describe('Lenz node - Review', () => {
 		const { output } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) =>
 			options.method === 'POST'
 				? { review_id: 'rev_1', status: 'queued' }
-				: { review_id: 'rev_1', status: 'failed', outcome: null, failure: { failure_reason: 'x' } },
+				: { review_id: 'rev_1', status: 'failed', outcome: null, failure: { code: 'x' } },
 		);
 		expect((output[0].json as IDataObject).passed).toBeNull();
 	});
@@ -3027,7 +3046,7 @@ describe('Lenz node - Review hardening', () => {
 			if (options.method === 'POST') {
 				posts += 1;
 				if (posts === 1) {
-					throw apiError(429, { code: 'review_in_flight', detail: 'busy', retry_after_seconds: 60 });
+					throw apiError(429, { code: 'review_in_flight', detail: 'busy', retry_after: 60 });
 				}
 				return { review_id: 'rev_1', status: 'queued' };
 			}
@@ -3043,7 +3062,7 @@ describe('Lenz node - Review hardening', () => {
 		const spy = jest.spyOn(Date, 'now').mockImplementation(() => (now += 120000));
 		try {
 			const ctx = createContext({ operation: 'reviewDraft', draft: 'x' }, () => {
-				throw apiError(429, { code: 'review_in_flight', detail: 'busy', retry_after_seconds: 60 });
+				throw apiError(429, { code: 'review_in_flight', detail: 'busy', retry_after: 60 });
 			});
 			const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
 			expect((err as Error).message).toMatch(/already has 3 reviews running/);
@@ -3288,7 +3307,9 @@ describe('Lenz node - second review fixes', () => {
 
 describe('Lenz node - conflict on an operation that does not retry', () => {
 	it('does not claim a retry or a job it never made', async () => {
-		const ctx = createContext({ operation: 'usage' }, () => {
+		// Get Review: the review endpoints are the ones whose conflict carries
+		// its code (elsewhere the node's error output has never had one).
+		const ctx = createContext({ operation: 'getReview', reviewId: 'rev_1' }, () => {
 			throw apiError(409, { code: 'idempotency_conflict', detail: 'busy' });
 		});
 		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);

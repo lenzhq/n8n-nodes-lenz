@@ -1,8 +1,10 @@
-// The same cases as ./legacy-bodies.fixtures.ts, recorded in the newer shape
-// the Lenz API can answer in. Run-specific values are replaced by realistic ones.
+// Recorded responses of the Lenz API in the shape it answers a request that
+// pins API version 2026-10-11 (the version every node version sends), each
+// with the operation and parameters that produce it. Run-specific values are
+// replaced by realistic ones.
 /* eslint-disable */
-import type { LegacyCase } from './legacy-bodies.fixtures';
-export const canonicalCases: Record<string, LegacyCase> = {
+import type { RecordedCase } from './recorded-harness';
+export const canonicalCases: Record<string, RecordedCase> = {
  "account__me_usage_extra_credits": {
   "operation": "usage",
   "params": {},
@@ -1310,33 +1312,6 @@ export const canonicalCases: Record<string, LegacyCase> = {
     }
    ],
    "failure": null,
-   "more_claims": []
-  }
- },
- "assess__stored_replay_200": {
-  "operation": "assess",
-  "params": {
-   "text": "x"
-  },
-  "status": 200,
-  "body": {
-   "claims": [
-    {
-     "claim": "The Earth orbits the Sun.",
-     "language": "en",
-     "verdict": "True",
-     "confidence": "high",
-     "verification_url": null,
-     "rationale": null,
-     "dissent": null,
-     "suggested_rewrite": null,
-     "error_code": null,
-     "candidate_claims": [],
-     "identified_claims": [],
-     "hint": null
-    }
-   ],
-   "error": null,
    "more_claims": []
   }
  },
@@ -3535,36 +3510,6 @@ export const canonicalCases: Record<string, LegacyCase> = {
    ],
    "presumed_intent": "Verify reported figures",
    "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year."
-  }
- },
- "extract__stored_replay_200": {
-  "operation": "extract",
-  "params": {
-   "text": "x"
-  },
-  "status": 200,
-  "body": {
-   "status": "ready",
-   "claim": "Alpha rose 5% in 2024.",
-   "identified_claims": [
-    "Alpha rose 5% in 2024.",
-    "Beta fell 3% last year."
-   ],
-   "candidate_claims": [],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
-    }
-   ],
-   "presumed_intent": "Verify reported figures",
-   "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year.",
-   "locations": null
   }
  },
  "extract__url_fetch_502_unreadable": {
@@ -11573,19 +11518,6 @@ export const canonicalCases: Record<string, LegacyCase> = {
     "elapsed_seconds": "12",
     "poll_after_seconds": 5
    }
-  }
- },
- "verify__stored_replay_202": {
-  "operation": "verify",
-  "params": {
-   "claim": "x",
-   "waitForCompletion": false
-  },
-  "status": 202,
-  "body": {
-   "task_id": "87b803ba1e33748ece71d934b011522a",
-   "status": "queued",
-   "chain_id": "26c077de422857b6"
   }
  },
  "verify__submit_202": {
