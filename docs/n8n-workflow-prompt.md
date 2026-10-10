@@ -66,7 +66,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `askHistory` | Retrieve the follow-up conversation and remaining follow-up questions | `verificationId`**\*** |
+| `askHistory` | Retrieve the follow-up conversation, how many questions were used and whether another can be asked | `verificationId`**\*** |
 | `resetAsk` | Delete the follow-up conversation stored for a verification | `verificationId`**\*** |
 | `ask` | Ask a grounded follow-up question about a completed Verify (Deep) result | `verificationId`**\***, `question`**\***, `language` |
 
@@ -160,8 +160,11 @@ Branch on `{{ $json.passed }}`.
 **`assess`** returns **one item containing every claim it found**:
 
 ```
-{ status: "ok", claims: [ { claim, verdict, confidence, passed, verification_url }, ... ] }
+{ status: "ok", claims: [ { claim, verdict, confidence, passed, language, verification_url, rationale }, ... ] }
 ```
+
+`rationale` is a reviewer's note, not a checked source, and can be `null`. Put
+it in a message to a person; never branch on it.
 
 So `{{ $json.claims[0].passed }}` only looks at the first claim. If the text can
 contain several claims and each should be routed on its own, insert a **Split
@@ -349,6 +352,14 @@ it later. Add an error branch for it only if the user asked for one.
      `passed` reports every one of those as "the claim is false" — a provider
      outage becomes a debunking. Gate on `status` first, route the non-verdict
      statuses somewhere of their own, and only then branch on `passed`.
+7. **`language` is an ISO 639-1 code, or `auto` on five operations.** Leave it
+   out for English. `auto` answers in the language of the submitted text, and is
+   accepted by `assess`, `verify`, `ask`, `extract` and `reviewDraft` only; on `extract` it means
+   the language of the text (of the page when the input is a URL), English for a text too short to tell; on `ask` it means
+   the language of the claim being discussed, on `reviewDraft` the language of
+   the draft (one language for the whole review), and on `assess` with several claims one
+   language is chosen for the whole request, so name a code for a list in mixed
+   languages. Select, Verify Batch and Check Citations need a code, not `auto`.
 
 ## Before you answer
 

@@ -159,6 +159,26 @@ describe('Lenz node - Assess (Fast)', () => {
 		expect(claims[0].language).toBe('es');
 	});
 
+	it('passes on the reviewer\'s rationale, null when a row has none, and never a dissent', async () => {
+		const responder: Responder = () => ({
+			claims: [
+				{ claim: 'A', verdict: 'True', confidence: 'high', rationale: 'Agrees.', dissent: null },
+				// The API stopped filling dissent; a row still carrying one does not reach the output
+				{ claim: 'B', verdict: 'False', confidence: 'high', rationale: 'Agrees.', dissent: 'Disagrees.' },
+				// A response stored before the API added the field replays without it
+				{ claim: 'C', verdict: 'Mixed', confidence: 'low' },
+				{ claim: 'D', verdict: 'Error', confidence: 'low', rationale: null },
+			],
+		});
+		const { output } = await runNode({ operation: 'assess', text: 'some text' }, responder);
+		const claims = (output[0].json as IDataObject).claims as IDataObject[];
+		expect(claims[0].rationale).toBe('Agrees.');
+		expect(claims[1].rationale).toBe('Agrees.');
+		expect(claims[2].rationale).toBeNull();
+		expect(claims[3].rationale).toBeNull();
+		for (const row of claims) expect('dissent' in row).toBe(false);
+	});
+
 	it('skips empty text input instead of failing the batch', async () => {
 		const { output, httpMock } = await runNode({ operation: 'assess', text: '   ' }, noCall);
 		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
@@ -181,6 +201,73 @@ describe('Lenz node - Assess (Fast)', () => {
 		const { output } = await runNode({ operation: 'assess', text: 'vague text' }, responder);
 		expect(output[0].json.status).toBe('no_claim');
 		expect((output[0].json as IDataObject).candidate_claims).toEqual([]);
+	});
+});
+
+describe('Lenz node - what an expression hands a text field', () => {
+	// n8n passes an expression's raw result to a string field: {{ $json.claim }}
+	// on an item without `claim` gives undefined, {{ $json.count }} a number.
+	const ID_OPERATIONS: Array<[string, Record<string, unknown>]> = [
+		['verifyStatus', { taskId: undefined }],
+		['getVerification', { verificationId: undefined }],
+		['deleteVerification', { verificationId: undefined }],
+		['listRelated', { verificationId: undefined }],
+		['askHistory', { verificationId: undefined }],
+		['resetAsk', { verificationId: undefined }],
+		['ask', { verificationId: undefined, question: 'Why?' }],
+		['ask', { verificationId: 'ver_1', question: undefined }],
+		['getReview', { reviewId: undefined }],
+		['getCitationCheck', { citecheckId: undefined }],
+	];
+
+	it.each(ID_OPERATIONS)('%s skips an input that is missing, without a request', async (operation, params) => {
+		for (const missing of [undefined, null, '', '   ']) {
+			const filled = Object.fromEntries(
+				Object.entries(params).map(([key, value]) => [key, value === undefined ? missing : value]),
+			);
+			const { output, httpMock } = await runNode({ operation, ...filled }, noCall);
+			expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
+			expect(httpMock).not.toHaveBeenCalled();
+		}
+	});
+
+	it.each([
+		['verify', 'claim'],
+		['assess', 'text'],
+		['extract', 'text'],
+		['reviewDraft', 'draft'],
+	])('%s skips a missing %s, without a request', async (operation, field) => {
+		for (const missing of [undefined, null]) {
+			const { output, httpMock } = await runNode({ operation, [field]: missing }, noCall);
+			expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
+			expect(httpMock).not.toHaveBeenCalled();
+		}
+	});
+
+	it('sends a number as its text', async () => {
+		const { calls } = await runNode({ operation: 'assess', text: 42 }, () => ({
+			claims: [{ claim: '42', verdict: 'True', confidence: 'high' }],
+		}));
+		expect(calls[0].body).toMatchObject({ text: '42' });
+	});
+
+	it('refuses an object with a message naming the field', async () => {
+		await expect(runNode({ operation: 'assess', text: { a: 1 } }, noCall)).rejects.toThrow(
+			/"text" must be text or a number, but the expression returned an object/,
+		);
+	});
+
+	it.each([
+		['getVerification', { verificationId: 'a/b?c' }, '/verifications/a%2Fb%3Fc'],
+		['deleteVerification', { verificationId: 'a/b' }, '/verifications/a%2Fb'],
+		['listRelated', { verificationId: 'a/b' }, '/verifications/a%2Fb/related'],
+		['askHistory', { verificationId: 'a/b' }, '/ask/a%2Fb'],
+		['resetAsk', { verificationId: 'a/b' }, '/ask/a%2Fb'],
+		['ask', { verificationId: 'a/b', question: 'Why?' }, '/ask/a%2Fb'],
+		['verifyStatus', { taskId: 'a/b' }, '/verify/status/a%2Fb'],
+	])('%s encodes the ID into the path', async (operation, params, path) => {
+		const { calls } = await runNode({ operation, ...params }, () => ({ status: 'processing' }), true);
+		expect(calls[0].url).toBe(path);
 	});
 });
 
@@ -657,6 +744,35 @@ describe('Lenz node - Submit Verify Batch', () => {
 		expect((output[1].json as IDataObject).task_id).toBe('t2');
 	});
 
+	it('sends each row\'s own options, and the batch-wide ones, only when set', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'verifyBatch',
+				webhookUrl: ' https://example.com/hook ',
+				visibility: 'private',
+				depth: 'low',
+				batchClaims: {
+					claim: [
+						{ text: ' Claim one ', sourceUrl: 'https://src.example', visibility: 'unlisted', depth: 'standard' },
+						{ text: 'Claim two', sourceUrl: '', visibility: '', depth: '' },
+						{ text: 42 },
+					],
+				},
+			},
+			() => ({ batch_id: 'b', items: [] }),
+		);
+		expect(calls[0].body).toEqual({
+			claims: [
+				{ text: 'Claim one', source_url: 'https://src.example', visibility: 'unlisted', depth: 'standard' },
+				{ text: 'Claim two' },
+				{ text: '42' },
+			],
+			webhook_url: 'https://example.com/hook',
+			visibility: 'private',
+			depth: 'low',
+		});
+	});
+
 	it('flags a partial fan-out so the caller can retry the missing claims', async () => {
 		const responder: Responder = () => ({
 			batch_id: 'batch_2',
@@ -822,6 +938,66 @@ describe('Lenz node - Extract Claims', () => {
 			domain: 'General',
 			not_a_claim: false,
 		});
+	});
+});
+
+// `auto` is a request value the API understands on assess, verify, ask and extract. The
+// field is free text, so the node has to send it exactly as typed, and keep
+// sending no `language` key at all when the field is empty.
+describe('Lenz node - Language "auto"', () => {
+	const verifyResponder: Responder = (options) => {
+		if (options.method === 'POST' && options.url === '/verify') return { task_id: 'task_1' };
+		if (options.method === 'GET' && options.url === '/verify/status/task_1') {
+			return { status: 'completed', result: { verification_id: 'ver_1', claim: 'c', verdict: 'True' } };
+		}
+		throw new Error(`unexpected request: ${options.method} ${options.url}`);
+	};
+	const assessResponder: Responder = () => ({
+		claims: [{ claim: 'A', verdict: 'True', confidence: 'high', verification_url: null }],
+	});
+	const askResponder: Responder = () => ({ role: 'expert', content: 'An answer.' });
+	const extractResponder: Responder = () => ({
+		status: 'ok',
+		language: 'de',
+		claims: [{ claim: 'Berlin ist die Hauptstadt.' }],
+	});
+
+	const cases: Array<[string, Record<string, unknown>, Responder, string]> = [
+		['assess', { operation: 'assess', text: 'Berlin ist die Hauptstadt.' }, assessResponder, '/assess'],
+		['verify', { operation: 'verify', claim: 'Berlin ist die Hauptstadt.' }, verifyResponder, '/verify'],
+		['ask', { operation: 'ask', verificationId: 'ver_1', question: 'Warum?' }, askResponder, '/ask/ver_1'],
+		['extract', { operation: 'extract', text: 'Berlin ist die Hauptstadt.' }, extractResponder, '/extract'],
+	];
+
+	it('stays a free-text field whose description names auto and the operations that take it', () => {
+		const field = new Lenz().description.properties.find(
+			(p) => p.name === 'language' && p.displayOptions?.show?.operation !== undefined,
+		);
+		expect(field?.type).toBe('string');
+		expect(field?.default).toBe('');
+		expect(field?.description).toContain('`auto`');
+		expect(field?.description).toContain('Assess, Verify, Ask, Extract and Review Draft');
+	});
+
+	it.each(cases)('sends auto unchanged as body.language on %s', async (_op, params, responder, url) => {
+		const { calls } = await runNode({ ...params, language: 'auto' }, responder);
+		const submit = calls.find((c) => c.method === 'POST' && c.url === url);
+		expect((submit?.body as IDataObject).language).toBe('auto');
+	});
+
+	it('returns the language Extract reports for its claims', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'Berlin ist die Hauptstadt.', language: 'auto' },
+			extractResponder,
+		);
+		expect(output[0].json.language).toBe('de');
+	});
+
+	it.each(cases)('sends no language key on %s when the field is empty', async (_op, params, responder, url) => {
+		const { calls } = await runNode({ ...params, language: '' }, responder);
+		const submit = calls.find((c) => c.method === 'POST' && c.url === url);
+		expect(submit?.body).toBeDefined();
+		expect(submit?.body as IDataObject).not.toHaveProperty('language');
 	});
 });
 
@@ -2762,6 +2938,17 @@ describe('Lenz node - Review', () => {
 		expect(calls[0].url).toBe('/reviews/rev%2F1');
 		expect(calls[0].qs).toEqual({ view: 'issues' });
 		expect((output[0].json as IDataObject).passed).toBe(true);
+	});
+});
+
+describe('Lenz node - a job accepted without its ID', () => {
+	it.each([
+		['reviewDraft', { draft: 'x' }, /returned no review_id/],
+		['checkCitations', { citationInput: 'text', citationText: 'See [1].' }, /returned no citecheck_id/],
+	])('%s fails with a message instead of polling an empty ID', async (operation, params, message) => {
+		const { calls, output } = await runNode({ operation, ...params }, () => ({ status: 'queued' }), true);
+		expect(calls).toHaveLength(1);
+		expect(String((output[0].json as IDataObject).error)).toMatch(message);
 	});
 });
 
