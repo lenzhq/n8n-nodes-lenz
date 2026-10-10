@@ -2684,6 +2684,10 @@ export class Lenz implements INodeType {
 								passed: isPassingVerdict(c.verdict as string | undefined),
 								language: c.language ?? '',
 								verification_url: c.verification_url ?? null,
+								// A reviewer's note, not a checked source. Null on Error rows, and
+								// absent from a response stored before the API added it, which
+								// Lenz replays for 24h on a reused Idempotency-Key.
+								rationale: typeof c.rationale === 'string' ? c.rationale : null,
 							})),
 						};
 					}

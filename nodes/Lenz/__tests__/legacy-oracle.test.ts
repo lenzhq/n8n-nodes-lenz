@@ -1,7 +1,8 @@
 // Release bar: against every recorded response in the shape this node still
 // requests, the node returns exactly what 0.8.0 returned, byte for byte once
 // serialized, plus one additive boolean `not_a_claim` where the answer can say
-// nothing is checkable (Assess, Extract, and a failed verification).
+// nothing is checkable (Assess, Extract, and a failed verification), and the
+// reviewer's note `rationale` on each Assess row (Lenz#705).
 import { sleep } from 'n8n-workflow';
 import type { IDataObject } from 'n8n-workflow';
 
@@ -16,9 +17,19 @@ import { runLegacyCase } from './legacy-harness';
 
 void sleep;
 
+const NOTES = ['rationale'];
+
 const withoutFlag = (json: IDataObject): IDataObject => {
 	const rest = { ...json };
 	delete rest.not_a_claim;
+	if (Array.isArray(rest.claims) && 'status' in rest) {
+		rest.claims = (rest.claims as IDataObject[]).map((row) => {
+			if (!row || typeof row !== 'object' || !('passed' in row)) return row;
+			const kept = { ...row };
+			for (const key of NOTES) delete kept[key];
+			return kept;
+		});
+	}
 	return rest;
 };
 
@@ -41,6 +52,14 @@ describe('legacy responses give the 0.8.0 output plus not_a_claim', () => {
 			if ('not_a_claim' in item) {
 				expect(typeof item.not_a_claim).toBe('boolean');
 				expect(['assess', 'extract', 'verify', 'verifyStatus', 'getVerification']).toContain(c.operation);
+			}
+			if (c.operation === 'assess' && Array.isArray(item.claims)) {
+				for (const row of item.claims as IDataObject[]) {
+					for (const key of NOTES) {
+						expect(key in row).toBe(true);
+						expect(row[key] === null || typeof row[key] === 'string').toBe(true);
+					}
+				}
 			}
 		}
 	});
