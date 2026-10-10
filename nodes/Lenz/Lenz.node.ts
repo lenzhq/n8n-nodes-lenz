@@ -1026,8 +1026,9 @@ function fillUsageOutputKeys(body: IDataObject): IDataObject {
  * A refusal, rewritten IN PLACE as this node has always read it
  * (errorBodyAsNodeReads), so everything that reads the error afterwards (the
  * messages, the error output's fields, the retry logic) sees the fields and
- * words it was built on, on every node version. n8n has already built the error's `description` from the
- * body; where it did, it is rebuilt the same way from the rewritten body.
+ * words it was built on, on every node version. n8n has already built the
+ * error's `description` from the body; where it did, it is rebuilt the same
+ * way from the rewritten body.
  */
 function readErrorAsNodeReads(node: INode, error: unknown, method: string, path: string): void {
 	const status = statusCodeOf(error);
