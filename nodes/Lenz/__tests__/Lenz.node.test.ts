@@ -3298,3 +3298,194 @@ describe('Lenz node - conflict on an operation that does not retry', () => {
 		expect(description).not.toMatch(/the job/);
 	});
 });
+
+describe('Lenz node - No Public Record', () => {
+	const noRecord: IDataObject = {
+		verification_id: 'ver_np',
+		claim: 'The mayor of Smalltown signed the order on 3 May.',
+		verdict: 'No Public Record',
+		confidence: 'medium',
+		lenz_score: null,
+		key_finding: 'Lenz found no public record of this.',
+		executive_summary: 'No public source records this. That does not make it false.',
+		suggested_rewrite: null,
+		warnings: [],
+		sources: [],
+	};
+
+	const verifyResponder =
+		(terminal: IDataObject): Responder =>
+		(options) => {
+			if (options.method === 'POST') return { task_id: 'task_1' };
+			if (options.url === '/verify/status/task_1') return terminal;
+			throw new Error(`unexpected request: ${options.method} ${options.url}`);
+		};
+
+	it('Verify (Deep): passed is null, not false, and lenz_score is null', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'x' },
+			verifyResponder({ status: 'completed', result: noRecord }),
+			false,
+			1,
+			{ typeVersion: 1.3 },
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('completed');
+		expect(json.passed).toBeNull();
+		expect(json.verdict).toBe('No Public Record');
+		expect(json.lenz_score).toBeNull();
+		expect(json.confidence).toBe('medium');
+		expect(json.suggested_rewrite).toBe('');
+		expect(json.citations).toEqual([]);
+	});
+
+	it('Get Verify Status and Get Verification read it the same way', async () => {
+		const status = await runNode({ operation: 'verifyStatus', taskId: 'task_1' }, () => ({
+			status: 'completed',
+			result: noRecord,
+		}));
+		expect((status.output[0].json as IDataObject).passed).toBeNull();
+		const stored = await runNode(
+			{ operation: 'getVerification', verificationId: 'ver_np' },
+			() => noRecord,
+		);
+		const json = stored.output[0].json as IDataObject;
+		expect(json.passed).toBeNull();
+		expect(json.lenz_score).toBeNull();
+	});
+
+	it('still passes only True and Mostly True, and fails the rest', async () => {
+		const verdicts: Array<[string, boolean | null]> = [
+			['True', true],
+			['Mostly True', true],
+			['Mixed', false],
+			['Mostly False', false],
+			['False', false],
+			['No Public Record', null],
+		];
+		for (const [verdict, passed] of verdicts) {
+			const { output } = await runNode(
+				{ operation: 'getVerification', verificationId: 'ver_np' },
+				() => ({ ...noRecord, verdict }),
+			);
+			expect((output[0].json as IDataObject).passed).toBe(passed);
+		}
+	});
+
+	it('Assess: a row with this verdict has passed null', async () => {
+		const { output } = await runNode({ operation: 'assess', text: 'x' }, () => ({
+			claims: [{ claim: 'x', verdict: 'No Public Record', confidence: 'medium', language: 'en' }],
+		}));
+		const json = output[0].json as IDataObject;
+		const rows = json.claims as IDataObject[];
+		expect(rows[0].passed).toBeNull();
+		expect(rows[0].verdict).toBe('No Public Record');
+	});
+
+	describe('a review that is incomplete', () => {
+		const incomplete: IDataObject = {
+			review_id: 'rev_1',
+			status: 'completed',
+			outcome: 'incomplete',
+			issues: [],
+		};
+		const responder: Responder = (options) =>
+			options.method === 'POST' ? { review_id: 'rev_1', status: 'queued' } : incomplete;
+
+		it('has passed null on a version 1.3 node, which asks for the newer shape', async () => {
+			const { output } = await runNode(
+				{ operation: 'reviewDraft', draft: 'x' },
+				responder,
+				false,
+				1,
+				{
+					typeVersion: 1.3,
+				},
+			);
+			expect((output[0].json as IDataObject).passed).toBeNull();
+			const stored = await runNode(
+				{ operation: 'getReview', reviewId: 'rev_1' },
+				responder,
+				false,
+				1,
+				{
+					typeVersion: 1.3,
+				},
+			);
+			expect((stored.output[0].json as IDataObject).passed).toBeNull();
+		});
+
+		it('keeps false on a node that still asks for the older shape', async () => {
+			const { output } = await runNode(
+				{ operation: 'reviewDraft', draft: 'x' },
+				responder,
+				false,
+				1,
+				{
+					typeVersion: 1.2,
+				},
+			);
+			expect((output[0].json as IDataObject).passed).toBe(false);
+		});
+
+		it('keeps true for clean and false for issues_found on a version 1.3 node', async () => {
+			for (const [outcome, passed] of [
+				['clean', true],
+				['issues_found', false],
+			] as const) {
+				const { output } = await runNode(
+					{ operation: 'getReview', reviewId: 'rev_1' },
+					() => ({ review_id: 'rev_1', status: 'completed', outcome }),
+					false,
+					1,
+					{ typeVersion: 1.3 },
+				);
+				expect((output[0].json as IDataObject).passed).toBe(passed);
+			}
+		});
+	});
+
+	describe('the collapsed failure codes', () => {
+		const failed = (code: string, failure_class: string, retryable: boolean): IDataObject => ({
+			status: 'failed',
+			failure: { code, detail: `Stopped: ${code}`, failure_class, retryable },
+		});
+
+		it.each([
+			['upstream_unavailable', 'upstream_unavailable', true],
+			['internal', 'internal', false],
+			['cancelled', 'cancelled', false],
+		])(
+			'%s is passed on as failure_reason with its class and retryable',
+			async (code, cls, retryable) => {
+				const { output } = await runNode(
+					{ operation: 'verifyStatus', taskId: 'task_1' },
+					() => failed(code, cls, retryable),
+					false,
+					1,
+					{ typeVersion: 1.3 },
+				);
+				const json = output[0].json as IDataObject;
+				expect(json.status).toBe('failed');
+				expect(json.passed).toBeNull();
+				expect(json.failure_reason).toBe(code);
+				expect(json.failure_class).toBe(cls);
+				expect(json.retryable).toBe(retryable);
+				expect(json.not_a_claim).toBe(false);
+			},
+		);
+
+		it('no_checkable_claim is still reported as not_a_claim, with not_a_claim true', async () => {
+			const { output } = await runNode(
+				{ operation: 'verifyStatus', taskId: 'task_1' },
+				() => failed('no_checkable_claim', 'invalid_input', false),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			const json = output[0].json as IDataObject;
+			expect(json.failure_reason).toBe('not_a_claim');
+			expect(json.not_a_claim).toBe(true);
+		});
+	});
+});

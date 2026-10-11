@@ -44,7 +44,14 @@ const CHAIN_ID =
 const SAME_INSTANT =
 	'recorded with created_at equal to completed_at, so no later day to report; the later-day rule is tested in api-shapes.test.ts';
 
+const INCOMPLETE_PASSED =
+	'an incomplete outcome is neither a pass nor a finding (a claim can have no public record), so the newer shape reads it as null; the older shape kept false';
+
 const KNOWN: Record<string, Record<string, string>> = {
+	citecheck__get_completed_incomplete: { '[0].passed': INCOMPLETE_PASSED },
+	review__get_citations_failed_and_unchecked: { '[0].passed': INCOMPLETE_PASSED },
+	review__get_completed_issues_full: { '[0].passed': INCOMPLETE_PASSED },
+	review__get_completed_issues_view_issues: { '[0].passed': INCOMPLETE_PASSED },
 	extract__locate_all_dropped: {
 		'[0].locations': 'an empty list only when positions were asked for, which this node never does',
 	},
@@ -53,6 +60,7 @@ const KNOWN: Record<string, Record<string, string>> = {
 			'the older shape said not_a_claim beside a claim it returned; the newer one says ready',
 	},
 	review__get_assessment_rows_full_fields: {
+		'[0].passed': INCOMPLETE_PASSED,
 		'[0].claims[0].assessment.hint': 'a hint stored on this recorded row only; reviews store none',
 	},
 	review__get_failed_every_assessment_failed: { '[0].failure.hint': PROSE },

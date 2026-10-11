@@ -361,7 +361,11 @@ const MAX_FOCUS_CHARS = 300;
 // GET /verifications is paginated; 100 is the largest page the API allows.
 const MAX_PAGE_SIZE = 100;
 
-function isPassingVerdict(verdict?: string): boolean {
+// `passed` for a verdict label. 'No Public Record' is neither a pass nor a
+// failure: Lenz found no public record of the claim, which does not make it
+// false, so it reads null (like every other answer that is not a verdict).
+function isPassingVerdict(verdict?: string): boolean | null {
+	if (verdict === 'No Public Record') return null;
 	return verdict === 'True' || verdict === 'Mostly True';
 }
 
@@ -726,9 +730,12 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 /**
  * The explanatory half of a failed verification.
  *
- * failure_class is a closed set (upstream_unavailable | insufficient_evidence
- * | invalid_input | cancelled | internal); retryable is true only for
- * upstream_unavailable. Both are absent on rows written before 2026-08 —
+ * failure_class is a closed set (upstream_unavailable | invalid_input |
+ * cancelled | internal; the older shape may also say insufficient_evidence);
+ * retryable is true only for upstream_unavailable. The failure `code` of the
+ * newer shape is one of no_checkable_claim | upstream_unavailable | internal |
+ * cancelled; the older shape names where the pipeline stopped (research_empty,
+ * framing_failed, ...). Both are absent on rows written before 2026-08 —
  * explicit fields (not just the prose message) so an IF node can branch.
  *
  * Shared so a failure reads the same whether it arrives from the poll loop,
@@ -886,10 +893,17 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 
 // A review or a citation check, as the node hands it on: the API's own body,
 // plus `passed` for an IF node — true only for a completed `clean` outcome,
-// null until there is an outcome, like Verify's.
-function withPassed(job: IDataObject): IDataObject {
+// false for `issues_found` or `unchecked`, and null until there is an outcome.
+// On the newer API shape (node version 1.3 on) `incomplete` is null too: part
+// of the draft could not be checked, or a claim has no public record, which is
+// neither a pass nor a finding. A node on the older shape keeps `false` there.
+function withPassed(job: IDataObject, incompleteIsNull: boolean): IDataObject {
 	const filled = fillReviewLegacyKeys(job);
-	return { passed: filled.status === 'completed' ? filled.outcome === 'clean' : null, ...filled };
+	const passed =
+		filled.status !== 'completed' || (incompleteIsNull && filled.outcome === 'incomplete')
+			? null
+			: filled.outcome === 'clean';
+	return { passed, ...filled };
 }
 
 // The word the older review and citation-check bodies use for nothing-to-check
@@ -2412,6 +2426,9 @@ export class Lenz implements INodeType {
 				: 'lenzApi';
 		// Read once, like the credential: one node, one API version.
 		const apiVersion = apiVersionFor(node.typeVersion);
+		// A node on the newer shape reads an `incomplete` review as `passed:
+		// null`; a node still on the older shape keeps the false it always gave.
+		const incompleteIsNull = apiVersion !== LEGACY_API_VERSION;
 		const lenzRequest = async (
 			method: IHttpRequestMethods,
 			path: string,
@@ -3278,7 +3295,7 @@ export class Lenz implements INodeType {
 							waitSeconds,
 						);
 						responseData = polled.terminal
-							? withPassed(polled.terminal)
+							? withPassed(polled.terminal, incompleteIsNull)
 							: jobTimeout('review_id', reviewId, 'Get Review', polled);
 					}
 				} else if (operation === 'getReview') {
@@ -3298,6 +3315,7 @@ export class Lenz implements INodeType {
 							undefined,
 							issuesOnly ? { qs: { view: 'issues' } } : undefined,
 						),
+						incompleteIsNull,
 					);
 				} else if (operation === 'checkCitations') {
 					const input = this.getNodeParameter('citationInput', itemIndex, 'text') as string;
@@ -3387,7 +3405,7 @@ export class Lenz implements INodeType {
 							waitSeconds,
 						);
 						responseData = polled.terminal
-							? withPassed(polled.terminal)
+							? withPassed(polled.terminal, incompleteIsNull)
 							: jobTimeout('citecheck_id', citecheckId, 'Get Citation Check', polled);
 					}
 				} else if (operation === 'getCitationCheck') {
@@ -3401,6 +3419,7 @@ export class Lenz implements INodeType {
 					}
 					responseData = withPassed(
 						await lenzRequest('GET', `/citechecks/${encodeURIComponent(citecheckId)}`),
+						incompleteIsNull,
 					);
 				} else if (operation === 'usage') {
 					responseData = fillLegacyUsageKeys(await lenzRequest('GET', '/me/usage'));
