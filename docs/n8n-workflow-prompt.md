@@ -155,7 +155,10 @@ message is sent is decoration.
   lenz_score: 1-10, key_finding: "...", citations: [...], verification_id: "..." }
 ```
 
-Branch on `{{ $json.passed }}`.
+Branch on `{{ $json.passed }}`. `passed` is `true` for True and Mostly True, `false`
+for Mixed, Mostly False and False, and `null` for the verdict `No Public Record`
+(Lenz found no public record of the claim; that does not make it false, and
+`lenz_score` is `null`). Send a `null` to its own branch.
 
 **`assess`** returns **one item containing every claim it found**:
 

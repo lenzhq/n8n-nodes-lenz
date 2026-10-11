@@ -361,7 +361,11 @@ const MAX_FOCUS_CHARS = 300;
 // GET /verifications is paginated; 100 is the largest page the API allows.
 const MAX_PAGE_SIZE = 100;
 
-function isPassingVerdict(verdict?: string): boolean {
+// `passed` for a verdict label. 'No Public Record' is neither a pass nor a
+// failure: Lenz found no public record of the claim, which does not make it
+// false, so it reads null (like every other answer that is not a verdict).
+function isPassingVerdict(verdict?: string): boolean | null {
+	if (verdict === 'No Public Record') return null;
 	return verdict === 'True' || verdict === 'Mostly True';
 }
 
@@ -765,9 +769,12 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 /**
  * The explanatory half of a failed verification.
  *
- * failure_class is a closed set (upstream_unavailable | insufficient_evidence
- * | invalid_input | cancelled | internal); retryable is true only for
- * upstream_unavailable. Both are absent on rows written before 2026-08 —
+ * failure_class is a closed set (upstream_unavailable | invalid_input |
+ * cancelled | internal; the older shape may also say insufficient_evidence);
+ * retryable is true only for upstream_unavailable. The failure `code` of the
+ * newer shape is one of no_checkable_claim | upstream_unavailable | internal |
+ * cancelled; the older shape names where the pipeline stopped (research_empty,
+ * framing_failed, ...). Both are absent on rows written before 2026-08 —
  * explicit fields (not just the prose message) so an IF node can branch.
  *
  * Shared so a failure reads the same whether it arrives from the poll loop,

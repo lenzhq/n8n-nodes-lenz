@@ -63,7 +63,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | **Check Citations** | Checks only the citations: either a **Text** with its links, DOIs or `[n]` markers and a reference list (**Max Citations**, default 20), or up to 20 **Statement-Source Pairs** you list, each with a URL or a DOI. 1 credit per citation checked; a source that could not be read is refunded. |
 | **Get Citation Check** | Fetches a citation check by `citecheck_id`. |
 
-Both hand on Lenz's result as it comes, plus `passed`: `true` only when `outcome` is `clean`, `false` for `issues_found`, `incomplete` or `unchecked`, and `null` until there is an outcome. **Branch on `outcome`** for anything finer: `issues[]` (claims Lenz found wrong, each with `verdict`, `key_finding` and `suggested_rewrite`) and `citation_issues[]` (citations whose source does not say what the text says, worst first) are the arrays to loop over, and `credits.charged` is what it cost.
+Both hand on Lenz's result as it comes, plus `passed`: `true` only when `outcome` is `clean`, `false` for `issues_found`, `incomplete` or `unchecked`, and `null` until there is an outcome. A draft claim with no public record is listed under `issues[]` with the verdict `No Public Record`, so the review reads `issues_found` (`passed` is `false`); read the verdict on each issue to tell them from claims found wrong. **Branch on `outcome`** for anything finer: `issues[]` (claims Lenz found wrong, each with `verdict`, `key_finding` and `suggested_rewrite`) and `citation_issues[]` (citations whose source does not say what the text says, worst first) are the arrays to loop over, and `credits.charged` is what it cost.
 
 **Waiting.** With **Wait for Completion** on, the node polls until the job finishes, for up to **Options → Max Wait (Seconds)**, default **600**. If that runs out you get `status: "timeout"` with the `review_id` or `citecheck_id`; nothing is cancelled or lost, so fetch it later with **Get Review** / **Get Citation Check**. For long drafts, turn Wait for Completion off and use a **Webhook URL** (also under Options) or fetch it later.
 
@@ -87,6 +87,15 @@ Both hand on Lenz's result as it comes, plus `passed`: `true` only when `outcome
 The per-capability blocks (`verify` / `ask` / `assess`) and each block's `credits` alias are **deprecated, and kept for existing callers**. They are projections of the one balance, not separate allowances, so derive them instead and branch on the balance itself: `Math.floor(credits.remaining / costs[capability])`. Note the single slash — in an n8n expression `//` starts a comment, so the older form silently returned the raw balance. Only divide for a capability that costs credits: `costs.extract` is `0`. An **IF** node reading `{{ $json.verify.remaining }}` keeps resolving; new workflows should read the balance and `costs` instead.
 
 Every claim-checking operation returns a branch-ready `passed` boolean (derived from the verdict) alongside the raw verdict/confidence/citations, so you can wire an **IF** node directly off the result — e.g. route failed claims to human review.
+
+| Verdict | `passed` |
+|---|---|
+| `True`, `Mostly True` | `true` |
+| `Mostly False`, `False`, `Mixed` | `false` |
+| `No Public Record` | `null` |
+| no verdict yet or none (timeout, `failed`, `needs_input`) | `null` |
+
+`No Public Record` means Lenz found no public record of the claim. That does not make it false, so it is neither passed nor failed, and its `lenz_score` is `null`. Route it on its own: branch on `{{ $json.verdict }}` or check `{{ $json.passed }}` **is null** after the `status` check.
 
 Verify and Get also expose an **Include Audit Trail** toggle, which adds the adjudication reasoning, debate transcript, per-panelist assessments, and panel agreement under `audit`. It's off by default because it's a lot of data per item. At Low depth the debate transcript carries no rebuttals, because that round does not run.
 
@@ -202,8 +211,8 @@ A verification that stops before reaching a verdict comes back with `status: "fa
 
 | Field | What it says |
 |---|---|
-| `failure_reason` | *Where* the pipeline stopped (e.g. `research_empty`, `framing_failed`) |
-| `failure_class` | *Why*, from a closed set: `upstream_unavailable`, `insufficient_evidence`, `invalid_input`, `cancelled`, `internal` |
+| `failure_reason` | *Where* the pipeline stopped, or on the newer API shape one of `not_a_claim` (nothing to check), `upstream_unavailable`, `internal`, `cancelled` |
+| `failure_class` | *Why*, from a closed set: `upstream_unavailable`, `invalid_input`, `cancelled`, `internal` (a response from before the newer shape may also say `insufficient_evidence`) |
 | `retryable` | `true` only for `upstream_unavailable` — resubmitting the same claim later can succeed. For every other class, retrying the same input will not help. |
 
 Both `failure_class` and `retryable` are empty/`null` on verifications older than 2026-08. **Get** reports a stored verification that failed the same way, rather than as a completed one with no verdict.
