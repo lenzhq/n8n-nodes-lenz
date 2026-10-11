@@ -3602,3 +3602,155 @@ describe('Lenz node - No Public Record', () => {
 		});
 	});
 });
+
+describe('Lenz node - the collapsed failure codes and a quick No Public Record row', () => {
+	const noRecordRow: IDataObject = {
+		claim: 'The Smalltown council approved the bridge budget in 2019.',
+		language: 'en',
+		status: 'completed',
+		verdict: 'No Public Record',
+		confidence: 'medium',
+		rationale: 'Nothing the reviewers found records the vote.',
+		searched_pages: [],
+		failure: null,
+	};
+	const unavailableRow: IDataObject = {
+		claim: 'B',
+		language: 'en',
+		status: 'failed',
+		verdict: null,
+		confidence: null,
+		failure: {
+			code: 'upstream_unavailable',
+			detail: 'The check did not finish inside its time budget.',
+			failure_class: 'upstream_unavailable',
+			retryable: true,
+		},
+	};
+
+	it.each([1.2, 1.3])(
+		'Assess on a version %s node: a No Public Record row is passed null, beside a failed row that stays Error',
+		async (typeVersion) => {
+			const { output } = await runNode(
+				{ operation: 'assess', text: 'x' },
+				() => ({ status: 'ok', claims: [noRecordRow, unavailableRow, { claim: 'C', verdict: 'True', confidence: 'high', status: 'completed' }] }),
+				false,
+				1,
+				{ typeVersion },
+			);
+			const rows = (output[0].json as IDataObject).claims as IDataObject[];
+			expect(rows[0].verdict).toBe('No Public Record');
+			expect(rows[0].confidence).toBe('medium');
+			expect(rows[0].passed).toBeNull();
+			expect(rows[0].rationale).toBe('Nothing the reviewers found records the vote.');
+			expect(rows[1].verdict).toBe('Error');
+			expect(rows[1].confidence).toBe('low');
+			expect(rows[2].passed).toBe(true);
+			expect((output[0].json as IDataObject).not_a_claim).toBe(false);
+		},
+	);
+
+	it('a failure that is not "nothing to check" is not flagged not_a_claim, whatever its code', async () => {
+		for (const code of ['upstream_unavailable', 'internal', 'page_unreadable', 'cancelled']) {
+			const { output } = await runNode(
+				{ operation: 'assess', text: 'x' },
+				() => ({ status: 'ok', claims: [{ claim: 'A', status: 'failed', verdict: null, failure: { code, failure_class: 'internal', retryable: false } }] }),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			expect((output[0].json as IDataObject).not_a_claim).toBe(false);
+		}
+		for (const code of ['no_checkable_claim', 'not_a_claim', 'no_claim']) {
+			const { output } = await runNode(
+				{ operation: 'assess', text: 'x' },
+				() => ({ status: 'ok', claims: [{ claim: 'A', status: 'failed', verdict: null, failure: { code } }] }),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			expect((output[0].json as IDataObject).not_a_claim).toBe(true);
+		}
+	});
+
+	it('Extract: a 422 page_unreadable reaches the error output with its code and status', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'https://example.org/gone' },
+			() => {
+				throw apiError(422, {
+					detail: 'The page at the link could not be read.',
+					code: 'page_unreadable',
+					hint: "Paste the page's text instead.",
+				});
+			},
+			true,
+			1,
+			{ typeVersion: 1.3 },
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(422);
+		expect(json.code).toBe('page_unreadable');
+	});
+
+	it.each([
+		['extract', '/extract', 'extraction_failed'],
+		['assess', '/assess', 'framing_failed'],
+	])('%s: a 502 internal reads as the older %s on a version 1.3 node', async (operation, url, older) => {
+		const { output } = await runNode(
+			{ operation, text: 'x' },
+			(options) => {
+				expect(options.url).toBe(url);
+				throw apiError(502, { detail: 'Failed', code: 'internal' });
+			},
+			true,
+			1,
+			{ typeVersion: 1.3 },
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(502);
+		expect(json.code).toBe(older);
+	});
+
+	it('a 502 internal from another endpoint is left as it is', async () => {
+		const { output } = await runNode(
+			{ operation: 'ask', verificationId: 'ver_1', question: 'q' },
+			() => {
+				throw apiError(502, { detail: 'Failed', code: 'internal' });
+			},
+			true,
+			1,
+			{ typeVersion: 1.3 },
+		);
+		expect((output[0].json as IDataObject).code).toBe('internal');
+	});
+
+	it('Get Review: every failure code reads as the code it is, and nothing-to-check stays no_claim', async () => {
+		const failed = (code: string): IDataObject => ({
+			review_id: 'rev_1',
+			status: 'failed',
+			outcome: 'unchecked',
+			summary: {},
+			failure: { code, detail: 'd', failure_class: 'invalid_input', retryable: false },
+			claims: [],
+		});
+		for (const [code, reason] of [
+			['page_unreadable', 'page_unreadable'],
+			['upstream_unavailable', 'upstream_unavailable'],
+			['internal', 'internal'],
+			['insufficient_credits', 'insufficient_credits'],
+			['no_checkable_claim', 'no_claim'],
+		]) {
+			const { output } = await runNode(
+				{ operation: 'getReview', reviewId: 'rev_1' },
+				() => failed(code),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			const failure = (output[0].json as IDataObject).failure as IDataObject;
+			expect(failure.code).toBe(code);
+			expect(failure.failure_reason).toBe(reason);
+			expect((output[0].json as IDataObject).passed).toBeNull();
+		}
+	});
+});

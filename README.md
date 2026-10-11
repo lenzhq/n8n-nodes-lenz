@@ -95,7 +95,7 @@ Every claim-checking operation returns a branch-ready `passed` boolean (derived 
 | `No Public Record` | `null` |
 | no verdict yet or none (timeout, `failed`, `needs_input`) | `null` |
 
-`No Public Record` means Lenz found no public record of the claim. It is neither passed nor failed, and its `lenz_score` is `null`. Route it on its own: branch on `{{ $json.verdict }}` or check `{{ $json.passed }}` **is null** after the `status` check.
+`No Public Record` means Lenz found no public record of the claim. It is neither passed nor failed, and its `lenz_score` is `null`. Route it on its own: branch on `{{ $json.verdict }}` or check `{{ $json.passed }}` **is null** after the `status` check. An Assess row can carry it too (with a `confidence` that is never `high`), and a quick check that finds no record is an issue in a review.
 
 Verify and Get also expose an **Include Audit Trail** toggle, which adds the adjudication reasoning, debate transcript, per-panelist assessments, and panel agreement under `audit`. It's off by default because it's a lot of data per item. At Low depth the debate transcript carries no rebuttals, because that round does not run.
 

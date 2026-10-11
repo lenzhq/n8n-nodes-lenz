@@ -14142,5 +14142,46 @@ export const legacyCases: Record<string, LegacyCase> = {
     }
    ]
   }
+ },
+ "assess__no_public_record_row": {
+  "operation": "assess",
+  "params": {
+   "text": "x"
+  },
+  "status": 200,
+  "body": {
+   "claims": [
+    {
+     "claim": "The Smalltown council approved the new bridge budget in March 2019.",
+     "language": "en",
+     "verdict": "Mixed",
+     "confidence": "low",
+     "verification_url": null,
+     "rationale": "No source the reviewers found records the vote or the budget.",
+     "dissent": null,
+     "suggested_rewrite": null,
+     "error_code": null,
+     "candidate_claims": [],
+     "identified_claims": [],
+     "hint": null
+    },
+    {
+     "claim": "The Danube flows through Vienna.",
+     "language": "en",
+     "verdict": "True",
+     "confidence": "high",
+     "verification_url": null,
+     "rationale": "The river runs through the city.",
+     "dissent": null,
+     "suggested_rewrite": null,
+     "error_code": null,
+     "candidate_claims": [],
+     "identified_claims": [],
+     "hint": null
+    }
+   ],
+   "error": null,
+   "more_claims": []
+  }
  }
 };
