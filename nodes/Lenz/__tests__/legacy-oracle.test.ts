@@ -3,7 +3,8 @@
 // returned, byte for byte once serialized, plus one additive boolean
 // `not_a_claim` where the answer can say nothing is checkable (Assess, Extract,
 // and a failed verification), and the reviewer's note `rationale` on each
-// Assess row (Lenz#705).
+// Assess row (Lenz#705), and the list of pages the reviewers looked at,
+// `searched_pages`, on each Assess row.
 import { sleep } from 'n8n-workflow';
 import type { IDataObject } from 'n8n-workflow';
 
@@ -19,6 +20,7 @@ import { runLegacyCase } from './legacy-harness';
 void sleep;
 
 const NOTES = ['rationale'];
+const PAGE_LISTS = ['searched_pages'];
 
 const withoutFlag = (json: IDataObject): IDataObject => {
 	const rest = { ...json };
@@ -27,7 +29,7 @@ const withoutFlag = (json: IDataObject): IDataObject => {
 		rest.claims = (rest.claims as IDataObject[]).map((row) => {
 			if (!row || typeof row !== 'object' || !('passed' in row)) return row;
 			const kept = { ...row };
-			for (const key of NOTES) delete kept[key];
+			for (const key of [...NOTES, ...PAGE_LISTS]) delete kept[key];
 			return kept;
 		});
 	}
@@ -66,6 +68,9 @@ describe('legacy responses give the 0.8.0 output plus not_a_claim', () => {
 					for (const key of NOTES) {
 						expect(key in row).toBe(true);
 						expect(row[key] === null || typeof row[key] === 'string').toBe(true);
+					}
+					for (const key of PAGE_LISTS) {
+						expect(Array.isArray(row[key])).toBe(true);
 					}
 				}
 			}
