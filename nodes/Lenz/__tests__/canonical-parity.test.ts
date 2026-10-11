@@ -44,7 +44,22 @@ const CHAIN_ID =
 const SAME_INSTANT =
 	'recorded with created_at equal to completed_at, so no later day to report; the later-day rule is tested in api-shapes.test.ts';
 
+const COLLAPSED =
+	'the newer shape names the failure by its class (upstream_unavailable), where the older one named the cause (timeout, assessment_failed); the class and retryable beside it are unchanged';
+const DOCS_LINK =
+	'a failure now links the errors page for its class; the older shape sent null for these causes';
+const UNREADABLE_PAGE =
+	'an unreadable link on Extract is a 422 page_unreadable in the newer shape (the older shape answered the same 502 extraction_failed as a model failure), so the status, code and message differ';
+
+const NO_RECORD =
+	'a claim with no public record is its own verdict in the newer shape (not a pass, not a failure); the older shape reads the same answer as Mixed, low confidence, and the node says passed false for it';
+
 const KNOWN: Record<string, Record<string, string>> = {
+	assess__no_public_record_row: {
+		'[0].claims[0].verdict': NO_RECORD,
+		'[0].claims[0].confidence': NO_RECORD,
+		'[0].claims[0].passed': NO_RECORD,
+	},
 	extract__locate_all_dropped: {
 		'[0].locations': 'an empty list only when positions were asked for, which this node never does',
 	},
@@ -54,10 +69,23 @@ const KNOWN: Record<string, Record<string, string>> = {
 	},
 	review__get_assessment_rows_full_fields: {
 		'[0].claims[0].assessment.hint': 'a hint stored on this recorded row only; reviews store none',
+		'[0].claims[1].assessment.error_code': COLLAPSED,
+		'[0].claims[1].assessment.failure.failure_reason': COLLAPSED,
+		'[0].claims[1].assessment.failure.docs_url': DOCS_LINK,
+		'[0].failures[0].failure.failure_reason': COLLAPSED,
+		'[0].failures[0].failure.docs_url': DOCS_LINK,
 	},
-	review__get_failed_every_assessment_failed: { '[0].failure.hint': PROSE },
+	review__get_failed_every_assessment_failed: {
+		'[0].failure.hint': PROSE,
+		'[0].failure.failure_reason': COLLAPSED,
+	},
 	review__get_nested_verification_modified_at_crosses_midnight_by_minutes: {
 		'[0].claims[0].verification.modified_at': SAME_INSTANT,
+	},
+	extract__url_fetch_502_unreadable: {
+		'[0].code': UNREADABLE_PAGE,
+		'[0].error': UNREADABLE_PAGE,
+		'[0].status_code': UNREADABLE_PAGE,
 	},
 	verify__idempotency_key_replay: { '[0].chain_id': CHAIN_ID },
 	verify__implicit_repeat_replay: { '[0].chain_id': CHAIN_ID },
@@ -128,6 +156,7 @@ describe('version 1.3 gives the version 1.2 output from the newer shape', () => 
 // message and description. A version 1.3 node shows what a 1.2 node shows for
 // the same refusal: the newer error body is read as the older one first.
 const KNOWN_THROWN: Record<string, string> = {
+	extract__url_fetch_502_unreadable: UNREADABLE_PAGE,
 	review__delete_not_a_route:
 		'the older answer was not JSON, so n8n showed its generic text; the newer one is a JSON 405',
 };

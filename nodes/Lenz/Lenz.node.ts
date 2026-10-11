@@ -1155,7 +1155,9 @@ const CODELESS = new Set([
 	'invalid_request',
 ]);
 
-// Codes whose older refusal repeated the code as `error`.
+// Codes whose older refusal repeated the code as `error`. These are the
+// older shape's own words: the newer shape's 502 `internal` is read back as
+// `framing_failed` / `extraction_failed` first (legacyErrorBody).
 const ERROR_ECHO_CODES = new Set([
 	'framing_failed',
 	'extraction_failed',
@@ -1224,7 +1226,16 @@ export function legacyErrorBody(
 	path: string,
 ): IDataObject {
 	const out: IDataObject = { ...body };
-	const code = typeof out.code === 'string' ? out.code : '';
+	let code = typeof out.code === 'string' ? out.code : '';
+	// Work that failed on our side answers 502 `internal` in the newer shape;
+	// the older one named the step (the same two endpoints, the same 502).
+	if (status === 502 && code === 'internal' && method === 'POST') {
+		const older = path === '/assess' ? 'framing_failed' : path === '/extract' ? 'extraction_failed' : '';
+		if (older) {
+			code = older;
+			out.code = older;
+		}
+	}
 	const errors = Array.isArray(out.errors) ? (out.errors as unknown[]) : null;
 	const firstLoc = (): unknown => asObject(errors?.[0]).loc;
 	if (isReviewFamily(path)) {

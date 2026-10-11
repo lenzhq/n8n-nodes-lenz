@@ -74,6 +74,17 @@ describe('the keys filled from the newer names carry the older shape\'s values',
 	// `no_checkable_claim` is the newer word for what the older Extract and
 	// Verify bodies call `not_a_claim`; only the review words are compared.
 	const reviewAndExtract = names.filter((n) => /^(extract|review|citecheck)__/.test(n));
+	// The newer shape names a failure by its class (`upstream_unavailable`)
+	// where the older one named the cause (`timeout`, `assessment_failed`):
+	// these cases differ in the code words, each listed in canonical-parity.
+	const COLLAPSED_CODES: Record<string, string[]> = {
+		review__get_assessment_rows_full_fields: [
+			'claims.assessment.error_code',
+			'claims.assessment.failure.failure_reason',
+			'failures.failure.failure_reason',
+		],
+		review__get_failed_every_assessment_failed: ['failure.failure_reason'],
+	};
 
 	it.each(reviewAndExtract)('%s', async (name) => {
 		const legacy = await runLegacyCase(legacyCases[name]);
@@ -82,6 +93,7 @@ describe('the keys filled from the newer names carry the older shape\'s values',
 			// An extract whose claims were all dropped by the locator reads
 			// `locations: []` in the older shape and nothing in the newer one.
 			if (name === 'extract__locate_all_dropped' && path === 'locations') continue;
+			if (COLLAPSED_CODES[name]?.includes(path)) continue;
 			expect(JSON.stringify(get(canonical, path.split('.')))).toBe(
 				JSON.stringify(get(legacy, path.split('.'))),
 			);

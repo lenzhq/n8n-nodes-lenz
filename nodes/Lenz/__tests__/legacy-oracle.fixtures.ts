@@ -11629,5 +11629,30 @@ export const legacyOracle: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 422
    }
   ]
+ },
+ "assess__no_public_record_row": {
+  "ok": [
+   {
+    "status": "ok",
+    "claims": [
+     {
+      "claim": "The Smalltown council approved the new bridge budget in March 2019.",
+      "verdict": "Mixed",
+      "confidence": "low",
+      "passed": false,
+      "language": "en",
+      "verification_url": null
+     },
+     {
+      "claim": "The Danube flows through Vienna.",
+      "verdict": "True",
+      "confidence": "high",
+      "passed": true,
+      "language": "en",
+      "verification_url": null
+     }
+    ]
+   }
+  ]
  }
 };
