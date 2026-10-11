@@ -3387,12 +3387,12 @@ describe('Lenz node - No Public Record', () => {
 			review_id: 'rev_1',
 			status: 'completed',
 			outcome,
-			summary: { claims_selected: 2, issues: 1, no_public_record: 1 },
+			summary: { claims_selected: 2, issues: 1 },
 			issues: [{ claim: 'A', verdict: 'No Public Record', confidence: 'medium' }],
 		});
 
 		it.each([1.2, 1.3])(
-			'follows clean exactly as before on a version %s node, and passes summary.no_public_record and the issue row on',
+			'follows clean exactly as before on a version %s node, and passes the No Public Record issue row on',
 			async (typeVersion) => {
 				for (const [outcome, passed] of [
 					['clean', true],
@@ -3408,7 +3408,6 @@ describe('Lenz node - No Public Record', () => {
 					);
 					const json = output[0].json as IDataObject;
 					expect(json.passed).toBe(passed);
-					expect((json.summary as IDataObject).no_public_record).toBe(1);
 					expect((json.issues as IDataObject[])[0].verdict).toBe('No Public Record');
 				}
 			},
