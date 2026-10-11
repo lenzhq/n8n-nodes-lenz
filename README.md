@@ -95,13 +95,11 @@ Every claim-checking operation returns a branch-ready `passed` boolean (derived 
 | `No Public Record` | `null` |
 | no verdict yet or none (timeout, `failed`, `needs_input`) | `null` |
 
-`No Public Record` means Lenz found no public record of the claim. That does not make it false, so it is neither passed nor failed, and its `lenz_score` is `null`. Route it on its own: branch on `{{ $json.verdict }}` or check `{{ $json.passed }}` **is null** after the `status` check.
+`No Public Record` means Lenz found no public record of the claim. It is neither passed nor failed, and its `lenz_score` is `null`. Route it on its own: branch on `{{ $json.verdict }}` or check `{{ $json.passed }}` **is null** after the `status` check.
 
 Verify and Get also expose an **Include Audit Trail** toggle, which adds the adjudication reasoning, debate transcript, per-panelist assessments, and panel agreement under `audit`. It's off by default because it's a lot of data per item. At Low depth the debate transcript carries no rebuttals, because that round does not run.
 
 A completed verification — from **Verify (Deep)**, **Get Verify Status** or **Get** — also carries `suggested_rewrite`: a rewrite of the claim that the verification's findings support, for a person to review before using it. **It has not been verified itself**, so do not paste it over the original sentence without reading it. It is an empty string for a true claim, when no correction is established, and on verifications made before the field existed, so an **IF** node checking `{{ $json.suggested_rewrite }}` **is not empty** finds the claims that have one.
-
-A verification whose verdict is `No Public Record` can also carry `expected_record`: one sentence naming the record that would show the claim if it were so (for example, a company register entry). The key is left out when Lenz sends none, when no record would be expected, and on every other verdict, so every other verification keeps exactly the keys it had; an **IF** node checking `{{ $json.expected_record }}` **exists** finds the ones that have it.
 
 ### Retry safety
 
