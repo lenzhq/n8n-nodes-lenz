@@ -179,6 +179,114 @@ describe('Lenz node - Assess (Fast)', () => {
 		for (const row of claims) expect('dissent' in row).toBe(false);
 	});
 
+	describe('searched_pages', () => {
+		const rowsOf = async (searched: unknown, extra: IDataObject = {}) => {
+			const { output } = await runNode({ operation: 'assess', text: 'some text' }, () => ({
+				claims: [{ claim: 'A', verdict: 'True', confidence: 'high', searched_pages: searched, ...extra }],
+			}));
+			return ((output[0].json as IDataObject).claims as IDataObject[])[0];
+		};
+
+		it('passes on the pages the reviewers looked at, title and url only, in the order sent', async () => {
+			const row = await rowsOf([
+				{ title: 'First page', url: 'https://example.org/a', extra: 'dropped' },
+				{ title: 'Second page', url: 'http://example.com/b?q=1#frag' },
+			]);
+			expect(row.searched_pages).toEqual([
+				{ title: 'First page', url: 'https://example.org/a' },
+				{ title: 'Second page', url: 'http://example.com/b?q=1#frag' },
+			]);
+		});
+
+		it('is an empty list when the row has none, or an older API sends no key', async () => {
+			expect((await rowsOf([])).searched_pages).toEqual([]);
+			expect((await rowsOf(undefined)).searched_pages).toEqual([]);
+			expect((await rowsOf(null)).searched_pages).toEqual([]);
+		});
+
+		it('is an empty list when the value is not a list', async () => {
+			for (const bad of ['https://example.org', { title: 'T', url: 'https://example.org' }, 7, true]) {
+				expect((await rowsOf(bad)).searched_pages).toEqual([]);
+			}
+		});
+
+		it('keeps an entry only with a non-empty string title and an http(s) url with a host and no credentials', async () => {
+			const row = await rowsOf([
+				{ title: 'Kept', url: 'HTTPS://Example.org/x' },
+				{ title: '', url: 'https://example.org/empty-title' },
+				{ title: '   ', url: 'https://example.org/blank-title' },
+				{ title: 42, url: 'https://example.org/number-title' },
+				{ url: 'https://example.org/no-title' },
+				{ title: 'No url' },
+				{ title: 'Number url', url: 7 },
+				{ title: 'Script', url: 'javascript:alert(1)' },
+				{ title: 'Data', url: 'data:text/html,<b>x</b>' },
+				{ title: 'File', url: 'file:///etc/passwd' },
+				{ title: 'Ftp', url: 'ftp://example.org/x' },
+				{ title: 'Relative', url: '/path/only' },
+				{ title: 'Scheme only', url: 'https://' },
+				{ title: 'No host', url: 'https:///path' },
+				{ title: 'Credentials', url: 'https://user:pass@example.org/x' },
+				{ title: 'User only', url: 'https://user@example.org/x' },
+				'https://example.org/a-string',
+				null,
+				7,
+				['https://example.org'],
+			]);
+			expect(row.searched_pages).toEqual([{ title: 'Kept', url: 'HTTPS://Example.org/x' }]);
+		});
+
+		it('turns control characters in a title into spaces and caps it at 200 characters', async () => {
+			const row = await rowsOf([
+				{ title: 'Line one\nline two\ttabbed\u0000nul\u001b[0m', url: 'https://example.org/a' },
+				{ title: 'x'.repeat(250), url: 'https://example.org/b' },
+			]);
+			const pages = row.searched_pages as IDataObject[];
+			expect(pages[0].title).toBe('Line one line two tabbed nul [0m');
+			expect((pages[1].title as string).length).toBe(200);
+		});
+
+		it('drops an entry whose url holds a space, newline, tab or other control character', async () => {
+			const row = await rowsOf([
+				{ title: 'Space', url: 'https://example.org/a b' },
+				{ title: 'Newline', url: 'https://example.org/a\nb' },
+				{ title: 'Tab', url: 'https://example.org/a\tb' },
+				{ title: 'Nul', url: 'https://example.org/a\u0000b' },
+				{ title: 'Trailing', url: 'https://example.org/a ' },
+				{ title: 'Line separator', url: 'https://example.org/a b' },
+				{ title: 'Kept', url: 'https://example.org/ab' },
+			]);
+			expect(row.searched_pages).toEqual([{ title: 'Kept', url: 'https://example.org/ab' }]);
+		});
+
+		it('drops an entry whose title is only whitespace or control characters, and collapses runs inside one', async () => {
+			const row = await rowsOf([
+				{ title: ' \n\t\u0000\u001b ', url: 'https://example.org/a' },
+				{ title: 'One \n\n two\t\tthree', url: 'https://example.org/b' },
+				{ title: `${'x'.repeat(199)} y`, url: 'https://example.org/c' },
+			]);
+			expect(row.searched_pages).toEqual([
+				{ title: 'One two three', url: 'https://example.org/b' },
+				{ title: 'x'.repeat(199), url: 'https://example.org/c' },
+			]);
+		});
+
+		it('leaves markup in a title as text and does not touch it', async () => {
+			const row = await rowsOf([{ title: '<img src=x onerror=alert(1)>', url: 'https://example.org/a' }]);
+			expect(row.searched_pages).toEqual([
+				{ title: '<img src=x onerror=alert(1)>', url: 'https://example.org/a' },
+			]);
+		});
+
+		it('is an empty list on an Error row', async () => {
+			const { output } = await runNode({ operation: 'assess', text: 'some text' }, () => ({
+				claims: [{ claim: 'A', status: 'failed', verdict: null, confidence: null, searched_pages: [] }],
+			}));
+			const row = ((output[0].json as IDataObject).claims as IDataObject[])[0];
+			expect(row.searched_pages).toEqual([]);
+		});
+	});
+
 	it('skips empty text input instead of failing the batch', async () => {
 		const { output, httpMock } = await runNode({ operation: 'assess', text: '   ' }, noCall);
 		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
@@ -2841,6 +2949,42 @@ describe('Lenz node - Review', () => {
 		expect(json.outcome).toBe('issues_found');
 		expect(json.review_id).toBe('rev_1');
 		expect(json.credits).toEqual({ charged: 12 });
+	});
+
+	describe('searched_pages on a review row', () => {
+		const withPages = (): IDataObject => ({
+			...completedReview('issues_found'),
+			claims: [
+				{
+					claim_index: 0,
+					assessment: {
+						verdict: 'False',
+						confidence: 'high',
+						searched_pages: [{ title: 'A page', url: 'https://example.org/a' }],
+					},
+				},
+				{ claim_index: 1, assessment: { verdict: 'True', confidence: 'high', searched_pages: [] } },
+			],
+		});
+
+		it('reaches the output of Review Draft as the API sent it', async () => {
+			const { output } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) =>
+				options.method === 'POST' ? { review_id: 'rev_1', status: 'queued' } : withPages(),
+			);
+			const claims = (output[0].json as IDataObject).claims as Array<{ assessment: IDataObject }>;
+			expect(claims[0].assessment.searched_pages).toEqual([
+				{ title: 'A page', url: 'https://example.org/a' },
+			]);
+			expect(claims[1].assessment.searched_pages).toEqual([]);
+		});
+
+		it('reaches the output of Get Review', async () => {
+			const { output } = await runNode({ operation: 'getReview', reviewId: 'rev_1' }, withPages);
+			const claims = (output[0].json as IDataObject).claims as Array<{ assessment: IDataObject }>;
+			expect(claims[0].assessment.searched_pages).toEqual([
+				{ title: 'A page', url: 'https://example.org/a' },
+			]);
+		});
 	});
 
 	it('sends no escalate block when no option is set', async () => {
