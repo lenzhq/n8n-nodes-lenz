@@ -101,6 +101,8 @@ Verify and Get also expose an **Include Audit Trail** toggle, which adds the adj
 
 A completed verification — from **Verify (Deep)**, **Get Verify Status** or **Get** — also carries `suggested_rewrite`: a rewrite of the claim that the verification's findings support, for a person to review before using it. **It has not been verified itself**, so do not paste it over the original sentence without reading it. It is an empty string for a true claim, when no correction is established, and on verifications made before the field existed, so an **IF** node checking `{{ $json.suggested_rewrite }}` **is not empty** finds the claims that have one.
 
+A verification whose verdict is `No Public Record` can also carry `expected_record`: one sentence naming the record that would show the claim if it were so (for example, a company register entry). The key is left out when Lenz sends none, when no record would be expected, and on every other verdict, so every other verification keeps exactly the keys it had; an **IF** node checking `{{ $json.expected_record }}` **exists** finds the ones that have it.
+
 ### Retry safety
 
 Billable calls (Verify, Assess, Extract, Submit Batch, Select Claims, Ask Follow-Up) send an `Idempotency-Key` derived from the execution ID, a hash of the node's identity, the item index, and a fingerprint of the request — its path as well as its body. If n8n retries the node — via **Retry On Fail**, or after a dropped response — the input is identical, so Lenz replays the original response instead of charging you a second time. A fresh run of the workflow is a new execution, so it bills normally.

@@ -3451,7 +3451,7 @@ describe('Lenz node - No Public Record', () => {
 		confidence: 'medium',
 		lenz_score: null,
 		key_finding: 'Lenz found no public record of this.',
-		executive_summary: 'No public source records this. That does not make it false.',
+		executive_summary: 'No public source records this.',
 		suggested_rewrite: null,
 		warnings: [],
 		sources: [],
@@ -3481,6 +3481,53 @@ describe('Lenz node - No Public Record', () => {
 		expect(json.confidence).toBe('medium');
 		expect(json.suggested_rewrite).toBe('');
 		expect(json.citations).toEqual([]);
+	});
+
+	describe('expected_record', () => {
+		const get = async (body: IDataObject) =>
+			(
+				await runNode({ operation: 'getVerification', verificationId: 'ver_np' }, () => body)
+			).output[0].json as IDataObject;
+
+		it('passes on the record that would show the claim, trimmed', async () => {
+			const json = await get({ ...noRecord, expected_record: '  A county register of orders.  ' });
+			expect(json.expected_record).toBe('A county register of orders.');
+		});
+
+		it('adds no key when none is sent, when it is empty or not text, and on other verdicts', async () => {
+			for (const body of [
+				noRecord,
+				{ ...noRecord, expected_record: '' },
+				{ ...noRecord, expected_record: '   ' },
+				{ ...noRecord, expected_record: null },
+				{ ...noRecord, expected_record: 7 },
+				{ ...noRecord, verdict: 'True', lenz_score: 9 },
+			]) {
+				expect('expected_record' in (await get(body))).toBe(false);
+			}
+		});
+
+		it('reads it from the conclusion when the body nests it there', async () => {
+			const json = await get({ ...noRecord, conclusion: { expected_record: 'A company register entry.' } });
+			expect(json.expected_record).toBe('A company register entry.');
+		});
+
+		it('reaches the output of Verify (Deep) and Get Verify Status', async () => {
+			const body = { ...noRecord, expected_record: 'A court record of the order.' };
+			const verify = await runNode(
+				{ operation: 'verify', claim: 'x' },
+				verifyResponder({ status: 'completed', result: body }),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			expect((verify.output[0].json as IDataObject).expected_record).toBe('A court record of the order.');
+			const status = await runNode({ operation: 'verifyStatus', taskId: 'task_1' }, () => ({
+				status: 'completed',
+				result: body,
+			}));
+			expect((status.output[0].json as IDataObject).expected_record).toBe('A court record of the order.');
+		});
 	});
 
 	it('Get Verify Status and Get Verification read it the same way', async () => {

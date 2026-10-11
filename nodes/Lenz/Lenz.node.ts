@@ -724,6 +724,14 @@ function modifiedAtOf(result: IDataObject): string | null {
 	return day(completed) > day(created) ? asText(result.completed_at) : null;
 }
 
+/** The API's `expected_record`, trimmed; '' when absent or not a string. */
+function expectedRecordOf(result: IDataObject): string {
+	const direct = result.expected_record;
+	if (typeof direct === 'string') return direct.trim();
+	const nested = (result.conclusion as IDataObject | undefined)?.expected_record;
+	return typeof nested === 'string' ? nested.trim() : '';
+}
+
 function mapCompletedVerification(result: IDataObject, includeAudit: boolean): IDataObject {
 	const sources = result.sources;
 	const mapped: IDataObject = {
@@ -760,6 +768,11 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 		created_at: result.created_at ?? '',
 		modified_at: modifiedAtOf(result),
 	};
+	// For a "No Public Record" verdict: one sentence naming the record that would
+	// show the claim if it were so. Added only when there is one, so every other
+	// verification keeps exactly the keys it always had. The name matches the API.
+	const expectedRecord = expectedRecordOf(result);
+	if (expectedRecord) mapped.expected_record = expectedRecord;
 	if (includeAudit) {
 		mapped.audit = result.audit ?? {};
 	}
