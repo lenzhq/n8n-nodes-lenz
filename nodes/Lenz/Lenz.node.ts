@@ -662,6 +662,45 @@ function asText(value: unknown): string {
 	return typeof value === 'string' ? value : '';
 }
 
+const MAX_PAGE_TITLE_CHARS = 200;
+
+/**
+ * The pages the reviewers looked at, as an Assess row carries them
+ * (`searched_pages`): `{ title, url }` entries. A page is kept only when its
+ * title is a non-empty string and its url is a string that starts with
+ * http:// or https://, has a host, carries no credentials and holds no
+ * whitespace or control character anywhere. Control characters in a title
+ * become spaces, runs of whitespace collapse to one space, and a title is cut
+ * at 200 characters. Anything else is dropped, and a value that is not a list is no list, so an
+ * older API that sends no key gives `[]`.
+ */
+function readSearchedPages(value: unknown): IDataObject[] {
+	if (!Array.isArray(value)) return [];
+	const pages: IDataObject[] = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+		const { title, url } = entry as IDataObject;
+		if (typeof title !== 'string' || typeof url !== 'string') continue;
+		// eslint-disable-next-line no-control-regex
+		if (/[\s\u0000-\u001f\u007f-\u009f]/.test(url)) continue;
+		if (!/^https?:\/\/[^/?#]/i.test(url)) continue;
+		let parsed: URL;
+		try {
+			parsed = new URL(url);
+		} catch {
+			continue;
+		}
+		if (!parsed.hostname || parsed.username || parsed.password) continue;
+		const collapse = (text: string): string =>
+			// eslint-disable-next-line no-control-regex
+			text.replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+		const cleaned = collapse(collapse(title).slice(0, MAX_PAGE_TITLE_CHARS));
+		if (!cleaned) continue;
+		pages.push({ title: cleaned, url });
+	}
+	return pages;
+}
+
 function isNoCheckable(value: unknown): boolean {
 	return typeof value === 'string' && NO_CHECKABLE_CODES.includes(value);
 }
@@ -3021,6 +3060,10 @@ export class Lenz implements INodeType {
 								// absent from a response stored before the API added it, which
 								// Lenz replays for 24h on a reused Idempotency-Key.
 								rationale: typeof c.rationale === 'string' ? c.rationale : null,
+								// The pages the reviewers looked at: titles and links, not
+								// checked sources. `[]` on an Error row and on a response from
+								// an API that does not send the key.
+								searched_pages: readSearchedPages(c.searched_pages),
 							})),
 						};
 					}

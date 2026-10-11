@@ -160,11 +160,14 @@ Branch on `{{ $json.passed }}`.
 **`assess`** returns **one item containing every claim it found**:
 
 ```
-{ status: "ok", claims: [ { claim, verdict, confidence, passed, language, verification_url, rationale }, ... ] }
+{ status: "ok", claims: [ { claim, verdict, confidence, passed, language, verification_url, rationale, searched_pages }, ... ] }
 ```
 
 `rationale` is a reviewer's note, not a checked source, and can be `null`. Put
-it in a message to a person; never branch on it.
+it in a message to a person; never branch on it. `searched_pages` is the list
+of pages the reviewers looked at, `[{ title, url }, ...]`, empty when there are
+none: pages to look at, not sources that confirm the verdict. For checked
+sources, run Verify (Deep).
 
 So `{{ $json.claims[0].passed }}` only looks at the first claim. If the text can
 contain several claims and each should be routed on its own, insert a **Split
