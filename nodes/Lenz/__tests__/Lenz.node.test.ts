@@ -3382,67 +3382,36 @@ describe('Lenz node - No Public Record', () => {
 		expect(rows[0].verdict).toBe('No Public Record');
 	});
 
-	describe('a review that is incomplete', () => {
-		const incomplete: IDataObject = {
+	describe('a review', () => {
+		const review = (outcome: string): IDataObject => ({
 			review_id: 'rev_1',
 			status: 'completed',
-			outcome: 'incomplete',
+			outcome,
+			summary: { claims_selected: 2, issues: 0, no_public_record: 1 },
 			issues: [],
-		};
-		const responder: Responder = (options) =>
-			options.method === 'POST' ? { review_id: 'rev_1', status: 'queued' } : incomplete;
-
-		it('has passed null on a version 1.3 node, which asks for the newer shape', async () => {
-			const { output } = await runNode(
-				{ operation: 'reviewDraft', draft: 'x' },
-				responder,
-				false,
-				1,
-				{
-					typeVersion: 1.3,
-				},
-			);
-			expect((output[0].json as IDataObject).passed).toBeNull();
-			const stored = await runNode(
-				{ operation: 'getReview', reviewId: 'rev_1' },
-				responder,
-				false,
-				1,
-				{
-					typeVersion: 1.3,
-				},
-			);
-			expect((stored.output[0].json as IDataObject).passed).toBeNull();
 		});
 
-		it('keeps false on a node that still asks for the older shape', async () => {
-			const { output } = await runNode(
-				{ operation: 'reviewDraft', draft: 'x' },
-				responder,
-				false,
-				1,
-				{
-					typeVersion: 1.2,
-				},
-			);
-			expect((output[0].json as IDataObject).passed).toBe(false);
-		});
-
-		it('keeps true for clean and false for issues_found on a version 1.3 node', async () => {
-			for (const [outcome, passed] of [
-				['clean', true],
-				['issues_found', false],
-			] as const) {
-				const { output } = await runNode(
-					{ operation: 'getReview', reviewId: 'rev_1' },
-					() => ({ review_id: 'rev_1', status: 'completed', outcome }),
-					false,
-					1,
-					{ typeVersion: 1.3 },
-				);
-				expect((output[0].json as IDataObject).passed).toBe(passed);
-			}
-		});
+		it.each([1.2, 1.3])(
+			'follows clean exactly as before on a version %s node, and passes summary.no_public_record on',
+			async (typeVersion) => {
+				for (const [outcome, passed] of [
+					['clean', true],
+					['issues_found', false],
+					['incomplete', false],
+				] as const) {
+					const { output } = await runNode(
+						{ operation: 'getReview', reviewId: 'rev_1' },
+						() => review(outcome),
+						false,
+						1,
+						{ typeVersion },
+					);
+					const json = output[0].json as IDataObject;
+					expect(json.passed).toBe(passed);
+					expect((json.summary as IDataObject).no_public_record).toBe(1);
+				}
+			},
+		);
 	});
 
 	describe('the collapsed failure codes', () => {

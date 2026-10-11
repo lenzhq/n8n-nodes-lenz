@@ -893,17 +893,10 @@ function statedPollAfterMs(progress: unknown): number | undefined {
 
 // A review or a citation check, as the node hands it on: the API's own body,
 // plus `passed` for an IF node — true only for a completed `clean` outcome,
-// false for `issues_found` or `unchecked`, and null until there is an outcome.
-// On the newer API shape (node version 1.3 on) `incomplete` is null too: part
-// of the draft could not be checked, or a claim has no public record, which is
-// neither a pass nor a finding. A node on the older shape keeps `false` there.
-function withPassed(job: IDataObject, incompleteIsNull: boolean): IDataObject {
+// null until there is an outcome, like Verify's.
+function withPassed(job: IDataObject): IDataObject {
 	const filled = fillReviewLegacyKeys(job);
-	const passed =
-		filled.status !== 'completed' || (incompleteIsNull && filled.outcome === 'incomplete')
-			? null
-			: filled.outcome === 'clean';
-	return { passed, ...filled };
+	return { passed: filled.status === 'completed' ? filled.outcome === 'clean' : null, ...filled };
 }
 
 // The word the older review and citation-check bodies use for nothing-to-check
@@ -2426,9 +2419,6 @@ export class Lenz implements INodeType {
 				: 'lenzApi';
 		// Read once, like the credential: one node, one API version.
 		const apiVersion = apiVersionFor(node.typeVersion);
-		// A node on the newer shape reads an `incomplete` review as `passed:
-		// null`; a node still on the older shape keeps the false it always gave.
-		const incompleteIsNull = apiVersion !== LEGACY_API_VERSION;
 		const lenzRequest = async (
 			method: IHttpRequestMethods,
 			path: string,
@@ -3295,7 +3285,7 @@ export class Lenz implements INodeType {
 							waitSeconds,
 						);
 						responseData = polled.terminal
-							? withPassed(polled.terminal, incompleteIsNull)
+							? withPassed(polled.terminal)
 							: jobTimeout('review_id', reviewId, 'Get Review', polled);
 					}
 				} else if (operation === 'getReview') {
@@ -3315,7 +3305,6 @@ export class Lenz implements INodeType {
 							undefined,
 							issuesOnly ? { qs: { view: 'issues' } } : undefined,
 						),
-						incompleteIsNull,
 					);
 				} else if (operation === 'checkCitations') {
 					const input = this.getNodeParameter('citationInput', itemIndex, 'text') as string;
@@ -3405,7 +3394,7 @@ export class Lenz implements INodeType {
 							waitSeconds,
 						);
 						responseData = polled.terminal
-							? withPassed(polled.terminal, incompleteIsNull)
+							? withPassed(polled.terminal)
 							: jobTimeout('citecheck_id', citecheckId, 'Get Citation Check', polled);
 					}
 				} else if (operation === 'getCitationCheck') {
@@ -3419,7 +3408,6 @@ export class Lenz implements INodeType {
 					}
 					responseData = withPassed(
 						await lenzRequest('GET', `/citechecks/${encodeURIComponent(citecheckId)}`),
-						incompleteIsNull,
 					);
 				} else if (operation === 'usage') {
 					responseData = fillLegacyUsageKeys(await lenzRequest('GET', '/me/usage'));
