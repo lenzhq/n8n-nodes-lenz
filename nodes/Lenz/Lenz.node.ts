@@ -1976,7 +1976,7 @@ export class Lenz implements INodeType {
 					{
 						name: 'Statement-Source Pairs',
 						value: 'pairs',
-						description: 'Up to 20 statements, each with the URL, DOI or legal citation it cites',
+						description: 'Up to 20 statements, each with the URL, DOI or citation it cites',
 					},
 					{
 						name: 'Text',
@@ -2012,7 +2012,7 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: { operation: ['checkCitations'], citationInput: ['pairs'] },
 				},
-				description: 'Statements and the source each one cites: a URL, a DOI or a legal citation, exactly one',
+				description: 'Statements and the source each one cites: a URL, a DOI or a citation, exactly one',
 				options: [
 					{
 						name: 'pair',
@@ -2025,7 +2025,7 @@ export class Lenz implements INodeType {
 								default: '',
 								placeholder: '42 U.S.C. § 1983',
 								description:
-									'A legal authority by its citation, alone: a US case, a statute, a regulation or an EU act. Leave empty when the source is a URL or a DOI.',
+									'A source named by its citation, alone: a US case, a statute, a regulation, an EU act or a DOI. Leave empty when the source is entered as a URL or a DOI.',
 							},
 							{
 								displayName: 'DOI',
@@ -3386,7 +3386,7 @@ export class Lenz implements INodeType {
 							if (!statement || [url, doi, cite].filter(Boolean).length !== 1) {
 								throw new NodeOperationError(
 									this.getNode(),
-									`Pair ${n + 1} needs a statement and exactly one source: a URL, a DOI or a legal citation`,
+									`Pair ${n + 1} needs a statement and exactly one source: a URL, a DOI or a citation`,
 									{ itemIndex },
 								);
 							}
