@@ -45,7 +45,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list (each with a URL, a DOI or a citation). 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language` |
+| `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language` |
 | `getCitationCheck` | Retrieve a citation check by its ID | `citecheckId`**\*** |
 | `getReview` | Retrieve a review by its ID | `reviewId`**\***, `issuesOnly` |
 | `reviewDraft` | Review a whole draft: find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `draft`**\***, `waitForCompletion`, `reviewOptions`, `visibility`, `language` |
