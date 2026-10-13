@@ -3116,7 +3116,7 @@ describe('Lenz node - Check Citations', () => {
 		expect((output[0].json as IDataObject).passed).toBe(true);
 	});
 
-	it('sends pairs with a URL or a DOI, never max_citations', async () => {
+	it('sends pairs with a URL, a DOI or a legal cite, never max_citations', async () => {
 		const { calls } = await runNode(
 			{
 				operation: 'checkCitations',
@@ -3125,6 +3125,7 @@ describe('Lenz node - Check Citations', () => {
 					pair: [
 						{ statement: ' A ', url: ' https://a.example ' },
 						{ statement: 'B', doi: '10.1038/nature12373' },
+						{ statement: 'C', cite: ' 42 U.S.C. § 1983 ' },
 					],
 				},
 			},
@@ -3135,6 +3136,7 @@ describe('Lenz node - Check Citations', () => {
 			pairs: [
 				{ statement: 'A', url: 'https://a.example' },
 				{ statement: 'B', doi: '10.1038/nature12373' },
+				{ statement: 'C', cite: '42 U.S.C. § 1983' },
 			],
 		});
 	});
@@ -3142,6 +3144,7 @@ describe('Lenz node - Check Citations', () => {
 	it.each([
 		[{ statement: 'A' }],
 		[{ statement: 'A', url: 'https://a.example', doi: '10.1/x' }],
+		[{ statement: 'A', doi: '10.1/x', cite: '42 U.S.C. § 1983' }],
 		[{ url: 'https://a.example' }],
 	])('refuses a pair without a statement and exactly one source, before submitting: %j', async (pair) => {
 		const ctx = createContext(
