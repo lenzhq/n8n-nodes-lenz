@@ -359,6 +359,35 @@ describe('Lenz node - what an expression hands a text field', () => {
 		expect(calls[0].body).toMatchObject({ text: '42' });
 	});
 
+	it('reads a citation pair and selected claims the same way', async () => {
+		const pairs = await runNode(
+			{
+				operation: 'checkCitations',
+				citationInput: 'pairs',
+				waitForCompletion: false,
+				citationPairs: {
+					pair: [
+						{ statement: 42, cite: ' 42 U.S.C. § 1983 ', url: null, doi: undefined },
+						{ statement: 'Water boils at 100 °C.', url: 'https://example.com', cite: null },
+					],
+				},
+			},
+			() => ({ citecheck_id: 'cc_1', status: 'queued' }),
+		);
+		expect(pairs.calls[0].body).toMatchObject({
+			pairs: [
+				{ statement: '42', cite: '42 U.S.C. § 1983' },
+				{ statement: 'Water boils at 100 °C.', url: 'https://example.com' },
+			],
+		});
+
+		const select = await runNode(
+			{ operation: 'select', taskId: 'task_1', selectedClaims: [7, null, ' Claim two '] },
+			() => ({ batch_id: 'b', items: [] }),
+		);
+		expect(select.calls[0].body).toEqual({ texts: ['7', 'Claim two'] });
+	});
+
 	it('refuses an object with a message naming the field', async () => {
 		await expect(runNode({ operation: 'assess', text: { a: 1 } }, noCall)).rejects.toThrow(
 			/"text" must be text or a number, but the expression returned an object/,

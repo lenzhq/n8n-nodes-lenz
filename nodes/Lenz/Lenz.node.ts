@@ -600,9 +600,6 @@ function bodyFingerprint(body?: IDataObject): string {
 	return hash.toString(36);
 }
 
-// Sources without a URL can't be cited, so they're dropped. The rest are passed
-// through in full — snippet and source_name are what make a citation quotable
-// rather than merely linkable.
 // A parameter value as trimmed text: null and undefined read as '', a number or
 // boolean as its text. Undefined for an object or list, which has no text.
 function textOf(value: unknown): string | undefined {
@@ -612,6 +609,9 @@ function textOf(value: unknown): string | undefined {
 	return undefined;
 }
 
+// Sources without a URL can't be cited, so they're dropped. The rest are passed
+// through in full — snippet and source_name are what make a citation quotable
+// rather than merely linkable.
 function mapCitations(sources: unknown): IDataObject[] {
 	// Guarded rather than cast. A verification is paid for and finished by the
 	// time this runs, so throwing here would fail the item *after* the money was
@@ -675,8 +675,8 @@ const MAX_PAGE_TITLE_CHARS = 200;
  * http:// or https://, has a host, carries no credentials and holds no
  * whitespace or control character anywhere. Control characters in a title
  * become spaces, runs of whitespace collapse to one space, and a title is cut
- * at 200 characters. Anything else is dropped, and a value that is not a list is no list, so an
- * older API that sends no key gives `[]`.
+ * at 200 characters. Anything else is dropped. A value that is not a list
+ * gives `[]`, so does an older API that sends no key.
  */
 function readSearchedPages(value: unknown): IDataObject[] {
 	if (!Array.isArray(value)) return [];
@@ -2997,8 +2997,8 @@ export class Lenz implements INodeType {
 					continue;
 				} else if (operation === 'select') {
 					const taskId = readText('taskId', itemIndex);
-					const selected = ((this.getNodeParameter('selectedClaims', itemIndex, []) as string[]) ?? [])
-						.map((text) => (text ?? '').trim())
+					const selected = ((this.getNodeParameter('selectedClaims', itemIndex, []) as unknown[]) ?? [])
+						.map((text) => textOf(text) ?? '')
 						.filter((text) => text !== '');
 					if (!taskId || !selected.length) {
 						returnData.push({
@@ -3375,14 +3375,14 @@ export class Lenz implements INodeType {
 					const body: IDataObject = {};
 					if (input === 'pairs') {
 						const raw = this.getNodeParameter('citationPairs', itemIndex, {}) as {
-							pair?: Array<{ statement?: string; url?: string; doi?: string; cite?: string }>;
+							pair?: Array<{ statement?: unknown; url?: unknown; doi?: unknown; cite?: unknown }>;
 						};
 						const pairs: IDataObject[] = [];
 						for (const [n, pair] of (raw.pair ?? []).entries()) {
-							const statement = (pair.statement ?? '').trim();
-							const url = (pair.url ?? '').trim();
-							const doi = (pair.doi ?? '').trim();
-							const cite = (pair.cite ?? '').trim();
+							const statement = textOf(pair.statement) ?? '';
+							const url = textOf(pair.url) ?? '';
+							const doi = textOf(pair.doi) ?? '';
+							const cite = textOf(pair.cite) ?? '';
 							if (!statement || [url, doi, cite].filter(Boolean).length !== 1) {
 								throw new NodeOperationError(
 									this.getNode(),
