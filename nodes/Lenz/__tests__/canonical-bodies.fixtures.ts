@@ -378,7 +378,7 @@ export const canonicalCases: Record<string, LegacyCase> = {
   "params": {},
   "status": 200,
   "body": {
-   "webhook_secret": "315ac3434d186fa9a2fb48d92381f06e"
+   "webhook_secret": "example-webhook-secret"
   }
  },
  "assess__401_no_key": {
@@ -11908,8 +11908,8 @@ export const canonicalCases: Record<string, LegacyCase> = {
    "coverage": {
     "status": "covered",
     "reasons": [],
-    "certificate_id": "e467bd8abf2913eddccb3d2dc8c86371",
-    "certificate_url": "https://lenz.io/certificate/e467bd8abf2913eddccb3d2dc8c86371",
+    "certificate_id": "example-certificate-1",
+    "certificate_url": "https://lenz.io/certificate/example-certificate-1",
     "as_of": "2026-03-10T12:01:30+00:00",
     "currency": "EUR",
     "cap": 10000,
@@ -12001,8 +12001,8 @@ export const canonicalCases: Record<string, LegacyCase> = {
    "coverage": {
     "status": "covered",
     "reasons": [],
-    "certificate_id": "e467bd8abf2913eddccb3d2dc8c86371",
-    "certificate_url": "https://lenz.io/certificate/e467bd8abf2913eddccb3d2dc8c86371",
+    "certificate_id": "example-certificate-1",
+    "certificate_url": "https://lenz.io/certificate/example-certificate-1",
     "as_of": "2026-03-10T12:01:30+00:00",
     "currency": "EUR",
     "cap": 10000,
