@@ -481,6 +481,140 @@ describe('Lenz node - Verify (Deep)', () => {
 		]);
 	});
 
+	it('preserves source origin when present in citations', async () => {
+		const statusWithOrigin: IDataObject = {
+			status: 'completed',
+			result: {
+				verification_id: 'ver_origin',
+				verdict: 'True',
+				confidence: 'high',
+				lenz_score: 9,
+				executive_summary: 'This claim is true.',
+				sources: [
+					{
+						title: 'Supplied Doc',
+						url: 'https://supplied.example',
+						origin: 'supplied',
+					},
+					{
+						title: 'Web Source',
+						url: 'https://web.example',
+						origin: 'web',
+					},
+					{
+						title: 'Legacy Source',
+						url: 'https://legacy.example',
+					},
+				],
+			},
+		};
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			verifyResponder(statusWithOrigin),
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.citations).toEqual([
+			{
+				title: 'Supplied Doc',
+				url: 'https://supplied.example',
+				source_name: '',
+				snippet: '',
+				date: '',
+				origin: 'supplied',
+			},
+			{
+				title: 'Web Source',
+				url: 'https://web.example',
+				source_name: '',
+				snippet: '',
+				date: '',
+				origin: 'web',
+			},
+			{
+				title: 'Legacy Source',
+				url: 'https://legacy.example',
+				source_name: '',
+				snippet: '',
+				date: '',
+			},
+		]);
+	});
+
+	it('submits supplied_sources from additionalFields with non-empty fields alongside text', async () => {
+		let submitBody: IDataObject | undefined;
+		await runNode(
+			{
+				operation: 'verify',
+				claim: 'Some claim',
+				additionalFields: {
+					supplied_sources: {
+						sources: [
+							{
+								text: 'Excerpts from report',
+								title: 'Annual Report',
+								url: 'https://report.example',
+								doi: '',
+								cite: '',
+								published_date: '2026-01-15',
+							},
+							{
+								text: 'Academic paper extract',
+								doi: '10.1038/s41586-026-0001-x',
+							},
+						],
+					},
+				},
+			},
+			(options) => {
+				if (options.method === 'POST' && options.url === '/verify') {
+					submitBody = options.body as IDataObject;
+					return { task_id: 'task_1' };
+				}
+				return completedStatus;
+			},
+		);
+		expect(submitBody?.supplied_sources).toEqual([
+			{
+				text: 'Excerpts from report',
+				title: 'Annual Report',
+				url: 'https://report.example',
+				published_date: '2026-01-15',
+			},
+			{
+				text: 'Academic paper extract',
+				doi: '10.1038/s41586-026-0001-x',
+			},
+		]);
+	});
+
+	it('ignores supplied_sources with empty or whitespace-only text', async () => {
+		let submitBody: IDataObject | undefined;
+		await runNode(
+			{
+				operation: 'verify',
+				claim: 'Some claim',
+				additionalFields: {
+					supplied_sources: {
+						sources: [
+							{
+								text: '   ',
+								url: 'https://empty.example',
+							},
+						],
+					},
+				},
+			},
+			(options) => {
+				if (options.method === 'POST' && options.url === '/verify') {
+					submitBody = options.body as IDataObject;
+					return { task_id: 'task_1' };
+				}
+				return completedStatus;
+			},
+		);
+		expect(submitBody?.supplied_sources).toBeUndefined();
+	});
+
 	it('surfaces the fields the API added: key_finding, domain, entities, warnings, visibility', async () => {
 		const { output } = await runNode(
 			{ operation: 'verify', claim: 'Some claim' },
@@ -2980,6 +3114,41 @@ describe('Lenz node - Review', () => {
 		expect(json.credits).toEqual({ charged: 12 });
 	});
 
+	it('submits supplied_sources from additionalFields', async () => {
+		let submitBody: IDataObject | undefined;
+		await runNode(
+			{
+				operation: 'reviewDraft',
+				draft: 'A review draft.',
+				additionalFields: {
+					supplied_sources: {
+						sources: [
+							{
+								text: 'Context document for review',
+								title: 'Brief',
+								url: 'https://brief.example',
+							},
+						],
+					},
+				},
+			},
+			(options) => {
+				if (options.method === 'POST') {
+					submitBody = options.body as IDataObject;
+					return { review_id: 'rev_1', status: 'queued' };
+				}
+				return completedReview('clean');
+			},
+		);
+		expect(submitBody?.supplied_sources).toEqual([
+			{
+				text: 'Context document for review',
+				title: 'Brief',
+				url: 'https://brief.example',
+			},
+		]);
+	});
+
 	describe('searched_pages on a review row', () => {
 		const withPages = (): IDataObject => ({
 			...completedReview('issues_found'),
@@ -3170,10 +3339,102 @@ describe('Lenz node - Check Citations', () => {
 		});
 	});
 
+	it('sends pairs with source_text, published_date, and standalone source_text', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'checkCitations',
+				citationInput: 'pairs',
+				citationPairs: {
+					pair: [
+						{
+							statement: 'A',
+							url: 'https://paywalled.example',
+							source_text: 'Full text behind paywall',
+							published_date: '2026-03-01',
+						},
+						{
+							statement: 'B',
+							source_text: 'Offline internal document',
+						},
+						{
+							statement: 'C',
+							source_text: 'Dated document',
+							published_date: '2026-05-10',
+						},
+						{
+							statement: 'D',
+							doi: '10.1038/example',
+							source_text: 'Paper text',
+						},
+					],
+				},
+			},
+			(options) =>
+				options.method === 'POST' ? { citecheck_id: 'cc_1', status: 'queued' } : completedCheck,
+		);
+		expect(calls[0].body).toEqual({
+			pairs: [
+				{
+					statement: 'A',
+					url: 'https://paywalled.example',
+					source_text: 'Full text behind paywall',
+					published_date: '2026-03-01',
+				},
+				{
+					statement: 'B',
+					source_text: 'Offline internal document',
+				},
+				{
+					statement: 'C',
+					source_text: 'Dated document',
+					published_date: '2026-05-10',
+				},
+				{
+					statement: 'D',
+					doi: '10.1038/example',
+					source_text: 'Paper text',
+				},
+			],
+		});
+	});
+
+	it('submits supplied_sources on checkCitations from additionalFields', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'checkCitations',
+				citationInput: 'text',
+				citationText: 'See [1].',
+				additionalFields: {
+					supplied_sources: {
+						sources: [
+							{
+								text: 'Source reference text',
+								cite: '42 U.S.C. § 1983',
+							},
+						],
+					},
+				},
+			},
+			(options) =>
+				options.method === 'POST' ? { citecheck_id: 'cc_1', status: 'queued' } : completedCheck,
+		);
+		expect(calls[0].body).toEqual({
+			text: 'See [1].',
+			max_citations: 20,
+			supplied_sources: [
+				{
+					text: 'Source reference text',
+					cite: '42 U.S.C. § 1983',
+				},
+			],
+		});
+	});
+
 	it.each([
 		[{ statement: 'A' }],
 		[{ statement: 'A', url: 'https://a.example', doi: '10.1/x' }],
 		[{ statement: 'A', doi: '10.1/x', cite: '42 U.S.C. § 1983' }],
+		[{ statement: 'A', url: 'https://a.example', doi: '10.1/x', source_text: 'Full text' }],
 		[{ url: 'https://a.example' }],
 	])('refuses a pair without a statement and exactly one source, before submitting: %j', async (pair) => {
 		const ctx = createContext(

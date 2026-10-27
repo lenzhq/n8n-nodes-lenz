@@ -84,7 +84,7 @@ describe('Review resource parameter keys (saved in 0.8.0 workflows)', () => {
 	});
 
 	it('every copy of a shared key keeps one type and never shows twice for an operation', () => {
-		for (const key of ['waitForCompletion', 'maxWaitSeconds', 'webhookUrl', 'operation']) {
+		for (const key of ['waitForCompletion', 'maxWaitSeconds', 'webhookUrl', 'operation', 'additionalFields']) {
 			const copies = props.filter((p) => p.name === key);
 			if (key !== 'operation') {
 				expect(new Set(copies.map((c) => c.type)).size).toBe(1);
@@ -97,5 +97,27 @@ describe('Review resource parameter keys (saved in 0.8.0 workflows)', () => {
 			}
 			for (const [op, n] of seen) expect([key, op, n]).toEqual([key, op, 1]);
 		}
+	});
+
+	it('supplied_sources is available under additionalFields on verify, reviewDraft, and checkCitations', () => {
+		const additional = props.find((p) => p.name === 'additionalFields');
+		expect(additional?.type).toBe('collection');
+		const ops = (additional?.displayOptions?.show?.operation as string[] | undefined) ?? [];
+		expect(ops.sort()).toEqual(['checkCitations', 'reviewDraft', 'verify']);
+
+		const options = additional?.options as INodeProperties[];
+		const supplied = options.find((o) => o.name === 'supplied_sources');
+		expect(supplied?.type).toBe('fixedCollection');
+		const sourceCollection = (supplied?.options as INodePropertyCollection[])[0];
+		const fieldNames = sourceCollection.values.map((v) => v.name).sort();
+		expect(fieldNames).toEqual(['cite', 'doi', 'published_date', 'text', 'title', 'url']);
+	});
+
+	it('citationPairs includes source_text and published_date values', () => {
+		const pairsProp = props.find((p) => p.name === 'citationPairs');
+		const values = ((pairsProp?.options as INodePropertyCollection[])[0]?.values ?? []).map((v) => v.name);
+		expect(values).toEqual(
+			expect.arrayContaining(['cite', 'doi', 'published_date', 'source_text', 'statement', 'url']),
+		);
 	});
 });

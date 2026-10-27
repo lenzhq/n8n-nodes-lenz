@@ -620,14 +620,49 @@ function mapCitations(sources: unknown): IDataObject[] {
 	// nothing else.
 	if (!Array.isArray(sources)) return [];
 	return sources
-		.filter((s): s is IDataObject => typeof s === 'object' && s !== null && !!(s as IDataObject).url)
-		.map((s) => ({
-			title: s.title ?? '',
-			url: s.url ?? '',
-			source_name: s.source_name ?? '',
-			snippet: s.snippet ?? '',
-			date: s.date ?? '',
-		}));
+		.filter(
+			(s): s is IDataObject =>
+				typeof s === 'object' &&
+				s !== null &&
+				(!!(s as IDataObject).url || (s as IDataObject).origin === 'supplied'),
+		)
+		.map((s) => {
+			const citation: IDataObject = {
+				title: s.title ?? '',
+				url: s.url ?? '',
+				source_name: s.source_name ?? '',
+				snippet: s.snippet ?? '',
+				date: s.date ?? '',
+			};
+			if (s.origin !== undefined && s.origin !== null && s.origin !== '') {
+				citation.origin = s.origin;
+			}
+			return citation;
+		});
+}
+
+function parseSuppliedSources(rawSources: unknown): IDataObject[] {
+	if (!Array.isArray(rawSources)) return [];
+	const parsed: IDataObject[] = [];
+	for (const entry of rawSources) {
+		if (!entry || typeof entry !== 'object') continue;
+		const source = entry as IDataObject;
+		const text = textOf(source.text) ?? '';
+		if (!text) continue;
+		const item: IDataObject = { text };
+		const url = textOf(source.url) ?? '';
+		if (url) item.url = url;
+		const doi = textOf(source.doi) ?? '';
+		if (doi) item.doi = doi;
+		const cite = textOf(source.cite) ?? '';
+		if (cite) item.cite = cite;
+		const title = textOf(source.title) ?? '';
+		if (title) item.title = title;
+		const publishedDate = textOf(source.published_date) ?? '';
+		if (publishedDate) item.published_date = publishedDate;
+		parsed.push(item);
+	}
+	return parsed;
 }
 
 // The claims a paused task offers, passed through as the API sent them. Only
@@ -2037,6 +2072,23 @@ export class Lenz implements INodeType {
 									'The cited DOI alone. Leave empty when the source is a URL or a legal citation.',
 							},
 							{
+								displayName: 'Published Date',
+								name: 'published_date',
+								type: 'string',
+								default: '',
+								placeholder: 'YYYY-MM-DD',
+								description: 'Publication date of the source (YYYY-MM-DD)',
+							},
+							{
+								displayName: 'Source Text',
+								name: 'source_text',
+								type: 'string',
+								typeOptions: { rows: 4 },
+								default: '',
+								description:
+									'Full text of the cited source when behind a paywall or not publicly fetchable',
+							},
+							{
 								displayName: 'Statement',
 								name: 'statement',
 								type: 'string',
@@ -2384,6 +2436,83 @@ export class Lenz implements INodeType {
 						operation: ['ask', 'assess', 'extract', 'verify', 'verifyBatch', 'reviewDraft', 'checkCitations'],
 					},
 				},
+			},
+			{
+				displayName: 'Additional Fields',
+				name: 'additionalFields',
+				type: 'collection',
+				placeholder: 'Add Field',
+				default: {},
+				displayOptions: {
+					show: {
+						operation: ['verify', 'reviewDraft', 'checkCitations'],
+					},
+				},
+				options: [
+					{
+						displayName: 'Supplied Sources',
+						name: 'supplied_sources',
+						placeholder: 'Add Source',
+						type: 'fixedCollection',
+						typeOptions: {
+							multipleValues: true,
+						},
+						default: {},
+						description: 'Source documents or excerpts supplied directly for verification',
+						options: [
+							{
+								displayName: 'Source',
+								name: 'sources',
+								values: [
+									{
+										displayName: 'Cite',
+										name: 'cite',
+										type: 'string',
+										default: '',
+										description: 'Structured legal or academic citation string',
+									},
+									{
+										displayName: 'DOI',
+										name: 'doi',
+										type: 'string',
+										default: '',
+										description: 'DOI of the source (e.g. 10.1038/nature12373)',
+									},
+									{
+										displayName: 'Published Date',
+										name: 'published_date',
+										type: 'string',
+										default: '',
+										placeholder: 'YYYY-MM-DD',
+										description: 'Publication date (YYYY-MM-DD)',
+									},
+									{
+										displayName: 'Text',
+										name: 'text',
+										type: 'string',
+										typeOptions: { rows: 4 },
+										default: '',
+										description: 'Full text or excerpt of the source document',
+									},
+									{
+										displayName: 'Title',
+										name: 'title',
+										type: 'string',
+										default: '',
+										description: 'Source title',
+									},
+									{
+										displayName: 'URL',
+										name: 'url',
+										type: 'string',
+										default: '',
+										description: 'HTTP(S) URL of the source',
+									},
+								],
+							},
+						],
+					},
+				],
 			},
 		],
 	};
@@ -2812,6 +2941,13 @@ export class Lenz implements INodeType {
 					// readable when the two disagree.
 					if (depth) {
 						submitBody.depth = depth;
+					}
+					const additionalFields = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
+					const suppliedSources = parseSuppliedSources(
+						(additionalFields.supplied_sources as IDataObject | undefined)?.sources,
+					);
+					if (suppliedSources.length > 0) {
+						submitBody.supplied_sources = suppliedSources;
 					}
 					const accepted = await lenzRequest('POST', '/verify', submitBody, {
 						idempotent: { operation, itemIndex },
@@ -3320,6 +3456,13 @@ export class Lenz implements INodeType {
 						throw new NodeOperationError(this.getNode(), message, { itemIndex });
 					});
 					if (policy) body.escalate = policy;
+					const additionalFields = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
+					const suppliedSources = parseSuppliedSources(
+						(additionalFields.supplied_sources as IDataObject | undefined)?.sources,
+					);
+					if (suppliedSources.length > 0) {
+						body.supplied_sources = suppliedSources;
+					}
 
 					const accepted = await submitJob('/review', body, operation, itemIndex, 'review_id');
 					const reviewId = (accepted.review_id as string) ?? '';
@@ -3375,7 +3518,14 @@ export class Lenz implements INodeType {
 					const body: IDataObject = {};
 					if (input === 'pairs') {
 						const raw = this.getNodeParameter('citationPairs', itemIndex, {}) as {
-							pair?: Array<{ statement?: unknown; url?: unknown; doi?: unknown; cite?: unknown }>;
+							pair?: Array<{
+								statement?: unknown;
+								url?: unknown;
+								doi?: unknown;
+								cite?: unknown;
+								source_text?: unknown;
+								published_date?: unknown;
+							}>;
 						};
 						const pairs: IDataObject[] = [];
 						for (const [n, pair] of (raw.pair ?? []).entries()) {
@@ -3383,14 +3533,23 @@ export class Lenz implements INodeType {
 							const url = textOf(pair.url) ?? '';
 							const doi = textOf(pair.doi) ?? '';
 							const cite = textOf(pair.cite) ?? '';
-							if (!statement || [url, doi, cite].filter(Boolean).length !== 1) {
+							const sourceText = textOf(pair.source_text) ?? '';
+							const publishedDate = textOf(pair.published_date) ?? '';
+							const directCount = [url, doi, cite].filter(Boolean).length;
+							if (!statement || (directCount === 0 && !sourceText) || directCount > 1) {
 								throw new NodeOperationError(
 									this.getNode(),
 									`Pair ${n + 1} needs a statement and exactly one source: a URL, a DOI or a citation`,
 									{ itemIndex },
 								);
 							}
-							pairs.push(url ? { statement, url } : doi ? { statement, doi } : { statement, cite });
+							const pairObj: IDataObject = { statement };
+							if (url) pairObj.url = url;
+							else if (doi) pairObj.doi = doi;
+							else if (cite) pairObj.cite = cite;
+							if (sourceText) pairObj.source_text = sourceText;
+							if (publishedDate) pairObj.published_date = publishedDate;
+							pairs.push(pairObj);
 						}
 						if (pairs.length === 0) {
 							returnData.push({
@@ -3429,6 +3588,13 @@ export class Lenz implements INodeType {
 					if (language) body.language = language;
 					const webhookUrl = String(options.webhookUrl ?? '').trim();
 					if (webhookUrl) body.webhook_url = webhookUrl;
+					const additionalFields = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
+					const suppliedSources = parseSuppliedSources(
+						(additionalFields.supplied_sources as IDataObject | undefined)?.sources,
+					);
+					if (suppliedSources.length > 0) {
+						body.supplied_sources = suppliedSources;
+					}
 
 					const accepted = await submitJob('/citecheck', body, operation, itemIndex, 'citecheck_id');
 					const citecheckId = (accepted.citecheck_id as string) ?? '';

@@ -39,16 +39,16 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 |---|---|---|
 | `assess` | Fast 3-model panel verdict (~15s), one entry per claim found in the text | `text`**\***, `language` |
 | `extract` | Pull verifiable claims out of text, or out of a public web page given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `focus`, `language` |
-| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
+| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language`, `additionalFields` |
 
 ### `resource: "review"` — Review
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language` |
+| `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language`, `additionalFields` |
 | `getCitationCheck` | Retrieve a citation check by its ID | `citecheckId`**\*** |
 | `getReview` | Retrieve a review by its ID | `reviewId`**\***, `issuesOnly` |
-| `reviewDraft` | Review a whole draft: find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `draft`**\***, `waitForCompletion`, `reviewOptions`, `visibility`, `language` |
+| `reviewDraft` | Review a whole draft: find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `draft`**\***, `waitForCompletion`, `reviewOptions`, `visibility`, `language`, `additionalFields` |
 
 ### `resource: "verification"` — Verification
 
