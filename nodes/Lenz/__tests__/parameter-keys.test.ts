@@ -23,6 +23,9 @@ describe('parameter keys survive the Claim relabel', () => {
 	it('Extract keeps "Text" on `text`', () => {
 		const field = forOperation('extract').find((p) => p.displayName === 'Text');
 		expect(field?.name).toBe('text');
+		expect(forOperation('extract').map((p) => p.name)).toEqual(
+			expect.arrayContaining(['inputSource', 'text', 'binaryPropertyName']),
+		);
 	});
 
 	it('Verify keeps "Claim" on `claim`', () => {
@@ -49,8 +52,9 @@ describe('Review resource parameter keys (saved in 0.8.0 workflows)', () => {
 	const names = (op: string) => forOperation(op).map((p) => p.name);
 
 	it.each([
-		['reviewDraft', ['draft', 'waitForCompletion', 'reviewOptions', 'visibility', 'language']],
+		['reviewDraft', ['draft', 'waitForCompletion', 'reviewOptions', 'visibility', 'language', 'inputSource', 'binaryPropertyName']],
 		['getReview', ['reviewId', 'issuesOnly']],
+		['exportReview', ['reviewId', 'binaryPropertyName']],
 		['checkCitations', ['citationInput', 'citationText', 'citationPairs', 'maxCitations', 'citationOptions']],
 		['getCitationCheck', ['citecheckId']],
 	])('%s keeps its keys', (op, keys) => {

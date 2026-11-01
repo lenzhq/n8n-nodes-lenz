@@ -10,7 +10,7 @@ jest.mock('n8n-workflow', () => ({
 	sleep: jest.fn(async () => {}),
 }));
 
-import { Lenz, POLL_TIMEOUT_MS, apiVersionFor } from '../Lenz.node';
+import { Lenz, POLL_TIMEOUT_MS, apiVersionFor, normalizeUploadFile } from '../Lenz.node';
 
 // A responder receives the httpRequest options and returns the mocked response
 // body (or throws to simulate an API/transport error).
@@ -55,6 +55,7 @@ function createContext(
 	// The node's identity is a test input for the Idempotency-Key: its name is
 	// user-editable free text, and its id is absent on older n8n versions.
 	nodeIdentity: { name?: string; id?: string; typeVersion?: number } = {},
+	binaryDataByItem?: Array<Record<string, { buffer: Buffer; fileName?: string; mimeType?: string }>>,
 ): { ctx: IExecuteFunctions; httpMock: jest.Mock; calls: IHttpRequestOptions[] } {
 	const typeVersion = nodeIdentity.typeVersion ?? 1;
 	const items = Array.from({ length: itemCount }, () => ({ json: {} }));
@@ -62,6 +63,33 @@ function createContext(
 	const httpMock = jest.fn(async (_credType: string, options: IHttpRequestOptions) => {
 		calls.push(options);
 		return responder(options);
+	});
+	const assertBinaryDataMock = jest.fn((itemIndex: number, propertyName: string) => {
+		const itemBinary = binaryDataByItem?.[itemIndex] ?? {};
+		const entry = itemBinary[propertyName];
+		if (!entry) {
+			throw new Error(`No binary data on item ${itemIndex} property "${propertyName}"`);
+		}
+		return {
+			data: entry.buffer.toString('base64'),
+			mimeType: entry.mimeType ?? 'application/octet-stream',
+			fileName: entry.fileName,
+		};
+	});
+	const getBinaryDataBufferMock = jest.fn(async (itemIndex: number, propertyName: string) => {
+		const itemBinary = binaryDataByItem?.[itemIndex] ?? {};
+		const entry = itemBinary[propertyName];
+		if (!entry) {
+			throw new Error(`No binary data on item ${itemIndex} property "${propertyName}"`);
+		}
+		return entry.buffer;
+	});
+	const prepareBinaryDataMock = jest.fn(async (buffer: Buffer, fileName?: string, mimeType?: string) => {
+		return {
+			data: buffer.toString('base64'),
+			fileName,
+			mimeType,
+		};
 	});
 	const ctx = {
 		getInputData: jest.fn(() => items),
@@ -94,6 +122,9 @@ function createContext(
 		continueOnFail: jest.fn(() => continueOnFail),
 		helpers: {
 			httpRequestWithAuthentication: httpMock,
+			assertBinaryData: assertBinaryDataMock,
+			getBinaryDataBuffer: getBinaryDataBufferMock,
+			prepareBinaryData: prepareBinaryDataMock,
 		},
 	} as unknown as IExecuteFunctions;
 	return { ctx, httpMock, calls };
@@ -105,6 +136,7 @@ async function runNode(
 	continueOnFail = false,
 	itemCount = 1,
 	nodeIdentity: { name?: string; id?: string; typeVersion?: number } = {},
+	binaryDataByItem?: Array<Record<string, { buffer: Buffer; fileName?: string; mimeType?: string }>>,
 ) {
 	const { ctx, httpMock, calls } = createContext(
 		params,
@@ -112,6 +144,7 @@ async function runNode(
 		continueOnFail,
 		itemCount,
 		nodeIdentity,
+		binaryDataByItem,
 	);
 	const node = new Lenz();
 	const result = await node.execute.call(ctx);
@@ -4045,5 +4078,585 @@ describe('Lenz node - the collapsed failure codes and a quick No Public Record r
 			expect(failure.failure_reason).toBe(reason);
 			expect((output[0].json as IDataObject).passed).toBeNull();
 		}
+	});
+
+	describe('File upload and export (extractFile, reviewFile, exportReview)', () => {
+		it('extract: uploads binary file to /extract/file with multipart body and normalized filename', async () => {
+			const dummyDocx = Buffer.from('PK\x03\x04test-docx-content');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'data',
+					focus: 'financial figures',
+					language: 'en',
+				},
+				(options) => {
+					capturedOptions = options;
+					return {
+						status: 'ready',
+						claim: 'Revenue was $10M.',
+						identified_claims: ['Revenue was $10M.'],
+						domain: 'Finance',
+					};
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyDocx, fileName: 'report.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } }],
+			);
+
+			expect(capturedOptions).toBeDefined();
+			expect(capturedOptions!.method).toBe('POST');
+			expect(capturedOptions!.url).toBe('/extract/file');
+			expect(capturedOptions!.json).toBe(false);
+			const headers = capturedOptions!.headers as IDataObject;
+			expect(headers['Content-Type']).toMatch(/^multipart\/form-data; boundary=----LenzN8nBoundary/);
+			expect(headers['Idempotency-Key']).toMatch(/^n8n:exec-1:/);
+
+			const bodyBuffer = capturedOptions!.body as Buffer;
+			const bodyString = bodyBuffer.toString('utf8');
+			expect(bodyString).toContain('name="file"; filename="report.docx"');
+			expect(bodyString).toContain('name="language"\r\n\r\nen');
+			expect(bodyString).toContain('name="focus"\r\n\r\nfinancial figures');
+			expect(bodyBuffer.includes(dummyDocx)).toBe(true);
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('ready');
+			expect(json.identified_claims).toEqual(['Revenue was $10M.']);
+			expect(json.not_a_claim).toBe(false);
+		});
+
+		it('extract: unnamed docx binary item defaults to upload.docx', async () => {
+			const dummyDocx = Buffer.from('PK\x03\x04test');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'data',
+				},
+				(options) => {
+					capturedOptions = options;
+					return { status: 'ready', identified_claims: [] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyDocx, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } }],
+			);
+
+			const bodyString = (capturedOptions!.body as Buffer).toString('utf8');
+			expect(bodyString).toContain('name="file"; filename="upload.docx"');
+		});
+
+		it('extract: saved workflow without inputSource defaults to text input', async () => {
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'extract',
+					text: 'The sky is blue.',
+				},
+				(options) => {
+					capturedOptions = options;
+					return { status: 'ready', identified_claims: ['The sky is blue.'] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			expect(capturedOptions!.url).toBe('/extract');
+			expect(capturedOptions!.body).toEqual({ text: 'The sky is blue.' });
+			expect((output[0].json as IDataObject).identified_claims).toEqual(['The sky is blue.']);
+		});
+
+		it('reviewDraft: uploads binary file to /review/file and polls until complete', async () => {
+			const dummyPdf = Buffer.from('%PDF-1.4 test pdf content');
+			let submitOptions: IHttpRequestOptions | undefined;
+			let pollOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'binary',
+					binaryPropertyName: 'attachment',
+					waitForCompletion: true,
+					visibility: 'private',
+					reviewOptions: {
+						maxWaitSeconds: 300,
+						webhookUrl: 'https://webhook.example/review',
+					},
+				},
+				(options) => {
+					if (options.method === 'POST' && options.url === '/review/file') {
+						submitOptions = options;
+						return { review_id: 'rev_file_1', status: 'queued' };
+					}
+					if (options.method === 'GET' && options.url === '/reviews/rev_file_1') {
+						pollOptions = options;
+						return {
+							review_id: 'rev_file_1',
+							status: 'completed',
+							outcome: 'clean',
+							issues: [],
+						};
+					}
+					throw new Error(`Unexpected request: ${options.method} ${options.url}`);
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ attachment: { buffer: dummyPdf, fileName: 'paper.pdf', mimeType: 'application/pdf' } }],
+			);
+
+			expect(submitOptions).toBeDefined();
+			expect(submitOptions!.url).toBe('/review/file');
+			const bodyString = (submitOptions!.body as Buffer).toString('utf8');
+			expect(bodyString).toContain('name="file"; filename="paper.pdf"');
+			expect(bodyString).toContain('name="visibility"\r\n\r\nprivate');
+			expect(bodyString).toContain('name="webhook_url"\r\n\r\nhttps://webhook.example/review');
+
+			expect(pollOptions).toBeDefined();
+			expect(pollOptions!.url).toBe('/reviews/rev_file_1');
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('completed');
+			expect(json.outcome).toBe('clean');
+			expect(json.passed).toBe(true);
+		});
+
+		it('reviewDraft: reuses idempotency key on review_in_flight (429) retry', async () => {
+			const dummyDocx = Buffer.from('PK\x03\x04test');
+			let attempts = 0;
+			const keysSeen: string[] = [];
+
+			await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'binary',
+					waitForCompletion: false,
+				},
+				(options) => {
+					if (options.method === 'POST' && options.url === '/review/file') {
+						attempts++;
+						const key = (options.headers as IDataObject)['Idempotency-Key'] as string;
+						keysSeen.push(key);
+						if (attempts === 1) {
+							throw apiError(429, { code: 'review_in_flight', retry_after_seconds: 1 });
+						}
+						return { review_id: 'rev_retry_1', status: 'queued' };
+					}
+					throw new Error(`Unexpected: ${options.method} ${options.url}`);
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyDocx, fileName: 'doc.docx' } }],
+			);
+
+			expect(attempts).toBe(2);
+			expect(keysSeen).toHaveLength(2);
+			expect(keysSeen[0]).toBe(keysSeen[1]);
+			expect(keysSeen[0]).toMatch(/^n8n:exec-1:/);
+		});
+
+		it('refuses 0-byte binary file upload', async () => {
+			const emptyBuffer = Buffer.alloc(0);
+
+			await expect(
+				runNode(
+					{
+						operation: 'extract',
+						inputSource: 'binary',
+					},
+					noCall,
+					false,
+					1,
+					{ typeVersion: 1.3 },
+					[{ data: { buffer: emptyBuffer, fileName: 'empty.docx' } }],
+				),
+			).rejects.toThrow('Binary field "data" is empty (0 bytes)');
+		});
+
+		it('refuses binary file exceeding 10 MB limit', async () => {
+			const oversizedBuffer = Buffer.alloc(10 * 1024 * 1024 + 1);
+
+			await expect(
+				runNode(
+					{
+						operation: 'extract',
+						inputSource: 'binary',
+					},
+					noCall,
+					false,
+					1,
+					{ typeVersion: 1.3 },
+					[{ data: { buffer: oversizedBuffer, fileName: 'big.docx' } }],
+				),
+			).rejects.toThrow('exceeds the 10 MB (10,485,760 bytes) limit');
+		});
+
+		it('exportReview: downloads docx binary and returns binary data with filename and export source', async () => {
+			const docxBytes = Buffer.from('PK\x03\x04word-document-content');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'exportReview',
+					reviewId: 'rev_123',
+					binaryPropertyName: 'exportedDoc',
+				},
+				(options) => {
+					capturedOptions = options;
+					return {
+						statusCode: 200,
+						headers: {
+							'content-disposition': 'attachment; filename="annotated-review.docx"',
+							'x-lenz-export-source': 'original',
+						},
+						body: docxBytes,
+					};
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			expect(capturedOptions).toBeDefined();
+			expect(capturedOptions!.method).toBe('GET');
+			expect(capturedOptions!.url).toBe('/reviews/rev_123/export');
+			expect(capturedOptions!.qs).toEqual({ format: 'docx' });
+			expect(capturedOptions!.encoding).toBe('arraybuffer');
+			expect(capturedOptions!.json).toBe(false);
+			expect(capturedOptions!.returnFullResponse).toBe(true);
+
+			const item = output[0];
+			expect(item.json).toEqual({
+				review_id: 'rev_123',
+				format: 'docx',
+				file_name: 'annotated-review.docx',
+				export_source: 'original',
+			});
+			expect(item.binary).toBeDefined();
+			expect(item.binary!.exportedDoc).toBeDefined();
+			expect(item.binary!.exportedDoc.fileName).toBe('annotated-review.docx');
+			expect(item.binary!.exportedDoc.mimeType).toBe(
+				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+			);
+			expect(Buffer.from(item.binary!.exportedDoc.data, 'base64')).toEqual(docxBytes);
+		});
+
+		it('exportReview: handles 409 error with binary response body', async () => {
+			const errorJson = JSON.stringify({
+				detail: 'Review is still processing',
+				code: 'not_ready',
+			});
+			const errorBuffer = Buffer.from(errorJson, 'utf8');
+
+			const err = apiError(409, undefined, 'Conflict');
+			(err as unknown as { context: { data: Buffer } }).context = { data: errorBuffer };
+
+			const { output } = await runNode(
+				{
+					operation: 'exportReview',
+					reviewId: 'rev_not_ready',
+				},
+				() => {
+					throw err;
+				},
+				true,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			// Under continueOnFail, error output is returned
+			expect(output[0].json).toBeDefined();
+			expect((output[0].json as IDataObject).code).toBe('not_ready');
+		});
+
+		it('exportReview: decodes binary error body properly in responseBodyOf', async () => {
+			const err = apiError(409, { code: 'not_ready', detail: 'Still running' });
+			// Simulate raw ArrayBuffer in error.body or context.data
+			const rawBuf = Buffer.from(JSON.stringify({ code: 'not_ready', detail: 'Still running' }));
+			(err as unknown as { context: { data: Buffer } }).context = { data: rawBuf };
+
+			const { output } = await runNode(
+				{
+					operation: 'exportReview',
+					reviewId: 'rev_not_ready_2',
+				},
+				() => {
+					throw err;
+				},
+				true,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			const json = output[0].json as IDataObject;
+			expect(json.code).toBe('not_ready');
+		});
+
+		it.each([1.2, 1.3])(
+			'exportReview: hydrates binary error body at typeVersion %s for thrown error description and continueOnFail output',
+			async (typeVersion) => {
+				const errorDetail = 'URL-sourced reviews cannot be exported as DOCX.';
+				const errorBuf = Buffer.from(
+					JSON.stringify({
+						detail: errorDetail,
+						code: 'not_exportable',
+					}),
+					'utf8',
+				);
+
+				const createErr = () => {
+					const transport = Object.assign(new Error('Request failed with status code 400'), {
+						statusCode: 400,
+						response: { status: 400, data: errorBuf },
+					});
+					return new NodeApiError(
+						{ name: 'Lenz', type: 'lenz', typeVersion, position: [0, 0] } as never,
+						transport as never,
+					);
+				};
+
+				// Thrown error has description populated from binary error body
+				let thrownError: unknown;
+				try {
+					await runNode(
+						{
+							operation: 'exportReview',
+							reviewId: 'rev_url_only',
+						},
+						() => {
+							throw createErr();
+						},
+						false,
+						1,
+						{ typeVersion },
+					);
+				} catch (err) {
+					thrownError = err;
+				}
+
+				expect(thrownError).toBeInstanceOf(NodeApiError);
+				expect((thrownError as NodeApiError).description).toContain(errorDetail);
+
+				// Under continueOnFail: true, output json has code and error populated
+				const { output } = await runNode(
+					{
+						operation: 'exportReview',
+						reviewId: 'rev_url_only',
+					},
+					() => {
+						throw createErr();
+					},
+					true,
+					1,
+					{ typeVersion },
+				);
+
+				expect(output).toHaveLength(1);
+				const json = output[0].json as IDataObject;
+				expect(json.code).toBe('not_exportable');
+				expect(typeof json.error).toBe('string');
+				expect(json.error).toBeTruthy();
+			},
+		);
+
+		it('generates different Idempotency-Key headers for two different file buffers on the same item index', async () => {
+			const bufA = Buffer.from('PDF file content version 1');
+			const bufB = Buffer.from('PDF file content version 2');
+			let keyA: string | undefined;
+			let keyB: string | undefined;
+
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'file',
+				},
+				(options) => {
+					keyA = (options.headers as IDataObject)?.['Idempotency-Key'] as string;
+					return { status: 'ready', identified_claims: [] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ file: { buffer: bufA, fileName: 'doc.pdf', mimeType: 'application/pdf' } }],
+			);
+
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'file',
+				},
+				(options) => {
+					keyB = (options.headers as IDataObject)?.['Idempotency-Key'] as string;
+					return { status: 'ready', identified_claims: [] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ file: { buffer: bufB, fileName: 'doc.pdf', mimeType: 'application/pdf' } }],
+			);
+
+			expect(keyA).toBeDefined();
+			expect(keyB).toBeDefined();
+			expect(keyA).not.toEqual(keyB);
+		});
+
+		it('reviewDraft: serializes escalate and supplied_sources as JSON strings in multipart form fields for binary upload', async () => {
+			const dummyDocx = Buffer.from('PK\x03\x04test-review-binary');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'binary',
+					binaryPropertyName: 'file',
+					waitForCompletion: false,
+					reviewOptions: {
+						depth: 'deep',
+						maxVerifications: 2,
+						suggestEdits: true,
+					},
+					additionalFields: {
+						supplied_sources: {
+							sources: [
+								{ url: 'https://example.com/source1', text: 'Supplied source content 1' },
+							],
+						},
+					},
+				},
+				(options) => {
+					capturedOptions = options;
+					return { review_id: 'rev_multipart_opt', status: 'queued' };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ file: { buffer: dummyDocx, fileName: 'brief.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } }],
+			);
+
+			expect(capturedOptions).toBeDefined();
+			expect(capturedOptions!.url).toBe('/review/file');
+			const bodyString = (capturedOptions!.body as Buffer).toString('utf8');
+
+			expect(bodyString).toContain('name="escalate"');
+			expect(bodyString).toContain(JSON.stringify({ max_verifications: 2, depth: 'deep', suggest_edits: true }));
+
+			expect(bodyString).toContain('name="supplied_sources"');
+			expect(bodyString).toContain(
+				JSON.stringify([{ text: 'Supplied source content 1', url: 'https://example.com/source1' }]),
+			);
+		});
+
+		it('normalizeUploadFile: correctly handles export.tmp with docx MIME and application/octet-stream with no filename', async () => {
+			const docxMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+			const res1 = normalizeUploadFile('export.tmp', docxMime);
+			expect(res1.filename).toBe('export.tmp.docx');
+			expect(res1.contentType).toBe(docxMime);
+
+			const res2 = normalizeUploadFile(undefined, 'application/octet-stream');
+			expect(res2.filename).toBe('upload');
+			expect(res2.contentType).toBe('application/octet-stream');
+
+			let capturedOptions: IHttpRequestOptions | undefined;
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'file',
+				},
+				(options) => {
+					capturedOptions = options;
+					return { status: 'ready', identified_claims: [] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ file: { buffer: Buffer.from('test-tmp'), fileName: 'export.tmp', mimeType: docxMime } }],
+			);
+
+			const bodyStr = (capturedOptions!.body as Buffer).toString('utf8');
+			expect(bodyStr).toContain('filename="export.tmp.docx"');
+		});
+
+		it('extract: blank text with invalid >300-char focus returns empty_input skipped instead of throwing', async () => {
+			const longFocus = 'x'.repeat(305);
+			const { output } = await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'text',
+					text: '   ',
+					focus: longFocus,
+				},
+				() => {
+					throw new Error('Should not be called');
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			expect(output).toHaveLength(1);
+			expect(output[0].json).toEqual({
+				skipped: true,
+				reason: 'empty_input',
+			});
+		});
+
+		it('reviewDraft: blank draft with invalid reviewOptions returns empty_input skipped instead of throwing', async () => {
+			const { output } = await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'text',
+					draft: '',
+					reviewOptions: {
+						maxWaitSeconds: 'invalid-non-number',
+					},
+				},
+				() => {
+					throw new Error('Should not be called');
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			expect(output).toHaveLength(1);
+			expect(output[0].json).toEqual({
+				skipped: true,
+				reason: 'empty_input',
+			});
+		});
+
+		it('exportReview: throws NodeOperationError when export response body is empty (0 bytes)', async () => {
+			await expect(
+				runNode(
+					{
+						operation: 'exportReview',
+						reviewId: 'rev_empty_export',
+					},
+					() => ({
+						statusCode: 200,
+						headers: {
+							'content-disposition': 'attachment; filename="empty.docx"',
+						},
+						body: Buffer.from([]),
+					}),
+					false,
+					1,
+					{ typeVersion: 1.3 },
+				),
+			).rejects.toThrow('Lenz returned an empty document export.');
+		});
 	});
 });
