@@ -44,10 +44,12 @@ long time inside a webhook. It also gives up if the pipeline overruns, returning
 `status: "timeout"` rather than a verdict; see the branching rule below.
 
 **`extract`** — free, and does not check anything. It pulls the verifiable
-claims out of a block of text, as plain strings. `text` can also be a single
-public web page URL: Lenz reads the page, or a YouTube video's transcript, and
-extracts the claims from its first 50,000 characters. A URL call typically
-takes 5-40 seconds; pages behind a login (Facebook, Instagram, Threads,
+claims out of a block of text, an uploaded document or image file, or a public
+URL, as plain strings. You can hand it text, binary data from an incoming file
+node (.docx, .pdf up to 100 pages, .png, .jpg/.jpeg, .webp up to 10 MB), or a
+single public web page, Google Doc, PDF, YouTube video, or image URL: Lenz reads
+the page, document, video transcript, or image and extracts claims. A URL call
+typically takes 5-40 seconds; pages behind a login (Facebook, Instagram, Threads,
 LinkedIn) can't be read.
 
 **For a paragraph, you usually do not need it before `assess`.** `assess`
@@ -60,7 +62,7 @@ choose, filtering or deduplicating the list, storing it, or checking a subset.
 **For a document, `extract` first is the designed path, not a redundancy.**
 `assess` truncates a single text at 10,000 characters and says nothing about
 having done so — the claims past the cut are silently never checked. `extract`
-accepts 50,000. So anything article- or transcript-sized goes to `extract`,
+accepts 50,000 (or uploaded files up to 100 pages / 10 MB). So anything article- or transcript-sized goes to `extract`,
 then its claims to `assess`; one `extract` output is one `assess` call. Sending
 a long document straight to `assess` is the silently-lossy option.
 
