@@ -419,7 +419,32 @@ function responseBodyOf(error: unknown): IDataObject {
 		e.error,
 	];
 	for (const c of candidates) {
-		if (c && typeof c === 'object' && !Array.isArray(c)) return c as IDataObject;
+		if (Buffer.isBuffer(c) || c instanceof ArrayBuffer || ArrayBuffer.isView(c)) {
+			try {
+				let buf: Buffer;
+				if (Buffer.isBuffer(c)) {
+					buf = c;
+				} else if (c instanceof ArrayBuffer) {
+					buf = Buffer.from(c);
+				} else {
+					buf = Buffer.from(c.buffer, c.byteOffset, c.byteLength);
+				}
+				const text = buf.toString('utf8');
+				const parsed = JSON.parse(text);
+				if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as IDataObject;
+			} catch {
+				// Non-JSON buffer
+			}
+		} else if (typeof c === 'string' && c.trim().startsWith('{')) {
+			try {
+				const parsed = JSON.parse(c);
+				if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as IDataObject;
+			} catch {
+				// Non-JSON string
+			}
+		} else if (c && typeof c === 'object' && !Array.isArray(c)) {
+			return c as IDataObject;
+		}
 	}
 	return {};
 }
@@ -584,6 +609,141 @@ function describeApiError(
 		description: text.description,
 		httpCode,
 	});
+}
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MiB
+
+function fnv1aBytes(buf: Buffer): string {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < buf.length; i++) {
+		hash ^= buf[i];
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash.toString(36);
+}
+
+const SUPPORTED_UPLOAD_EXTENSIONS: Record<string, string> = {
+	'.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+	'.pdf': 'application/pdf',
+	'.png': 'image/png',
+	'.jpg': 'image/jpeg',
+	'.jpeg': 'image/jpeg',
+	'.webp': 'image/webp',
+};
+
+const SUPPORTED_UPLOAD_MIMES: Record<string, string> = {
+	'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+	'application/pdf': '.pdf',
+	'image/png': '.png',
+	'image/jpeg': '.jpg',
+	'image/webp': '.webp',
+};
+
+export function normalizeUploadFile(fileName?: string, mimeType?: string): { filename: string; contentType: string } {
+	let raw = typeof fileName === 'string' ? fileName : '';
+	// Strip directory components (/ or \), control characters ([\x00-\x1f\x7f]), and "
+	// eslint-disable-next-line no-control-regex
+	raw = raw.replace(/[/\\]/g, '').replace(/[\x00-\x1f\x7f"]/g, '').trim();
+
+	let mime = typeof mimeType === 'string' ? mimeType.trim().toLowerCase() : '';
+	if (mime.includes(';')) {
+		mime = mime.split(';')[0].trim();
+	}
+	if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(mime)) {
+		mime = 'application/octet-stream';
+	}
+
+	let filename = raw;
+	const lower = filename.toLowerCase();
+	const lastDot = lower.lastIndexOf('.');
+	const ext = lastDot !== -1 ? lower.slice(lastDot) : '';
+
+	if (mime in SUPPORTED_UPLOAD_MIMES && !(ext in SUPPORTED_UPLOAD_EXTENSIONS)) {
+		filename = (filename || 'upload') + SUPPORTED_UPLOAD_MIMES[mime];
+	} else if (!filename) {
+		filename = 'upload';
+	}
+
+	let contentType = mime;
+	if (!contentType || contentType === 'application/octet-stream') {
+		const lowerName = filename.toLowerCase();
+		const matchedExt = Object.keys(SUPPORTED_UPLOAD_EXTENSIONS).find((e) => lowerName.endsWith(e));
+		if (matchedExt) {
+			contentType = SUPPORTED_UPLOAD_EXTENSIONS[matchedExt];
+		} else {
+			contentType = 'application/octet-stream';
+		}
+	}
+
+	return { filename, contentType };
+}
+
+function buildMultipartBody(
+	file: { filename: string; contentType: string; content: Buffer },
+	fields: Record<string, string>,
+): { body: Buffer; contentType: string } {
+	const boundary = `----LenzN8nBoundary${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+	const chunks: Buffer[] = [];
+
+	for (const [key, value] of Object.entries(fields)) {
+		const sanitizedKey = key.replace(/[\r\n]/g, '');
+		const sanitizedValue = value.replace(/[\r\n]/g, '');
+		chunks.push(
+			Buffer.from(
+				`--${boundary}\r\nContent-Disposition: form-data; name="${sanitizedKey}"\r\n\r\n${sanitizedValue}\r\n`,
+				'utf8',
+			),
+		);
+	}
+
+	const escapedFilename = file.filename.replace(/["\\\r\n]/g, '');
+	const sanitizedContentType = file.contentType.replace(/[\r\n]/g, '');
+	chunks.push(
+		Buffer.from(
+			`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${escapedFilename}"\r\nContent-Type: ${sanitizedContentType}\r\n\r\n`,
+			'utf8',
+		),
+	);
+	chunks.push(file.content);
+	chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+
+	return {
+		body: Buffer.concat(chunks),
+		contentType: `multipart/form-data; boundary=${boundary}`,
+	};
+}
+
+function parseExportFilename(contentDisposition: unknown, fallbackId: string): string {
+	const fallback = `lenz-check-${fallbackId}.docx`;
+	if (typeof contentDisposition !== 'string') return fallback;
+
+	const sanitize = (name: string): string => {
+		// eslint-disable-next-line no-control-regex
+		const cleaned = name.replace(/[/\\]/g, '').replace(/[\x00-\x1f\x7f"]/g, '').trim();
+		return cleaned || fallback;
+	};
+
+	const utf8Match = /filename\*=UTF-8''([^;\r\n]+)/i.exec(contentDisposition);
+	if (utf8Match) {
+		try {
+			const decoded = decodeURIComponent(utf8Match[1].trim());
+			return sanitize(decoded);
+		} catch {
+			// Malformed percent encoding
+		}
+	}
+
+	const quotedMatch = /filename="([^"\r\n]+)"/i.exec(contentDisposition);
+	if (quotedMatch) {
+		return sanitize(quotedMatch[1].trim());
+	}
+
+	const plainMatch = /filename=([^;\s\r\n]+)/i.exec(contentDisposition);
+	if (plainMatch) {
+		return sanitize(plainMatch[1].trim());
+	}
+
+	return fallback;
 }
 
 // Stable fingerprint of a request, mixed into the Idempotency-Key so the key
@@ -1146,6 +1306,39 @@ function fillLegacyUsageKeys(body: IDataObject): IDataObject {
 }
 
 /**
+ * When `httpRequestWithAuthentication` throws on `encoding: 'arraybuffer'`,
+ * the raw response data is a binary buffer or ArrayBuffer rather than parsed JSON.
+ * NodeApiError constructs with a generic message and "Request failed with status code XXX" description.
+ * This helper parses the binary body and hydrates context.data and description across all node versions.
+ */
+function hydrateBinaryError(error: unknown): void {
+	if (!error || typeof error !== 'object') return;
+	const e = error as IDataObject;
+	const eData =
+		(e.context as IDataObject | undefined)?.data ??
+		(e.response as IDataObject | undefined)?.data ??
+		e.body;
+	const isBinary = Buffer.isBuffer(eData) || eData instanceof ArrayBuffer || ArrayBuffer.isView(eData);
+	if (!isBinary) return;
+
+	const parsed = responseBodyOf(error);
+	if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length > 0) {
+		if (!e.context || typeof e.context !== 'object') e.context = {};
+		(e.context as IDataObject).data = parsed;
+		if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
+			const detail = parsed.detail.trim();
+			if (
+				typeof e.description !== 'string' ||
+				!e.description ||
+				/^Request failed with status code \d+$/i.test(String(e.description))
+			) {
+				e.description = detail;
+			}
+		}
+	}
+}
+
+/**
  * A refusal answered in the newer shape, rewritten IN PLACE as the older shape
  * (legacyErrorBody), so everything that reads the error afterwards (the
  * messages, the error output's fields, the retry logic) sees what a version
@@ -1156,6 +1349,15 @@ function readAsLegacyError(node: INode, error: unknown, method: string, path: st
 	const status = statusCodeOf(error);
 	const body = responseBodyOf(error);
 	if (status === undefined || status < 400 || !Object.keys(body).length) return;
+	const eContext = (error as { context?: IDataObject })?.context;
+	if (eContext && (Buffer.isBuffer(eContext.data) || typeof eContext.data === 'string' || eContext.data instanceof ArrayBuffer || ArrayBuffer.isView(eContext.data))) {
+		eContext.data = body;
+	} else {
+		const eAny = error as Record<string, unknown>;
+		if (eAny && (Buffer.isBuffer(eAny.body) || typeof eAny.body === 'string' || eAny.body instanceof ArrayBuffer || ArrayBuffer.isView(eAny.body))) {
+			eAny.body = body;
+		}
+	}
 	const legacy = legacyErrorBody(status, body, method, path.split('?')[0]);
 	const before = bodyDescription(node, body, status);
 	for (const key of Object.keys(body)) delete body[key];
@@ -1163,6 +1365,10 @@ function readAsLegacyError(node: INode, error: unknown, method: string, path: st
 	const e = error as { description?: string | null };
 	if (before !== undefined && e && typeof e === 'object' && e.description === before) {
 		e.description = bodyDescription(node, legacy, status) ?? null;
+	} else if (e && typeof e === 'object' && typeof e.description === 'string' && /^Request failed with status code \d+$/i.test(e.description)) {
+		if (typeof legacy.error === 'string' && legacy.error) {
+			e.description = legacy.error;
+		}
 	}
 }
 
@@ -1204,6 +1410,7 @@ const ERROR_ECHO_CODES = new Set([
 
 const isReviewFamily = (path: string): boolean =>
 	path === '/review' ||
+	path === '/review/file' ||
 	path.startsWith('/reviews/') ||
 	path === '/citecheck' ||
 	path.startsWith('/citechecks/');
@@ -1265,7 +1472,7 @@ export function legacyErrorBody(
 	// Work that failed on our side answers 502 `internal` in the newer shape;
 	// the older one named the step (the same two endpoints, the same 502).
 	if (status === 502 && code === 'internal' && method === 'POST') {
-		const older = path === '/assess' ? 'framing_failed' : path === '/extract' ? 'extraction_failed' : '';
+		const older = path === '/assess' ? 'framing_failed' : path === '/extract' || path === '/extract/file' ? 'extraction_failed' : '';
 		if (older) {
 			code = older;
 			out.code = older;
@@ -1277,7 +1484,7 @@ export function legacyErrorBody(
 		if (code === 'not_authenticated') delete out.code;
 		if (status === 422) {
 			const detail = out.detail;
-			if (method === 'POST' && path === '/review' && typeof detail === 'string') {
+			if (method === 'POST' && (path === '/review' || path === '/review/file') && typeof detail === 'string') {
 				if (code === 'blank_input' || code === 'unsupported_language') {
 					out.code = 'validation_error';
 					if (code === 'unsupported_language' && !detail.startsWith('language: ')) {
@@ -1568,7 +1775,8 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text, or out of a public web page, Google Doc, PDF, YouTube video, or image given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
+						description:
+							'Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp), or a public web page, Google Doc, PDF, YouTube video, or image URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -1597,6 +1805,13 @@ export class Lenz implements INodeType {
 						action: 'Check citations',
 					},
 					{
+						name: 'Export Review',
+						value: 'exportReview',
+						description:
+							'Download an annotated Word document (.docx) with inline verification comments for a completed text or file review',
+						action: 'Export a completed review as a word document',
+					},
+					{
 						name: 'Get Citation Check',
 						value: 'getCitationCheck',
 						description: 'Retrieve a citation check by its ID',
@@ -1612,7 +1827,7 @@ export class Lenz implements INodeType {
 						name: 'Review Draft',
 						value: 'reviewDraft',
 						description:
-							'Review a whole draft: find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations',
+							'Review a whole draft, URL, or uploaded file (.docx, .pdf, .png, .jpg, .webp): find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations',
 						action: 'Review a draft',
 					},
 				],
@@ -1760,7 +1975,8 @@ export class Lenz implements INodeType {
 					{
 						name: 'Extract Claims',
 						value: 'extract',
-						description: 'Pull verifiable claims out of text, or out of a public web page, Google Doc, PDF, YouTube video, or image given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
+						description:
+							'Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp), or a public web page, Google Doc, PDF, YouTube video, or image URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -1800,6 +2016,39 @@ export class Lenz implements INodeType {
 				description: 'The claim to check. If it contains several claims, each is assessed separately.',
 			},
 			{
+				displayName: 'Input',
+				name: 'inputSource',
+				type: 'options',
+				options: [
+					{
+						name: 'Binary File',
+						value: 'binary',
+						description: 'An uploaded .docx, .pdf, .png, .jpg, or .webp file from an input binary field (up to 10 MB)',
+					},
+					{
+						name: 'Text or URL',
+						value: 'text',
+						description: 'Plain text or a public http(s) URL (web page, Google Doc, PDF, YouTube video, or image)',
+					},
+				],
+				default: 'text',
+				displayOptions: {
+					show: { operation: ['extract', 'reviewDraft'] },
+				},
+			},
+			{
+				displayName: 'Input Binary Field',
+				name: 'binaryPropertyName',
+				type: 'string',
+				default: 'data',
+				required: true,
+				displayOptions: {
+					show: { operation: ['extract', 'reviewDraft'], inputSource: ['binary'] },
+				},
+				description:
+					'The name of the input binary field holding the file to upload (.docx, .pdf up to 100 pages, .png, .jpg, or .webp, up to 10 MB)',
+			},
+			{
 				displayName: 'Text',
 				name: 'text',
 				type: 'string',
@@ -1808,6 +2057,7 @@ export class Lenz implements INodeType {
 				required: true,
 				displayOptions: {
 					show: { operation: ['extract'] },
+					hide: { inputSource: ['binary'] },
 				},
 				description:
 					"The text to pull the verifiable claims out of, or a single public web page, Google Doc, PDF, YouTube video, or image URL. Lenz reads the page, a Google Doc, a PDF (.pdf), a YouTube video's transcript, or an image (.png, .jpg, .jpeg, .webp), and extracts the claims from its first 50,000 characters; pages behind a login can't be read. A URL call typically takes 5-40 seconds.",
@@ -1999,6 +2249,7 @@ export class Lenz implements INodeType {
 				required: true,
 				displayOptions: {
 					show: { operation: ['reviewDraft'] },
+					hide: { inputSource: ['binary'] },
 				},
 				description:
 					'The draft to review, up to 50,000 characters (longer text is cut and reported as input_truncated), or one public http(s) URL to a web page, Google Doc, PDF (.pdf), YouTube video, or image (.png, .jpg, .jpeg, .webp) to read it from',
@@ -2159,9 +2410,20 @@ export class Lenz implements INodeType {
 				default: '',
 				required: true,
 				displayOptions: {
-					show: { operation: ['getReview'] },
+					show: { operation: ['getReview', 'exportReview'] },
 				},
 				description: 'The review_id Review Draft returned',
+			},
+			{
+				displayName: 'Put Output File in Field',
+				name: 'binaryPropertyName',
+				type: 'string',
+				default: 'data',
+				required: true,
+				displayOptions: {
+					show: { operation: ['exportReview'] },
+				},
+				description: 'The name of the output binary field to store the annotated .docx file in',
 			},
 			{
 				displayName: 'Issues Only',
@@ -2572,10 +2834,22 @@ export class Lenz implements INodeType {
 			itemIndex: number,
 			path: string,
 			body?: IDataObject,
-		): string =>
-			executionId
-				? `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyFingerprint({ path, body })}`
-				: '';
+			multipart?: { file: { content: Buffer }; fields: Record<string, string> },
+		): string => {
+			if (!executionId) return '';
+			let bodyPrint: string;
+			if (multipart) {
+				bodyPrint = bodyFingerprint({
+					path,
+					file_fnv: fnv1aBytes(multipart.file.content),
+					file_size: multipart.file.content.length,
+					...multipart.fields,
+				});
+			} else {
+				bodyPrint = bodyFingerprint({ path, body });
+			}
+			return `n8n:${executionId}:${nodeKey}:${operation}:${itemIndex}:${bodyPrint}`;
+		};
 
 		// A text parameter, trimmed. n8n hands a string field an expression's raw
 		// result: {{ $json.claim }} on an item without `claim` gives undefined, and
@@ -2598,6 +2872,33 @@ export class Lenz implements INodeType {
 			return text;
 		};
 
+		// Reads and validates an input file from the item's binary properties.
+		// Refuses 0 bytes and files exceeding MAX_UPLOAD_BYTES (10 MiB) before
+		// any network request is attempted.
+		const readBinaryUpload = async (
+			itemIndex: number,
+		): Promise<{ filename: string; contentType: string; content: Buffer }> => {
+			const binaryPropertyName = readText('binaryPropertyName', itemIndex, 'data') || 'data';
+			const binaryMeta = this.helpers.assertBinaryData(itemIndex, binaryPropertyName);
+			const buffer = await this.helpers.getBinaryDataBuffer(itemIndex, binaryPropertyName);
+			if (buffer.length === 0) {
+				throw new NodeOperationError(
+					this.getNode(),
+					`Binary field "${binaryPropertyName}" is empty (0 bytes)`,
+					{ itemIndex },
+				);
+			}
+			if (buffer.length > MAX_UPLOAD_BYTES) {
+				throw new NodeOperationError(
+					this.getNode(),
+					`File in binary field "${binaryPropertyName}" is ${buffer.length} bytes, which exceeds the 10 MB (10,485,760 bytes) limit`,
+					{ itemIndex },
+				);
+			}
+			const { filename, contentType } = normalizeUploadFile(binaryMeta.fileName, binaryMeta.mimeType);
+			return { filename, contentType, content: buffer };
+		};
+
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
 		// n8n. No third-party SDK — this is the required shape for a verified
 		// community node (zero runtime dependencies).
@@ -2612,7 +2913,17 @@ export class Lenz implements INodeType {
 			method: IHttpRequestMethods,
 			path: string,
 			body?: IDataObject,
-			extra?: { idempotent?: { operation: string; itemIndex: number }; qs?: IDataObject },
+			extra?: {
+				idempotent?: { operation: string; itemIndex: number };
+				qs?: IDataObject;
+				multipart?: {
+					file: { filename: string; contentType: string; content: Buffer };
+					fields: Record<string, string>;
+				};
+				encoding?: 'arraybuffer';
+				json?: boolean;
+				returnFullResponse?: boolean;
+			},
 		): Promise<IDataObject> => {
 			const headers: IDataObject = {
 				'User-Agent': USER_AGENT,
@@ -2624,6 +2935,7 @@ export class Lenz implements INodeType {
 					extra.idempotent.itemIndex,
 					path,
 					body,
+					extra.multipart,
 				);
 				if (key) {
 					headers['Idempotency-Key'] = key;
@@ -2633,27 +2945,59 @@ export class Lenz implements INodeType {
 				method,
 				baseURL: BASE_URL,
 				url: path,
-				json: true,
+				json: extra?.json !== undefined ? extra.json : extra?.multipart ? false : true,
 				headers,
 			};
-			if (body !== undefined) {
+			if (extra?.multipart) {
+				const { body: rawBody, contentType } = buildMultipartBody(
+					extra.multipart.file,
+					extra.multipart.fields,
+				);
+				options.body = rawBody;
+				headers['Content-Type'] = contentType;
+			} else if (body !== undefined) {
 				options.body = body;
 			}
 			if (extra?.qs !== undefined) {
 				options.qs = extra.qs;
 			}
-			const send = async () =>
-				(await this.helpers.httpRequestWithAuthentication.call(
+			if (extra?.encoding !== undefined) {
+				options.encoding = extra.encoding;
+			}
+			if (extra?.returnFullResponse) {
+				options.returnFullResponse = true;
+			}
+			const send = async () => {
+				const res = await this.helpers.httpRequestWithAuthentication.call(
 					this,
 					credentialType,
 					options,
-				)) as IDataObject;
+				);
+				if (extra?.returnFullResponse) {
+					return res;
+				}
+				if (typeof res === 'string' && res.trim().startsWith('{')) {
+					try {
+						return JSON.parse(res);
+					} catch {
+						// Fall through to returning raw res
+					}
+				} else if (Buffer.isBuffer(res)) {
+					try {
+						return JSON.parse(res.toString('utf8'));
+					} catch {
+						// Fall through to returning raw res
+					}
+				}
+				return res as IDataObject;
+			};
 			// Versions 1 to 1.2 get the older shape already: their errors pass
 			// through untouched.
 			if (apiVersion === LEGACY_API_VERSION) return await send();
 			try {
 				return await send();
 			} catch (error) {
+				hydrateBinaryError(error);
 				readAsLegacyError(node, error, method, path);
 				// A NodeApiError (what n8n throws here) comes back as itself.
 				throw new NodeApiError(node, error as JsonObject);
@@ -2770,7 +3114,7 @@ export class Lenz implements INodeType {
 			);
 		};
 
-		// POST /review or /citecheck. Two refusals are retried here because they
+		// POST /review, /review/file, or /citecheck. Two refusals are retried here because they
 		// clear on their own and the request is safe to resend (same
 		// Idempotency-Key, nothing charged by a refusal):
 		//  - 429 review_in_flight / citecheck_in_flight: three already run on the
@@ -2781,17 +3125,24 @@ export class Lenz implements INodeType {
 		//    When the body names the job, that IS the accepted job; otherwise
 		//    retry shortly, a few times.
 		const submitJob = async (
-			path: '/review' | '/citecheck',
+			path: '/review' | '/review/file' | '/citecheck',
 			body: IDataObject,
 			operation: string,
 			itemIndex: number,
 			idKey: 'review_id' | 'citecheck_id',
+			multipart?: {
+				file: { filename: string; contentType: string; content: Buffer };
+				fields: Record<string, string>;
+			},
 		): Promise<IDataObject> => {
 			const slotDeadline = Date.now() + IN_FLIGHT_WAIT_BUDGET_MS;
 			let conflicts = 0;
 			while (true) {
 				try {
-					return await lenzRequest('POST', path, body, { idempotent: { operation, itemIndex } });
+					return await lenzRequest('POST', path, body, {
+						idempotent: { operation, itemIndex },
+						multipart,
+					});
 				} catch (submitError) {
 					const code = statusCodeOf(submitError);
 					const errBody = responseBodyOf(submitError);
@@ -3232,13 +3583,17 @@ export class Lenz implements INodeType {
 						};
 					}
 				} else if (operation === 'extract') {
-					const text = readText('text', itemIndex);
-					if (!text) {
-						returnData.push({
-							json: { skipped: true, reason: 'empty_input' },
-							pairedItem: { item: itemIndex },
-						});
-						continue;
+					const inputSource = this.getNodeParameter('inputSource', itemIndex, 'text') as string;
+
+					if (inputSource !== 'binary') {
+						const text = readText('text', itemIndex);
+						if (!text) {
+							returnData.push({
+								json: { skipped: true, reason: 'empty_input' },
+								pairedItem: { item: itemIndex },
+							});
+							continue;
+						}
 					}
 
 					// Collapse the whitespace first and measure that, which is the order
@@ -3259,19 +3614,33 @@ export class Lenz implements INodeType {
 						);
 					}
 
-					const body: IDataObject = { text };
-					if (language) {
-						body.language = language;
+					if (inputSource === 'binary') {
+						const file = await readBinaryUpload(itemIndex);
+						const fields: Record<string, string> = {};
+						if (language) fields.language = language;
+						if (focus) fields.focus = focus;
+
+						responseData = await lenzRequest('POST', '/extract/file', undefined, {
+							idempotent: { operation, itemIndex },
+							multipart: { file, fields },
+						});
+					} else {
+						const text = readText('text', itemIndex);
+
+						const body: IDataObject = { text };
+						if (language) {
+							body.language = language;
+						}
+						// The collapsed form travels, not the raw one, so the body this node
+						// fingerprints into its Idempotency-Key is the same string the API
+						// hashes into its own — two spellings of one focus stay one request.
+						if (focus) {
+							body.focus = focus;
+						}
+						responseData = await lenzRequest('POST', '/extract', body, {
+							idempotent: { operation, itemIndex },
+						});
 					}
-					// The collapsed form travels, not the raw one, so the body this node
-					// fingerprints into its Idempotency-Key is the same string the API
-					// hashes into its own — two spellings of one focus stay one request.
-					if (focus) {
-						body.focus = focus;
-					}
-					responseData = await lenzRequest('POST', '/extract', body, {
-						idempotent: { operation, itemIndex },
-					});
 					// `no_match` means claims were found and the focus excluded all of
 					// them. The empty list is the answer rather than a failure, but on
 					// its own it is indistinguishable from "nothing here", so name the
@@ -3433,38 +3802,66 @@ export class Lenz implements INodeType {
 					}
 					continue;
 				} else if (operation === 'reviewDraft') {
-					const draft = readText('draft', itemIndex);
-					if (!draft) {
-						returnData.push({
-							json: { skipped: true, reason: 'empty_input' },
-							pairedItem: { item: itemIndex },
-						});
-						continue;
+					const inputSource = this.getNodeParameter('inputSource', itemIndex, 'text') as string;
+
+					if (inputSource !== 'binary') {
+						const draft = readText('draft', itemIndex);
+						if (!draft) {
+							returnData.push({
+								json: { skipped: true, reason: 'empty_input' },
+								pairedItem: { item: itemIndex },
+							});
+							continue;
+						}
 					}
+
 					const wait = this.getNodeParameter('waitForCompletion', itemIndex, true) as boolean;
 					const options = this.getNodeParameter('reviewOptions', itemIndex, {}) as IDataObject;
 					// Everything is validated before the submit: a review is charged
 					// when it is accepted.
 					const waitSeconds = wait ? readWaitSeconds(itemIndex, jobWait(options.maxWaitSeconds)) : 0;
-					const body: IDataObject = { text: draft };
-					if (language) body.language = language;
 					const visibility = this.getNodeParameter('visibility', itemIndex, '') as string;
-					if (visibility) body.visibility = visibility;
 					const webhookUrl = String(options.webhookUrl ?? '').trim();
-					if (webhookUrl) body.webhook_url = webhookUrl;
 					const policy = reviewPolicy(options, (message) => {
 						throw new NodeOperationError(this.getNode(), message, { itemIndex });
 					});
-					if (policy) body.escalate = policy;
 					const additionalFields = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
 					const suppliedSources = parseSuppliedSources(
 						(additionalFields.supplied_sources as IDataObject | undefined)?.sources,
 					);
-					if (suppliedSources.length > 0) {
-						body.supplied_sources = suppliedSources;
-					}
 
-					const accepted = await submitJob('/review', body, operation, itemIndex, 'review_id');
+					let accepted: IDataObject;
+					if (inputSource === 'binary') {
+						const file = await readBinaryUpload(itemIndex);
+						const fields: Record<string, string> = {};
+						if (language) fields.language = language;
+						if (visibility) fields.visibility = visibility;
+						if (webhookUrl) fields.webhook_url = webhookUrl;
+						if (policy) fields.escalate = JSON.stringify(policy);
+						if (suppliedSources.length > 0) fields.supplied_sources = JSON.stringify(suppliedSources);
+
+						accepted = await submitJob(
+							'/review/file',
+							{},
+							operation,
+							itemIndex,
+							'review_id',
+							{ file, fields },
+						);
+					} else {
+						const draft = readText('draft', itemIndex);
+
+						const body: IDataObject = { text: draft };
+						if (language) body.language = language;
+						if (visibility) body.visibility = visibility;
+						if (webhookUrl) body.webhook_url = webhookUrl;
+						if (policy) body.escalate = policy;
+						if (suppliedSources.length > 0) {
+							body.supplied_sources = suppliedSources;
+						}
+
+						accepted = await submitJob('/review', body, operation, itemIndex, 'review_id');
+					}
 					const reviewId = (accepted.review_id as string) ?? '';
 					if (!reviewId) {
 						throw new NodeOperationError(
@@ -3640,6 +4037,72 @@ export class Lenz implements INodeType {
 					responseData = withPassed(
 						await lenzRequest('GET', `/citechecks/${encodeURIComponent(citecheckId)}`),
 					);
+				} else if (operation === 'exportReview') {
+					const reviewId = readText('reviewId', itemIndex);
+					if (!reviewId) {
+						returnData.push({
+							json: { skipped: true, reason: 'empty_input' },
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					const binaryPropertyName = readText('binaryPropertyName', itemIndex, 'data') || 'data';
+					const response = (await lenzRequest(
+						'GET',
+						`/reviews/${encodeURIComponent(reviewId)}/export`,
+						undefined,
+						{
+							qs: { format: 'docx' },
+							encoding: 'arraybuffer',
+							json: false,
+							returnFullResponse: true,
+						},
+					)) as unknown as { body: unknown; headers?: Record<string, unknown> };
+
+					const rawBody = response.body;
+					let buffer: Buffer;
+					if (Buffer.isBuffer(rawBody)) {
+						buffer = rawBody;
+					} else if (rawBody instanceof ArrayBuffer) {
+						buffer = Buffer.from(rawBody);
+					} else if (ArrayBuffer.isView(rawBody)) {
+						buffer = Buffer.from(rawBody.buffer, rawBody.byteOffset, rawBody.byteLength);
+					} else if (typeof rawBody === 'string') {
+						buffer = Buffer.from(rawBody, 'binary');
+					} else {
+						buffer = Buffer.from([]);
+					}
+
+					if (buffer.length === 0) {
+						throw new NodeOperationError(this.getNode(), 'Lenz returned an empty document export.', {
+							itemIndex,
+						});
+					}
+
+					const filename = parseExportFilename(response.headers?.['content-disposition'], reviewId);
+					const exportSourceHeader = response.headers?.['x-lenz-export-source'];
+					const exportSource =
+						typeof exportSourceHeader === 'string' && exportSourceHeader
+							? exportSourceHeader
+							: 'original';
+
+					const binaryData = await this.helpers.prepareBinaryData(
+						buffer,
+						filename,
+						'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+					);
+
+					returnData.push({
+						json: {
+							review_id: reviewId,
+							format: 'docx',
+							file_name: filename,
+							export_source: exportSource,
+						},
+						binary: { [binaryPropertyName]: binaryData },
+						pairedItem: { item: itemIndex },
+					});
+					continue;
 				} else if (operation === 'usage') {
 					responseData = fillLegacyUsageKeys(await lenzRequest('GET', '/me/usage'));
 				} else if (operation === 'webhookSecret') {
@@ -3665,6 +4128,7 @@ export class Lenz implements INodeType {
 					pairedItem: { item: itemIndex },
 				});
 			} catch (error) {
+				hydrateBinaryError(error);
 				// This item's own job, left out of the "earlier items" note.
 				const currentJob = pendingTaskId
 					? `task_id ${pendingTaskId}`
