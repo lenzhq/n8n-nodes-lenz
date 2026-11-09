@@ -1,9 +1,5 @@
-// The node still requests the older API shape (legacy-oracle.test.ts holds it
-// to its 0.8.0 output). These tests run the same recorded responses in both
-// shapes, `legacy` and `canonical` (./api-shapes.fixtures.ts), through the real
-// node. The newer shape must never crash the node and every output key must
-// carry a sensible value; identical output from the two shapes is NOT promised
-// in this release.
+// Recorded Lenz API responses (./api-shapes.fixtures.ts) run through the real
+// node: every output key carries the value this node has always given it.
 import { NodeApiError, sleep } from 'n8n-workflow';
 import type { IDataObject, IExecuteFunctions, IHttpRequestOptions } from 'n8n-workflow';
 
@@ -18,7 +14,6 @@ import { shapes } from './api-shapes.fixtures';
 void sleep;
 
 type Responder = (options: IHttpRequestOptions) => unknown;
-const SHAPES = ['legacy', 'canonical'] as const;
 
 function apiError(statusCode: number, body: Record<string, unknown>) {
 	const transport = Object.assign(new Error(`Request failed with status code ${statusCode}`), {
@@ -56,12 +51,12 @@ const status = (body: unknown): Responder => (options) => {
 	throw new Error(`unexpected request: ${options.method} ${options.url}`);
 };
 
-describe.each(SHAPES)('API shape: %s', (shape) => {
+describe('recorded API responses', () => {
 	describe('a failed verification', () => {
 		it('keeps failure_reason, failure_class and retryable, and says why', async () => {
 			const [json] = await run(
 				{ operation: 'verify', claim: 'x' },
-				status(shapes.statusFailedLive[shape]),
+				status(shapes.statusFailedLive),
 			);
 			expect(json).toMatchObject({
 				status: 'failed',
@@ -79,7 +74,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		it('keeps the durable failure code', async () => {
 			const [json] = await run(
 				{ operation: 'verifyStatus', taskId: 'task_1' },
-				status(shapes.statusFailedDurable[shape]),
+				status(shapes.statusFailedDurable),
 			);
 			expect(json.failure_reason).toBe('conclusion_failed');
 			expect(json.failure_class).toBe('internal');
@@ -88,7 +83,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		it('reports nothing-to-check as failure_reason "not_a_claim" and not_a_claim true', async () => {
 			const [json] = await run(
 				{ operation: 'verifyStatus', taskId: 'task_1' },
-				status(shapes.statusNotAClaim[shape]),
+				status(shapes.statusNotAClaim),
 			);
 			expect(json.status).toBe('failed');
 			expect(json.failure_reason).toBe('not_a_claim');
@@ -101,7 +96,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		it('offers each claim under `text`, as the node always has', async () => {
 			const [json] = await run(
 				{ operation: 'verifyStatus', taskId: 'task_1' },
-				status(shapes.statusNeedsInput[shape]),
+				status(shapes.statusNeedsInput),
 			);
 			expect(json.status).toBe('needs_input');
 			const claims = json.claims as IDataObject[];
@@ -110,8 +105,8 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 				'Water boils at 100C at sea level.',
 			]);
 			expect(claims.map((c) => c.domain)).toEqual(['Science', 'Science']);
-			// An older-shape option is passed through exactly as sent.
-			if (shape === 'legacy') expect(claims).toEqual(shapes.statusNeedsInput.legacy.claims);
+			// The API's own `claim` stays beside it.
+			expect(claims.map((c) => c.claim)).toEqual(claims.map((c) => c.text));
 		});
 	});
 
@@ -119,7 +114,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		it('leaves modified_at null when it finished on the day it was created', async () => {
 			const [json] = await run(
 				{ operation: 'verifyStatus', taskId: 'task_1' },
-				status(shapes.statusCompletedSameDay[shape]),
+				status(shapes.statusCompletedSameDay),
 			);
 			expect(json.status).toBe('completed');
 			expect(json.modified_at).toBeNull();
@@ -128,7 +123,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		it('sets modified_at when it finished on a later UTC day', async () => {
 			const [json] = await run(
 				{ operation: 'verifyStatus', taskId: 'task_1' },
-				status(shapes.statusCompletedCrossesMidnight[shape]),
+				status(shapes.statusCompletedCrossesMidnight),
 			);
 			expect(json.modified_at).toBe('2026-09-02T00:03:00.000000+00:00');
 			expect(json).not.toHaveProperty('completed_at');
@@ -137,7 +132,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		it('reads a stored verification the same way', async () => {
 			const [json] = await run(
 				{ operation: 'getVerification', verificationId: 'ver_1' },
-				() => shapes.storedVerification[shape],
+				() => shapes.storedVerification,
 			);
 			expect(json.status).toBe('completed');
 			expect(json.verdict).toEqual(expect.any(String));
@@ -147,18 +142,18 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 	});
 
 	describe('receipts', () => {
-		it('emits chain_id, null when the API sends none', async () => {
+		it('emits chain_id, null: the API sends none', async () => {
 			const [json] = await run({ operation: 'verify', claim: 'x', waitForCompletion: false }, () => ({
-				...(shapes.submitReceipt[shape] as IDataObject),
+				...(shapes.submitReceipt as IDataObject),
 			}));
 			expect(json.status).toBe('queued');
-			expect(json.chain_id).toBe(shape === 'legacy' ? shapes.submitReceipt.legacy.chain_id : null);
+			expect(json.chain_id).toBeNull();
 		});
 
 		it('batch items carry the claim under `claim_text`', async () => {
 			const out = await run(
 				{ operation: 'verifyBatch', batchClaims: { claim: [{ text: 'a' }, { text: 'b' }] } },
-				() => shapes.batchReceipt[shape],
+				() => shapes.batchReceipt,
 			);
 			expect(out.map((j) => j.claim_text)).toEqual([
 				'The Earth is round.',
@@ -170,7 +165,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		it('select items carry the claim under `claim_text`', async () => {
 			const out = await run(
 				{ operation: 'select', taskId: 'task_1', selectedClaims: ['a'] },
-				() => shapes.selectReceipt[shape],
+				() => shapes.selectReceipt,
 			);
 			expect(out.length).toBeGreaterThan(0);
 			for (const j of out) {
@@ -182,7 +177,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 
 	describe('Assess', () => {
 		it('keeps status "no_claim" and sets not_a_claim when nothing is checkable', async () => {
-			const [json] = await run({ operation: 'assess', text: 'hi' }, () => shapes.assessNoClaim[shape]);
+			const [json] = await run({ operation: 'assess', text: 'hi' }, () => shapes.assessNoClaim);
 			expect(json.status).toBe('no_claim');
 			expect(json.not_a_claim).toBe(true);
 			expect(json.candidate_claims).toEqual([]);
@@ -190,7 +185,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		});
 
 		it('shows a failed row as verdict "Error", confidence "low"', async () => {
-			const [json] = await run({ operation: 'assess', text: 'hi' }, () => shapes.assessAllErrorRows[shape]);
+			const [json] = await run({ operation: 'assess', text: 'hi' }, () => shapes.assessAllErrorRows);
 			expect(json.status).toBe('ok');
 			expect(json.not_a_claim).toBe(true);
 			const rows = json.claims as IDataObject[];
@@ -201,7 +196,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		});
 
 		it('maps a mixed wave row by row', async () => {
-			const [json] = await run({ operation: 'assess', text: 'many' }, () => shapes.assessMixedRows[shape]);
+			const [json] = await run({ operation: 'assess', text: 'many' }, () => shapes.assessMixedRows);
 			expect(json.not_a_claim).toBe(false);
 			const rows = json.claims as IDataObject[];
 			expect(rows.map((r) => r.verdict)).toEqual(['True', 'Error', 'Error', 'Error']);
@@ -209,7 +204,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		});
 
 		it('maps a single checked claim', async () => {
-			const [json] = await run({ operation: 'assess', text: 'x' }, () => shapes.assessOneClaim[shape]);
+			const [json] = await run({ operation: 'assess', text: 'x' }, () => shapes.assessOneClaim);
 			expect(json.not_a_claim).toBe(false);
 			expect((json.claims as IDataObject[])[0]).toMatchObject({
 				claim: 'The registry reported 4,200 filings in 2024.',
@@ -221,15 +216,17 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 	});
 
 	describe('Extract', () => {
-		const extractBody = (status: string, claims: IDataObject[]): IDataObject =>
-			shape === 'legacy'
-				? { status, claim: claims[0]?.claim ?? '', identified_claims: [], original_input: 'x' }
-				: { status, claims, original_input: 'x' };
+		const extractBody = (status: string, claims: IDataObject[]): IDataObject => ({
+			status,
+			claims,
+			original_input: 'x',
+		});
 
 		it('flags an input with nothing to check', async () => {
-			const status = shape === 'legacy' ? 'not_a_claim' : 'no_checkable_claim';
-			const [json] = await run({ operation: 'extract', text: 'x' }, () => extractBody(status, []));
-			// The node's own word, from either shape.
+			const [json] = await run({ operation: 'extract', text: 'x' }, () =>
+				extractBody('no_checkable_claim', []),
+			);
+			// The node's own word.
 			expect(json.status).toBe('not_a_claim');
 			expect(json.not_a_claim).toBe(true);
 		});
@@ -248,8 +245,8 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 				throw apiError(statusCode, body as Record<string, unknown>);
 			}, true);
 
-		it('a 429 states its wait under either name', async () => {
-			const [json] = await refuse(429, shapes.extractRateLimited[shape], {
+		it('a 429 states its wait', async () => {
+			const [json] = await refuse(429, shapes.extractRateLimited, {
 				operation: 'extract',
 				text: 'Some text',
 			});
@@ -260,18 +257,18 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		});
 
 		it('a 503 states retry_after', async () => {
-			const [json] = await refuse(503, shapes.capacity503[shape], { operation: 'assess', text: 'x' });
+			const [json] = await refuse(503, shapes.capacity503, { operation: 'assess', text: 'x' });
 			expect(json.code).toBe('capacity');
 			expect(json.retry_after).toBe(60);
 			expect(String(json.error_message)).toContain('~60s');
 		});
 
-		it('an in-flight 429 states its wait under either name', async () => {
+		it('an in-flight 429 states its wait', async () => {
 			// The node waits for a slot on the real clock; jump it past the budget.
 			let now = Date.now();
 			const spy = jest.spyOn(Date, 'now').mockImplementation(() => (now += 120000));
 			try {
-				const [json] = await refuse(429, shapes.reviewInFlight429[shape], {
+				const [json] = await refuse(429, shapes.reviewInFlight429, {
 					operation: 'reviewDraft',
 					draft: 'A draft.',
 					waitForCompletion: false,
@@ -284,7 +281,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 		});
 
 		it('a 402 carries cost and credits_remaining', async () => {
-			const [json] = await refuse(402, shapes.noCredits402[shape], { operation: 'verify', claim: 'x' });
+			const [json] = await refuse(402, shapes.noCredits402, { operation: 'verify', claim: 'x' });
 			expect(json.code).toBe('no_credits');
 			expect(json.cost).toBe(10);
 			expect(json.credits_remaining).toBe(0);
@@ -294,7 +291,7 @@ describe.each(SHAPES)('API shape: %s', (shape) => {
 
 	describe('Review', () => {
 		it('hands on the review body and adds passed', async () => {
-			const [json] = await run({ operation: 'getReview', reviewId: 'rev_1' }, () => shapes.reviewCompletedClean[shape]);
+			const [json] = await run({ operation: 'getReview', reviewId: 'rev_1' }, () => shapes.reviewCompletedClean);
 			expect(json.status).toBe('completed');
 			expect(json.outcome).toBe('clean');
 			expect(json.passed).toBe(true);

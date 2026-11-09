@@ -1,11 +1,17 @@
 // Runs one recorded response through the node and returns what the workflow
 // receives: the items' json, or, for a 4xx/5xx, the error output of a node set
-// to continue on fail. Shared by the frozen-output test and the generator that
-// produced those outputs from the node as it was before the API-shape work.
+// to continue on fail. Shared by the frozen-output tests.
 import { NodeApiError } from 'n8n-workflow';
 import type { IDataObject, IExecuteFunctions } from 'n8n-workflow';
 import { Lenz } from '../Lenz.node';
-import type { LegacyCase } from './legacy-bodies.fixtures';
+
+/** A recorded response, with the operation and parameters that produce it. */
+export interface RecordedCase {
+	operation: string;
+	params: Record<string, unknown>;
+	status: number;
+	body: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+}
 
 function apiError(statusCode: number, body: Record<string, unknown>, describeFromBody = false) {
 	const transport = Object.assign(new Error(`Request failed with status code ${statusCode}`), {
@@ -26,14 +32,17 @@ function apiError(statusCode: number, body: Record<string, unknown>, describeFro
 
 // `typeVersion`: the node version to run as (default 1). `sent` collects the
 // API version header of every request the node made.
-export async function runLegacyCase(
-	c: LegacyCase,
+export async function runRecordedCase(
+	recorded: RecordedCase,
 	typeVersion = 1,
 	sent: string[] = [],
 	// false: run with Continue On Fail off, so a refusal throws as it does in a
 	// workflow; the error's description is then the one n8n builds from the body.
 	continueOnFail = true,
 ): Promise<IDataObject[]> {
+	// A copy: the node fills its own keys into the body it is handed, and the
+	// same recorded case runs at every node version.
+	const c: RecordedCase = JSON.parse(JSON.stringify(recorded));
 	const failing = c.status >= 400;
 	const ctx = {
 		getInputData: jest.fn(() => [{ json: {} }]),
@@ -67,11 +76,11 @@ export async function runLegacyCase(
  * the node handles the refusal itself and returns an item.
  */
 export async function thrownBy(
-	c: LegacyCase,
+	c: RecordedCase,
 	typeVersion: number,
 ): Promise<{ message: string; description: string | null; httpCode: string | null } | null> {
 	try {
-		await runLegacyCase(c, typeVersion, [], false);
+		await runRecordedCase(c, typeVersion, [], false);
 	} catch (error) {
 		const e = error as { message: string; description?: string | null; httpCode?: string | null };
 		return { message: e.message, description: e.description ?? null, httpCode: e.httpCode ?? null };
