@@ -380,7 +380,7 @@ export const canonicalCases: Record<string, RecordedCase> = {
   "params": {},
   "status": 200,
   "body": {
-   "webhook_secret": "315ac3434d186fa9a2fb48d92381f06e"
+   "webhook_secret": "example-webhook-secret"
   }
  },
  "assess__401_no_key": {
@@ -593,7 +593,7 @@ export const canonicalCases: Record<string, RecordedCase> = {
   "status": 502,
   "body": {
    "detail": "Framing failed",
-   "code": "framing_failed"
+   "code": "internal"
   }
  },
  "assess__503_capacity": {
@@ -898,12 +898,12 @@ export const canonicalCases: Record<string, RecordedCase> = {
      "suggested_rewrite": null,
      "more_claims": [],
      "failure": {
-      "code": "framing_failed",
+      "code": "internal",
       "detail": "The input could not be read as a claim.",
       "hint": "This item could not be processed; retrying it as-is will not help. Send it rephrased as one factual statement; nothing was charged.",
-      "failure_class": "invalid_input",
+      "failure_class": "internal",
       "retryable": false,
-      "docs_url": "https://lenz.io/docs/errors#invalid-input"
+      "docs_url": "https://lenz.io/docs/errors#internal"
      }
     }
    ],
@@ -3120,7 +3120,7 @@ export const canonicalCases: Record<string, RecordedCase> = {
   "status": 502,
   "body": {
    "detail": "Extraction failed",
-   "code": "extraction_failed"
+   "code": "internal"
   }
  },
  "extract__503_upstream_unavailable": {
@@ -3517,10 +3517,11 @@ export const canonicalCases: Record<string, RecordedCase> = {
   "params": {
    "text": "x"
   },
-  "status": 502,
+  "status": 422,
   "body": {
-   "detail": "Extraction failed",
-   "code": "extraction_failed"
+   "detail": "The page at the link could not be read.",
+   "code": "page_unreadable",
+   "hint": "Paste the page's text instead."
   }
  },
  "extract__url_fetch_503_upstream": {
@@ -4349,12 +4350,12 @@ export const canonicalCases: Record<string, RecordedCase> = {
      "claim": "The Eiffel Tower is in Berlin.",
      "stage": "assessment",
      "failure": {
-      "code": "timeout",
+      "code": "upstream_unavailable",
       "detail": "The check did not finish inside its time budget.",
       "hint": "The check ran out of time. Retry it; nothing was charged.",
       "failure_class": "upstream_unavailable",
       "retryable": true,
-      "docs_url": null
+      "docs_url": "https://lenz.io/docs/errors#upstream-unavailable"
      }
     }
    ],
@@ -4409,12 +4410,12 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "suggested_rewrite": null,
       "more_claims": [],
       "failure": {
-       "code": "timeout",
+       "code": "upstream_unavailable",
        "detail": "The check did not finish inside its time budget.",
        "hint": "The check ran out of time. Retry it; nothing was charged.",
        "failure_class": "upstream_unavailable",
        "retryable": true,
-       "docs_url": null
+       "docs_url": "https://lenz.io/docs/errors#upstream-unavailable"
       }
      },
      "escalation": null,
@@ -8266,7 +8267,7 @@ export const canonicalCases: Record<string, RecordedCase> = {
    ],
    "citations": [],
    "failure": {
-    "code": "assessment_failed",
+    "code": "upstream_unavailable",
     "detail": "No claim could be assessed.",
     "hint": "Retry the review with a new Idempotency-Key; nothing was charged.",
     "failure_class": "upstream_unavailable",
@@ -11839,8 +11840,8 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "coverage": {
     "status": "covered",
     "reasons": [],
-    "certificate_id": "e467bd8abf2913eddccb3d2dc8c86371",
-    "certificate_url": "https://lenz.io/certificate/e467bd8abf2913eddccb3d2dc8c86371",
+    "certificate_id": "example-certificate-1",
+    "certificate_url": "https://lenz.io/certificate/example-certificate-1",
     "as_of": "2026-03-10T12:01:30+00:00",
     "currency": "EUR",
     "cap": 10000,
@@ -11932,8 +11933,8 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "coverage": {
     "status": "covered",
     "reasons": [],
-    "certificate_id": "e467bd8abf2913eddccb3d2dc8c86371",
-    "certificate_url": "https://lenz.io/certificate/e467bd8abf2913eddccb3d2dc8c86371",
+    "certificate_id": "example-certificate-1",
+    "certificate_url": "https://lenz.io/certificate/example-certificate-1",
     "as_of": "2026-03-10T12:01:30+00:00",
     "currency": "EUR",
     "cap": 10000,
@@ -13919,6 +13920,46 @@ export const canonicalCases: Record<string, RecordedCase> = {
      "type": "webhook_secret_missing"
     }
    ]
+  }
+ },
+ "assess__no_public_record_row": {
+  "operation": "assess",
+  "params": {
+   "text": "x"
+  },
+  "status": 200,
+  "body": {
+   "status": "ok",
+   "claims": [
+    {
+     "claim": "The Smalltown council approved the new bridge budget in March 2019.",
+     "language": "en",
+     "status": "completed",
+     "verdict": "No Public Record",
+     "confidence": "medium",
+     "verification_url": null,
+     "rationale": "No source the reviewers found records the vote or the budget.",
+     "dissent": null,
+     "suggested_rewrite": null,
+     "more_claims": [],
+     "failure": null
+    },
+    {
+     "claim": "The Danube flows through Vienna.",
+     "language": "en",
+     "status": "completed",
+     "verdict": "True",
+     "confidence": "high",
+     "verification_url": null,
+     "rationale": "The river runs through the city.",
+     "dissent": null,
+     "suggested_rewrite": null,
+     "more_claims": [],
+     "failure": null
+    }
+   ],
+   "failure": null,
+   "more_claims": []
   }
  }
 };

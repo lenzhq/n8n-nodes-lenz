@@ -38,17 +38,18 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 | `operation` | What it does | Parameters |
 |---|---|---|
 | `assess` | Fast 3-model panel verdict (~15s), one entry per claim found in the text | `text`**\***, `language` |
-| `extract` | Pull verifiable claims out of text, or out of a public web page given its URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `text`**\***, `focus`, `language` |
-| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language` |
+| `extract` | Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp), or a public web page, Google Doc, PDF, YouTube video, or image URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `text`**\*** *(when `inputSource: "text"`)*, `focus`, `language` |
+| `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language`, `additionalFields` |
 
 ### `resource: "review"` — Review
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language` |
+| `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language`, `additionalFields` |
+| `exportReview` | Download an annotated Word document (.docx) with inline verification comments for a completed text or file review | `reviewId`**\***, `binaryPropertyName`**\*** |
 | `getCitationCheck` | Retrieve a citation check by its ID | `citecheckId`**\*** |
 | `getReview` | Retrieve a review by its ID | `reviewId`**\***, `issuesOnly` |
-| `reviewDraft` | Review a whole draft: find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `draft`**\***, `waitForCompletion`, `reviewOptions`, `visibility`, `language` |
+| `reviewDraft` | Review a whole draft, URL, or uploaded file (.docx, .pdf, .png, .jpg, .webp): find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `draft`**\*** *(when `inputSource: "text"`)*, `waitForCompletion`, `reviewOptions`, `visibility`, `language`, `additionalFields` |
 
 ### `resource: "verification"` — Verification
 
@@ -102,10 +103,12 @@ long time inside a webhook. It also gives up if the pipeline overruns, returning
 `status: "timeout"` rather than a verdict; see the branching rule below.
 
 **`extract`** — free, and does not check anything. It pulls the verifiable
-claims out of a block of text, as plain strings. `text` can also be a single
-public web page URL: Lenz reads the page, or a YouTube video's transcript, and
-extracts the claims from its first 50,000 characters. A URL call typically
-takes 5-40 seconds; pages behind a login (Facebook, Instagram, Threads,
+claims out of a block of text, an uploaded document or image file, or a public
+URL, as plain strings. You can hand it text, binary data from an incoming file
+node (.docx, .pdf up to 100 pages, .png, .jpg/.jpeg, .webp up to 10 MB), or a
+single public web page, Google Doc, PDF, YouTube video, or image URL: Lenz reads
+the page, document, video transcript, or image and extracts claims. A URL call
+typically takes 5-40 seconds; pages behind a login (Facebook, Instagram, Threads,
 LinkedIn) can't be read.
 
 **For a paragraph, you usually do not need it before `assess`.** `assess`
@@ -118,7 +121,7 @@ choose, filtering or deduplicating the list, storing it, or checking a subset.
 **For a document, `extract` first is the designed path, not a redundancy.**
 `assess` truncates a single text at 10,000 characters and says nothing about
 having done so — the claims past the cut are silently never checked. `extract`
-accepts 50,000. So anything article- or transcript-sized goes to `extract`,
+accepts 50,000 (or uploaded files up to 100 pages / 10 MB). So anything article- or transcript-sized goes to `extract`,
 then its claims to `assess`; one `extract` output is one `assess` call. Sending
 a long document straight to `assess` is the silently-lossy option.
 
@@ -155,16 +158,22 @@ message is sent is decoration.
   lenz_score: 1-10, key_finding: "...", citations: [...], verification_id: "..." }
 ```
 
-Branch on `{{ $json.passed }}`.
+Branch on `{{ $json.passed }}`. `passed` is `true` for True and Mostly True, `false`
+for Mixed, Mostly False and False, and `null` for the verdict `No Public Record`
+(Lenz found no public record of the claim; that does not make it false, and
+`lenz_score` is `null`). Send a `null` to its own branch.
 
 **`assess`** returns **one item containing every claim it found**:
 
 ```
-{ status: "ok", claims: [ { claim, verdict, confidence, passed, language, verification_url, rationale }, ... ] }
+{ status: "ok", claims: [ { claim, verdict, confidence, passed, language, verification_url, rationale, searched_pages }, ... ] }
 ```
 
 `rationale` is a reviewer's note, not a checked source, and can be `null`. Put
-it in a message to a person; never branch on it.
+it in a message to a person; never branch on it. `searched_pages` is the list
+of pages the reviewers looked at, `[{ title, url }, ...]`, empty when there are
+none: pages to look at, not sources that confirm the verdict. For checked
+sources, run Verify (Deep).
 
 So `{{ $json.claims[0].passed }}` only looks at the first claim. If the text can
 contain several claims and each should be routed on its own, insert a **Split

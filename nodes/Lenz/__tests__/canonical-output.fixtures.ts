@@ -1,5 +1,6 @@
-// What a version 1.3 node returned in 0.9.0 (before the node stopped reading
-// the older API shape) for each case in ./canonical-bodies.fixtures.ts:
+// What a version 1.3 node returned in 0.9.1 with #82-#85 (before the node
+// stopped reading the older API shape) for each case in
+// ./canonical-bodies.fixtures.ts:
 // `ok`, the items with Continue On Fail on (null when it threw), `threw`,
 // the message it threw with Continue On Fail on, and `thrown`, what a
 // workflow shows for a refusal with Continue On Fail off. Frozen:
@@ -682,13 +683,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining /assess units.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: No remaining /assess units.",
-   "description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -830,14 +831,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "capacity",
     "retry_after": 100,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~100s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~100s before submitting again: send this node's error output into a Wait node set to 100 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~100s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~100s before submitting again: send this node's error output into a Wait node set to 100 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz is at capacity right now \u2014 retry in ~100s.",
-   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~100s before submitting again: send this node's error output into a Wait node set to 100 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz is at capacity right now — retry in ~100s.",
+   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~100s before submitting again: send this node's error output into a Wait node set to 100 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -848,14 +849,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -866,14 +867,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -890,7 +891,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": "https://lenz.io/api/v1/verifications/b452a842",
-      "rationale": "The claim is verified."
+      "rationale": "The claim is verified.",
+      "searched_pages": []
      }
     ]
    }
@@ -925,7 +927,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      }
     ]
    }
@@ -946,7 +949,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      }
     ]
    }
@@ -967,7 +971,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "hello",
@@ -976,7 +981,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      }
     ]
    }
@@ -997,7 +1003,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "A plain claim.",
@@ -1006,7 +1013,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      }
     ]
    }
@@ -1027,7 +1035,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "hello there",
@@ -1036,7 +1045,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "vendor is down",
@@ -1045,7 +1055,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "cannot frame",
@@ -1054,7 +1065,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      }
     ]
    }
@@ -1075,7 +1087,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": "The river runs through the city."
+      "rationale": "The river runs through the city.",
+      "searched_pages": []
      }
     ]
    }
@@ -1108,7 +1121,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": "The registry lists 4,200 filings for 2024 and has not revised the figure."
+      "rationale": "The registry lists 4,200 filings for 2024 and has not revised the figure.",
+      "searched_pages": []
      }
     ]
    }
@@ -1129,7 +1143,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 1 is documented.",
@@ -1138,7 +1153,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 2 is documented.",
@@ -1147,7 +1163,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 3 is documented.",
@@ -1156,7 +1173,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 4 is documented.",
@@ -1165,7 +1183,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 5 is documented.",
@@ -1174,7 +1193,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 6 is documented.",
@@ -1183,7 +1203,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 7 is documented.",
@@ -1192,7 +1213,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 8 is documented.",
@@ -1201,7 +1223,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 9 is documented.",
@@ -1210,7 +1233,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 10 is documented.",
@@ -1219,7 +1243,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 11 is documented.",
@@ -1228,7 +1253,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 12 is documented.",
@@ -1237,7 +1263,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 13 is documented.",
@@ -1246,7 +1273,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 14 is documented.",
@@ -1255,7 +1283,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 15 is documented.",
@@ -1264,7 +1293,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 16 is documented.",
@@ -1273,7 +1303,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 17 is documented.",
@@ -1282,7 +1313,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 18 is documented.",
@@ -1291,7 +1323,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "Claim number 19 is documented.",
@@ -1300,7 +1333,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      }
     ]
    }
@@ -1321,7 +1355,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "The Moon is made of cheese.",
@@ -1330,7 +1365,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      },
      {
       "claim": "The Pacific is the deepest ocean.",
@@ -1339,7 +1375,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": null
+      "rationale": null,
+      "searched_pages": []
      }
     ]
    }
@@ -1360,7 +1397,8 @@ export const canonicalOutput: Record<
       "passed": false,
       "language": "en",
       "verification_url": null,
-      "rationale": "Mercury, not Venus, is the closest planet to the Sun."
+      "rationale": "Mercury, not Venus, is the closest planet to the Sun.",
+      "searched_pages": []
      },
      {
       "claim": "Mercury is the closest planet to the Sun.",
@@ -1369,7 +1407,8 @@ export const canonicalOutput: Record<
       "passed": true,
       "language": "en",
       "verification_url": null,
-      "rationale": "Mercury is the innermost planet."
+      "rationale": "Mercury is the innermost planet.",
+      "searched_pages": []
      }
     ]
    }
@@ -1387,13 +1426,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 100,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining credits for citation checks.",
-    "error_description": "This call costs 1 credit and you have 100 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 100 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: No remaining credits for citation checks.",
-   "description": "This call costs 1 credit and you have 100 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 1 credit and you have 100 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -1404,13 +1443,13 @@ export const canonicalOutput: Record<
     "status_code": 429,
     "code": "citecheck_in_flight",
     "retry_after": 60,
-    "error_message": "Lenz: this account already has 3 citation checks running \u2014 retry when one finishes.",
+    "error_message": "Lenz: this account already has 3 citation checks running — retry when one finishes.",
     "error_description": "HTTP 429 (citecheck_in_flight). Nothing was charged. Lenz runs at most 3 citation checks at a time per account; this is not a plan limit. The node waited for a slot and none opened in time. Send fewer items through at once, or send this node's error output into a Wait node with Wait Amount 60 and Wait Unit set to Seconds (it defaults to Hours), then loop it back."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: this account already has 3 citation checks running \u2014 retry when one finishes.",
+   "message": "Lenz: this account already has 3 citation checks running — retry when one finishes.",
    "description": "HTTP 429 (citecheck_in_flight). Nothing was charged. Lenz runs at most 3 citation checks at a time per account; this is not a plan limit. The node waited for a slot and none opened in time. Send fewer items through at once, or send this node's error output into a Wait node with Wait Amount 60 and Wait Unit set to Seconds (it defaults to Hours), then loop it back.",
    "httpCode": "429"
   }
@@ -1422,14 +1461,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "capacity",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -1440,14 +1479,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "citations_unavailable",
     "retry_after": 300,
-    "error_message": "Lenz: citation checking is switched off for a moment \u2014 retry in ~300s.",
-    "error_description": "Transient (HTTP 503, code: citations_unavailable). Nothing was charged. Wait ~300s before submitting again: send this node's error output into a Wait node set to 300 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: citation checking is switched off for a moment — retry in ~300s.",
+    "error_description": "Transient (HTTP 503, code: citations_unavailable). Nothing was charged. Wait ~300s before submitting again: send this node's error output into a Wait node set to 300 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: citation checking is switched off for a moment \u2014 retry in ~300s.",
-   "description": "Transient (HTTP 503, code: citations_unavailable). Nothing was charged. Wait ~300s before submitting again: send this node's error output into a Wait node set to 300 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: citation checking is switched off for a moment — retry in ~300s.",
+   "description": "Transient (HTTP 503, code: citations_unavailable). Nothing was charged. Wait ~300s before submitting again: send this node's error output into a Wait node set to 300 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -2896,13 +2935,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining ask credits.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: No remaining ask credits.",
-   "description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -2916,13 +2955,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining /assess units.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: No remaining /assess units.",
-   "description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -2936,13 +2975,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining claim checks.",
-    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: No remaining claim checks.",
-   "description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -2956,13 +2995,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 30,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: Insufficient credits for batch.",
-    "error_description": "This call costs 50 credits and you have 30 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 50 credits and you have 30 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: Insufficient credits for batch.",
-   "description": "This call costs 50 credits and you have 30 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 50 credits and you have 30 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -2993,14 +3032,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -3011,14 +3050,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "capacity",
     "retry_after": 60,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~60s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~60s before submitting again: send this node's error output into a Wait node set to 60 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~60s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~60s before submitting again: send this node's error output into a Wait node set to 60 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz is at capacity right now \u2014 retry in ~60s.",
-   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~60s before submitting again: send this node's error output into a Wait node set to 60 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz is at capacity right now — retry in ~60s.",
+   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~60s before submitting again: send this node's error output into a Wait node set to 60 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -3168,14 +3207,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -3544,7 +3583,7 @@ export const canonicalOutput: Record<
     "candidate_claims": [],
     "locations": null,
     "not_a_claim": false,
-    "message": "Claims were found, but none fall within the focus. Widen or reword it and run again \u2014 the unfocused claims are deliberately not substituted."
+    "message": "Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted."
    }
   ],
   "threw": null,
@@ -3678,16 +3717,16 @@ export const canonicalOutput: Record<
  "extract__url_fetch_502_unreadable": {
   "ok": [
    {
-    "error": "Bad gateway - the service failed to handle your request",
-    "status_code": 502,
-    "code": "extraction_failed"
+    "error": "Your request is invalid or could not be processed by the service",
+    "status_code": 422,
+    "code": "page_unreadable"
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Bad gateway - the service failed to handle your request",
-   "description": "extraction_failed",
-   "httpCode": "502"
+   "message": "Your request is invalid or could not be processed by the service",
+   "description": "The page at the link could not be read.",
+   "httpCode": "422"
   }
  },
  "extract__url_fetch_503_upstream": {
@@ -3697,14 +3736,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -3782,13 +3821,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 100,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining credits to assess the draft.",
-    "error_description": "This call costs 1 credit and you have 100 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 100 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: No remaining credits to assess the draft.",
-   "description": "This call costs 1 credit and you have 100 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 1 credit and you have 100 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -3802,13 +3841,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining credits to assess the draft.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: No remaining credits to assess the draft.",
-   "description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -4079,13 +4118,13 @@ export const canonicalOutput: Record<
     "status_code": 429,
     "code": "review_in_flight",
     "retry_after": 60,
-    "error_message": "Lenz: this account already has 3 reviews running \u2014 retry when one finishes.",
+    "error_message": "Lenz: this account already has 3 reviews running — retry when one finishes.",
     "error_description": "HTTP 429 (review_in_flight). Nothing was charged. Lenz runs at most 3 reviews at a time per account; this is not a plan limit. The node waited for a slot and none opened in time. Send fewer items through at once, or send this node's error output into a Wait node with Wait Amount 60 and Wait Unit set to Seconds (it defaults to Hours), then loop it back."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: this account already has 3 reviews running \u2014 retry when one finishes.",
+   "message": "Lenz: this account already has 3 reviews running — retry when one finishes.",
    "description": "HTTP 429 (review_in_flight). Nothing was charged. Lenz runs at most 3 reviews at a time per account; this is not a plan limit. The node waited for a slot and none opened in time. Send fewer items through at once, or send this node's error output into a Wait node with Wait Amount 60 and Wait Unit set to Seconds (it defaults to Hours), then loop it back.",
    "httpCode": "429"
   }
@@ -4097,14 +4136,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "capacity",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -4115,14 +4154,14 @@ export const canonicalOutput: Record<
     "status_code": 503,
     "code": "capacity",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -4417,13 +4456,13 @@ export const canonicalOutput: Record<
       "claim": "The Eiffel Tower is in Berlin.",
       "stage": "assessment",
       "failure": {
-       "code": "timeout",
+       "code": "upstream_unavailable",
        "detail": "The check did not finish inside its time budget.",
        "hint": "The check ran out of time. Retry it; nothing was charged.",
        "failure_class": "upstream_unavailable",
        "retryable": true,
-       "docs_url": null,
-       "failure_reason": "timeout"
+       "docs_url": "https://lenz.io/docs/errors#upstream-unavailable",
+       "failure_reason": "upstream_unavailable"
       }
      }
     ],
@@ -4484,15 +4523,15 @@ export const canonicalOutput: Record<
        "suggested_rewrite": null,
        "more_claims": [],
        "failure": {
-        "code": "timeout",
+        "code": "upstream_unavailable",
         "detail": "The check did not finish inside its time budget.",
         "hint": "The check ran out of time. Retry it; nothing was charged.",
         "failure_class": "upstream_unavailable",
         "retryable": true,
-        "docs_url": null,
-        "failure_reason": "timeout"
+        "docs_url": "https://lenz.io/docs/errors#upstream-unavailable",
+        "failure_reason": "upstream_unavailable"
        },
-       "error_code": "timeout",
+       "error_code": "upstream_unavailable",
        "hint": null,
        "identified_claims": []
       },
@@ -8511,13 +8550,13 @@ export const canonicalOutput: Record<
     ],
     "citations": [],
     "failure": {
-     "code": "assessment_failed",
+     "code": "upstream_unavailable",
      "detail": "No claim could be assessed.",
      "hint": "Retry the review with a new Idempotency-Key; nothing was charged.",
      "failure_class": "upstream_unavailable",
      "retryable": true,
      "docs_url": "https://lenz.io/docs/errors#upstream-unavailable",
-     "failure_reason": "assessment_failed"
+     "failure_reason": "upstream_unavailable"
     },
     "more_claims": [],
     "more_claim_locations": [],
@@ -10127,14 +10166,14 @@ export const canonicalOutput: Record<
     "error": "Service unavailable - try again later or consider setting this node to retry automatically (in the node settings)",
     "status_code": 503,
     "code": "capacity",
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -10190,13 +10229,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: Insufficient credits for batch.",
-    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: Insufficient credits for batch.",
-   "description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -10247,14 +10286,14 @@ export const canonicalOutput: Record<
     "error": "Service unavailable - try again later or consider setting this node to retry automatically (in the node settings)",
     "status_code": 503,
     "code": "capacity",
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ],
   "threw": null,
   "thrown": {
-   "message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait.",
+   "message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+   "description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
    "httpCode": "503"
   }
  },
@@ -10539,13 +10578,13 @@ export const canonicalOutput: Record<
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining claim checks.",
-    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ],
   "threw": null,
   "thrown": {
    "message": "Lenz: No remaining claim checks.",
-   "description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
+   "description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
    "httpCode": "402"
   }
  },
@@ -12983,5 +13022,37 @@ export const canonicalOutput: Record<
    "description": "webhook_url was supplied but this API key has no HMAC secret. Generate one at https://lenz.io/api-credentials (Webhooks panel) before submitting webhook-delivered calls.",
    "httpCode": "422"
   }
+ },
+ "assess__no_public_record_row": {
+  "ok": [
+   {
+    "status": "ok",
+    "not_a_claim": false,
+    "claims": [
+     {
+      "claim": "The Smalltown council approved the new bridge budget in March 2019.",
+      "verdict": "No Public Record",
+      "confidence": "medium",
+      "passed": null,
+      "language": "en",
+      "verification_url": null,
+      "rationale": "No source the reviewers found records the vote or the budget.",
+      "searched_pages": []
+     },
+     {
+      "claim": "The Danube flows through Vienna.",
+      "verdict": "True",
+      "confidence": "high",
+      "passed": true,
+      "language": "en",
+      "verification_url": null,
+      "rationale": "The river runs through the city.",
+      "searched_pages": []
+     }
+    ]
+   }
+  ],
+  "threw": null,
+  "thrown": null
  }
 };

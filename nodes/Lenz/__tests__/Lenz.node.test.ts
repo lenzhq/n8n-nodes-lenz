@@ -10,7 +10,7 @@ jest.mock('n8n-workflow', () => ({
 	sleep: jest.fn(async () => {}),
 }));
 
-import { API_VERSION, Lenz, POLL_TIMEOUT_MS } from '../Lenz.node';
+import { API_VERSION, Lenz, POLL_TIMEOUT_MS, normalizeUploadFile } from '../Lenz.node';
 
 // A responder receives the httpRequest options and returns the mocked response
 // body (or throws to simulate an API/transport error).
@@ -55,6 +55,7 @@ function createContext(
 	// The node's identity is a test input for the Idempotency-Key: its name is
 	// user-editable free text, and its id is absent on older n8n versions.
 	nodeIdentity: { name?: string; id?: string; typeVersion?: number } = {},
+	binaryDataByItem?: Array<Record<string, { buffer: Buffer; fileName?: string; mimeType?: string }>>,
 ): { ctx: IExecuteFunctions; httpMock: jest.Mock; calls: IHttpRequestOptions[] } {
 	const typeVersion = nodeIdentity.typeVersion ?? 1;
 	const items = Array.from({ length: itemCount }, () => ({ json: {} }));
@@ -62,6 +63,33 @@ function createContext(
 	const httpMock = jest.fn(async (_credType: string, options: IHttpRequestOptions) => {
 		calls.push(options);
 		return responder(options);
+	});
+	const assertBinaryDataMock = jest.fn((itemIndex: number, propertyName: string) => {
+		const itemBinary = binaryDataByItem?.[itemIndex] ?? {};
+		const entry = itemBinary[propertyName];
+		if (!entry) {
+			throw new Error(`No binary data on item ${itemIndex} property "${propertyName}"`);
+		}
+		return {
+			data: entry.buffer.toString('base64'),
+			mimeType: entry.mimeType ?? 'application/octet-stream',
+			fileName: entry.fileName,
+		};
+	});
+	const getBinaryDataBufferMock = jest.fn(async (itemIndex: number, propertyName: string) => {
+		const itemBinary = binaryDataByItem?.[itemIndex] ?? {};
+		const entry = itemBinary[propertyName];
+		if (!entry) {
+			throw new Error(`No binary data on item ${itemIndex} property "${propertyName}"`);
+		}
+		return entry.buffer;
+	});
+	const prepareBinaryDataMock = jest.fn(async (buffer: Buffer, fileName?: string, mimeType?: string) => {
+		return {
+			data: buffer.toString('base64'),
+			fileName,
+			mimeType,
+		};
 	});
 	const ctx = {
 		getInputData: jest.fn(() => items),
@@ -94,6 +122,9 @@ function createContext(
 		continueOnFail: jest.fn(() => continueOnFail),
 		helpers: {
 			httpRequestWithAuthentication: httpMock,
+			assertBinaryData: assertBinaryDataMock,
+			getBinaryDataBuffer: getBinaryDataBufferMock,
+			prepareBinaryData: prepareBinaryDataMock,
 		},
 	} as unknown as IExecuteFunctions;
 	return { ctx, httpMock, calls };
@@ -105,6 +136,7 @@ async function runNode(
 	continueOnFail = false,
 	itemCount = 1,
 	nodeIdentity: { name?: string; id?: string; typeVersion?: number } = {},
+	binaryDataByItem?: Array<Record<string, { buffer: Buffer; fileName?: string; mimeType?: string }>>,
 ) {
 	const { ctx, httpMock, calls } = createContext(
 		params,
@@ -112,6 +144,7 @@ async function runNode(
 		continueOnFail,
 		itemCount,
 		nodeIdentity,
+		binaryDataByItem,
 	);
 	const node = new Lenz();
 	const result = await node.execute.call(ctx);
@@ -177,6 +210,114 @@ describe('Lenz node - Assess (Fast)', () => {
 		expect(claims[2].rationale).toBeNull();
 		expect(claims[3].rationale).toBeNull();
 		for (const row of claims) expect('dissent' in row).toBe(false);
+	});
+
+	describe('searched_pages', () => {
+		const rowsOf = async (searched: unknown, extra: IDataObject = {}) => {
+			const { output } = await runNode({ operation: 'assess', text: 'some text' }, () => ({
+				claims: [{ claim: 'A', verdict: 'True', confidence: 'high', searched_pages: searched, ...extra }],
+			}));
+			return ((output[0].json as IDataObject).claims as IDataObject[])[0];
+		};
+
+		it('passes on the pages the reviewers looked at, title and url only, in the order sent', async () => {
+			const row = await rowsOf([
+				{ title: 'First page', url: 'https://example.org/a', extra: 'dropped' },
+				{ title: 'Second page', url: 'http://example.com/b?q=1#frag' },
+			]);
+			expect(row.searched_pages).toEqual([
+				{ title: 'First page', url: 'https://example.org/a' },
+				{ title: 'Second page', url: 'http://example.com/b?q=1#frag' },
+			]);
+		});
+
+		it('is an empty list when the row has none, or an older API sends no key', async () => {
+			expect((await rowsOf([])).searched_pages).toEqual([]);
+			expect((await rowsOf(undefined)).searched_pages).toEqual([]);
+			expect((await rowsOf(null)).searched_pages).toEqual([]);
+		});
+
+		it('is an empty list when the value is not a list', async () => {
+			for (const bad of ['https://example.org', { title: 'T', url: 'https://example.org' }, 7, true]) {
+				expect((await rowsOf(bad)).searched_pages).toEqual([]);
+			}
+		});
+
+		it('keeps an entry only with a non-empty string title and an http(s) url with a host and no credentials', async () => {
+			const row = await rowsOf([
+				{ title: 'Kept', url: 'HTTPS://Example.org/x' },
+				{ title: '', url: 'https://example.org/empty-title' },
+				{ title: '   ', url: 'https://example.org/blank-title' },
+				{ title: 42, url: 'https://example.org/number-title' },
+				{ url: 'https://example.org/no-title' },
+				{ title: 'No url' },
+				{ title: 'Number url', url: 7 },
+				{ title: 'Script', url: 'javascript:alert(1)' },
+				{ title: 'Data', url: 'data:text/html,<b>x</b>' },
+				{ title: 'File', url: 'file:///etc/passwd' },
+				{ title: 'Ftp', url: 'ftp://example.org/x' },
+				{ title: 'Relative', url: '/path/only' },
+				{ title: 'Scheme only', url: 'https://' },
+				{ title: 'No host', url: 'https:///path' },
+				{ title: 'Credentials', url: 'https://user:pass@example.org/x' },
+				{ title: 'User only', url: 'https://user@example.org/x' },
+				'https://example.org/a-string',
+				null,
+				7,
+				['https://example.org'],
+			]);
+			expect(row.searched_pages).toEqual([{ title: 'Kept', url: 'HTTPS://Example.org/x' }]);
+		});
+
+		it('turns control characters in a title into spaces and caps it at 200 characters', async () => {
+			const row = await rowsOf([
+				{ title: 'Line one\nline two\ttabbed\u0000nul\u001b[0m', url: 'https://example.org/a' },
+				{ title: 'x'.repeat(250), url: 'https://example.org/b' },
+			]);
+			const pages = row.searched_pages as IDataObject[];
+			expect(pages[0].title).toBe('Line one line two tabbed nul [0m');
+			expect((pages[1].title as string).length).toBe(200);
+		});
+
+		it('drops an entry whose url holds a space, newline, tab or other control character', async () => {
+			const row = await rowsOf([
+				{ title: 'Space', url: 'https://example.org/a b' },
+				{ title: 'Newline', url: 'https://example.org/a\nb' },
+				{ title: 'Tab', url: 'https://example.org/a\tb' },
+				{ title: 'Nul', url: 'https://example.org/a\u0000b' },
+				{ title: 'Trailing', url: 'https://example.org/a ' },
+				{ title: 'Line separator', url: 'https://example.org/a b' },
+				{ title: 'Kept', url: 'https://example.org/ab' },
+			]);
+			expect(row.searched_pages).toEqual([{ title: 'Kept', url: 'https://example.org/ab' }]);
+		});
+
+		it('drops an entry whose title is only whitespace or control characters, and collapses runs inside one', async () => {
+			const row = await rowsOf([
+				{ title: ' \n\t\u0000\u001b ', url: 'https://example.org/a' },
+				{ title: 'One \n\n two\t\tthree', url: 'https://example.org/b' },
+				{ title: `${'x'.repeat(199)} y`, url: 'https://example.org/c' },
+			]);
+			expect(row.searched_pages).toEqual([
+				{ title: 'One two three', url: 'https://example.org/b' },
+				{ title: 'x'.repeat(199), url: 'https://example.org/c' },
+			]);
+		});
+
+		it('leaves markup in a title as text and does not touch it', async () => {
+			const row = await rowsOf([{ title: '<img src=x onerror=alert(1)>', url: 'https://example.org/a' }]);
+			expect(row.searched_pages).toEqual([
+				{ title: '<img src=x onerror=alert(1)>', url: 'https://example.org/a' },
+			]);
+		});
+
+		it('is an empty list on an Error row', async () => {
+			const { output } = await runNode({ operation: 'assess', text: 'some text' }, () => ({
+				claims: [{ claim: 'A', status: 'failed', verdict: null, confidence: null, searched_pages: [] }],
+			}));
+			const row = ((output[0].json as IDataObject).claims as IDataObject[])[0];
+			expect(row.searched_pages).toEqual([]);
+		});
 	});
 
 	it('skips empty text input instead of failing the batch', async () => {
@@ -260,6 +401,35 @@ describe('Lenz node - what an expression hands a text field', () => {
 			claims: [{ claim: '42', verdict: 'True', confidence: 'high' }],
 		}));
 		expect(calls[0].body).toMatchObject({ text: '42' });
+	});
+
+	it('reads a citation pair and selected claims the same way', async () => {
+		const pairs = await runNode(
+			{
+				operation: 'checkCitations',
+				citationInput: 'pairs',
+				waitForCompletion: false,
+				citationPairs: {
+					pair: [
+						{ statement: 42, cite: ' 42 U.S.C. § 1983 ', url: null, doi: undefined },
+						{ statement: 'Water boils at 100 °C.', url: 'https://example.com', cite: null },
+					],
+				},
+			},
+			() => ({ citecheck_id: 'cc_1', status: 'queued' }),
+		);
+		expect(pairs.calls[0].body).toMatchObject({
+			pairs: [
+				{ statement: '42', cite: '42 U.S.C. § 1983' },
+				{ statement: 'Water boils at 100 °C.', url: 'https://example.com' },
+			],
+		});
+
+		const select = await runNode(
+			{ operation: 'select', taskId: 'task_1', selectedClaims: [7, null, ' Claim two '] },
+			() => ({ batch_id: 'b', items: [] }),
+		);
+		expect(select.calls[0].body).toEqual({ texts: ['7', 'Claim two'] });
 	});
 
 	it('refuses an object with a message naming the field', async () => {
@@ -353,6 +523,140 @@ describe('Lenz node - Verify (Deep)', () => {
 			},
 			{ title: 'Source B', url: 'https://b.example', source_name: '', snippet: '', date: '' },
 		]);
+	});
+
+	it('preserves source origin when present in citations', async () => {
+		const statusWithOrigin: IDataObject = {
+			status: 'completed',
+			result: {
+				verification_id: 'ver_origin',
+				verdict: 'True',
+				confidence: 'high',
+				lenz_score: 9,
+				executive_summary: 'This claim is true.',
+				sources: [
+					{
+						title: 'Supplied Doc',
+						url: 'https://supplied.example',
+						origin: 'supplied',
+					},
+					{
+						title: 'Web Source',
+						url: 'https://web.example',
+						origin: 'web',
+					},
+					{
+						title: 'Legacy Source',
+						url: 'https://legacy.example',
+					},
+				],
+			},
+		};
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'Some claim' },
+			verifyResponder(statusWithOrigin),
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.citations).toEqual([
+			{
+				title: 'Supplied Doc',
+				url: 'https://supplied.example',
+				source_name: '',
+				snippet: '',
+				date: '',
+				origin: 'supplied',
+			},
+			{
+				title: 'Web Source',
+				url: 'https://web.example',
+				source_name: '',
+				snippet: '',
+				date: '',
+				origin: 'web',
+			},
+			{
+				title: 'Legacy Source',
+				url: 'https://legacy.example',
+				source_name: '',
+				snippet: '',
+				date: '',
+			},
+		]);
+	});
+
+	it('submits supplied_sources from additionalFields with non-empty fields alongside text', async () => {
+		let submitBody: IDataObject | undefined;
+		await runNode(
+			{
+				operation: 'verify',
+				claim: 'Some claim',
+				additionalFields: {
+					supplied_sources: {
+						sources: [
+							{
+								text: 'Excerpts from report',
+								title: 'Annual Report',
+								url: 'https://report.example',
+								doi: '',
+								cite: '',
+								published_date: '2026-01-15',
+							},
+							{
+								text: 'Academic paper extract',
+								doi: '10.1038/s41586-026-0001-x',
+							},
+						],
+					},
+				},
+			},
+			(options) => {
+				if (options.method === 'POST' && options.url === '/verify') {
+					submitBody = options.body as IDataObject;
+					return { task_id: 'task_1' };
+				}
+				return completedStatus;
+			},
+		);
+		expect(submitBody?.supplied_sources).toEqual([
+			{
+				text: 'Excerpts from report',
+				title: 'Annual Report',
+				url: 'https://report.example',
+				published_date: '2026-01-15',
+			},
+			{
+				text: 'Academic paper extract',
+				doi: '10.1038/s41586-026-0001-x',
+			},
+		]);
+	});
+
+	it('ignores supplied_sources with empty or whitespace-only text', async () => {
+		let submitBody: IDataObject | undefined;
+		await runNode(
+			{
+				operation: 'verify',
+				claim: 'Some claim',
+				additionalFields: {
+					supplied_sources: {
+						sources: [
+							{
+								text: '   ',
+								url: 'https://empty.example',
+							},
+						],
+					},
+				},
+			},
+			(options) => {
+				if (options.method === 'POST' && options.url === '/verify') {
+					submitBody = options.body as IDataObject;
+					return { task_id: 'task_1' };
+				}
+				return completedStatus;
+			},
+		);
+		expect(submitBody?.supplied_sources).toBeUndefined();
 	});
 
 	it('surfaces the fields the API added: key_finding, domain, entities, warnings, visibility', async () => {
@@ -2862,6 +3166,77 @@ describe('Lenz node - Review', () => {
 		expect(json.credits).toEqual({ charged: 12 });
 	});
 
+	it('submits supplied_sources from additionalFields', async () => {
+		let submitBody: IDataObject | undefined;
+		await runNode(
+			{
+				operation: 'reviewDraft',
+				draft: 'A review draft.',
+				additionalFields: {
+					supplied_sources: {
+						sources: [
+							{
+								text: 'Context document for review',
+								title: 'Brief',
+								url: 'https://brief.example',
+							},
+						],
+					},
+				},
+			},
+			(options) => {
+				if (options.method === 'POST') {
+					submitBody = options.body as IDataObject;
+					return { review_id: 'rev_1', status: 'queued' };
+				}
+				return completedReview('clean');
+			},
+		);
+		expect(submitBody?.supplied_sources).toEqual([
+			{
+				text: 'Context document for review',
+				title: 'Brief',
+				url: 'https://brief.example',
+			},
+		]);
+	});
+
+	describe('searched_pages on a review row', () => {
+		const withPages = (): IDataObject => ({
+			...completedReview('issues_found'),
+			claims: [
+				{
+					claim_index: 0,
+					assessment: {
+						verdict: 'False',
+						confidence: 'high',
+						searched_pages: [{ title: 'A page', url: 'https://example.org/a' }],
+					},
+				},
+				{ claim_index: 1, assessment: { verdict: 'True', confidence: 'high', searched_pages: [] } },
+			],
+		});
+
+		it('reaches the output of Review Draft as the API sent it', async () => {
+			const { output } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) =>
+				options.method === 'POST' ? { review_id: 'rev_1', status: 'queued' } : withPages(),
+			);
+			const claims = (output[0].json as IDataObject).claims as Array<{ assessment: IDataObject }>;
+			expect(claims[0].assessment.searched_pages).toEqual([
+				{ title: 'A page', url: 'https://example.org/a' },
+			]);
+			expect(claims[1].assessment.searched_pages).toEqual([]);
+		});
+
+		it('reaches the output of Get Review', async () => {
+			const { output } = await runNode({ operation: 'getReview', reviewId: 'rev_1' }, withPages);
+			const claims = (output[0].json as IDataObject).claims as Array<{ assessment: IDataObject }>;
+			expect(claims[0].assessment.searched_pages).toEqual([
+				{ title: 'A page', url: 'https://example.org/a' },
+			]);
+		});
+	});
+
 	it('sends no escalate block when no option is set', async () => {
 		const { calls, output } = await runNode({ operation: 'reviewDraft', draft: 'x' }, (options) =>
 			options.method === 'POST' ? { review_id: 'rev_1', status: 'queued' } : completedReview('clean'),
@@ -2991,7 +3366,7 @@ describe('Lenz node - Check Citations', () => {
 		expect((output[0].json as IDataObject).passed).toBe(true);
 	});
 
-	it('sends pairs with a URL or a DOI, never max_citations', async () => {
+	it('sends pairs with a URL, a DOI or a legal cite, never max_citations', async () => {
 		const { calls } = await runNode(
 			{
 				operation: 'checkCitations',
@@ -3000,6 +3375,7 @@ describe('Lenz node - Check Citations', () => {
 					pair: [
 						{ statement: ' A ', url: ' https://a.example ' },
 						{ statement: 'B', doi: '10.1038/nature12373' },
+						{ statement: 'C', cite: ' 42 U.S.C. § 1983 ' },
 					],
 				},
 			},
@@ -3010,6 +3386,98 @@ describe('Lenz node - Check Citations', () => {
 			pairs: [
 				{ statement: 'A', url: 'https://a.example' },
 				{ statement: 'B', doi: '10.1038/nature12373' },
+				{ statement: 'C', cite: '42 U.S.C. § 1983' },
+			],
+		});
+	});
+
+	it('sends pairs with source_text, published_date, and standalone source_text', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'checkCitations',
+				citationInput: 'pairs',
+				citationPairs: {
+					pair: [
+						{
+							statement: 'A',
+							url: 'https://paywalled.example',
+							source_text: 'Full text behind paywall',
+							published_date: '2026-03-01',
+						},
+						{
+							statement: 'B',
+							source_text: 'Offline internal document',
+						},
+						{
+							statement: 'C',
+							source_text: 'Dated document',
+							published_date: '2026-05-10',
+						},
+						{
+							statement: 'D',
+							doi: '10.1038/example',
+							source_text: 'Paper text',
+						},
+					],
+				},
+			},
+			(options) =>
+				options.method === 'POST' ? { citecheck_id: 'cc_1', status: 'queued' } : completedCheck,
+		);
+		expect(calls[0].body).toEqual({
+			pairs: [
+				{
+					statement: 'A',
+					url: 'https://paywalled.example',
+					source_text: 'Full text behind paywall',
+					published_date: '2026-03-01',
+				},
+				{
+					statement: 'B',
+					source_text: 'Offline internal document',
+				},
+				{
+					statement: 'C',
+					source_text: 'Dated document',
+					published_date: '2026-05-10',
+				},
+				{
+					statement: 'D',
+					doi: '10.1038/example',
+					source_text: 'Paper text',
+				},
+			],
+		});
+	});
+
+	it('submits supplied_sources on checkCitations from additionalFields', async () => {
+		const { calls } = await runNode(
+			{
+				operation: 'checkCitations',
+				citationInput: 'text',
+				citationText: 'See [1].',
+				additionalFields: {
+					supplied_sources: {
+						sources: [
+							{
+								text: 'Source reference text',
+								cite: '42 U.S.C. § 1983',
+							},
+						],
+					},
+				},
+			},
+			(options) =>
+				options.method === 'POST' ? { citecheck_id: 'cc_1', status: 'queued' } : completedCheck,
+		);
+		expect(calls[0].body).toEqual({
+			text: 'See [1].',
+			max_citations: 20,
+			supplied_sources: [
+				{
+					text: 'Source reference text',
+					cite: '42 U.S.C. § 1983',
+				},
 			],
 		});
 	});
@@ -3017,6 +3485,8 @@ describe('Lenz node - Check Citations', () => {
 	it.each([
 		[{ statement: 'A' }],
 		[{ statement: 'A', url: 'https://a.example', doi: '10.1/x' }],
+		[{ statement: 'A', doi: '10.1/x', cite: '42 U.S.C. § 1983' }],
+		[{ statement: 'A', url: 'https://a.example', doi: '10.1/x', source_text: 'Full text' }],
 		[{ url: 'https://a.example' }],
 	])('refuses a pair without a statement and exactly one source, before submitting: %j', async (pair) => {
 		const ctx = createContext(
@@ -3317,5 +3787,899 @@ describe('Lenz node - conflict on an operation that does not retry', () => {
 		expect(description).toMatch(/Nothing new was charged/);
 		expect(description).not.toMatch(/already retried/);
 		expect(description).not.toMatch(/the job/);
+	});
+});
+
+describe('Lenz node - No Public Record', () => {
+	const noRecord: IDataObject = {
+		verification_id: 'ver_np',
+		claim: 'The mayor of Smalltown signed the order on 3 May.',
+		verdict: 'No Public Record',
+		confidence: 'medium',
+		lenz_score: null,
+		key_finding: 'Lenz found no public record of this.',
+		executive_summary: 'No public source records this.',
+		suggested_rewrite: null,
+		warnings: [],
+		sources: [],
+	};
+
+	const verifyResponder =
+		(terminal: IDataObject): Responder =>
+		(options) => {
+			if (options.method === 'POST') return { task_id: 'task_1' };
+			if (options.url === '/verify/status/task_1') return terminal;
+			throw new Error(`unexpected request: ${options.method} ${options.url}`);
+		};
+
+	it('Verify (Deep): passed is null, not false, and lenz_score is null', async () => {
+		const { output } = await runNode(
+			{ operation: 'verify', claim: 'x' },
+			verifyResponder({ status: 'completed', result: noRecord }),
+			false,
+			1,
+			{ typeVersion: 1.3 },
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status).toBe('completed');
+		expect(json.passed).toBeNull();
+		expect(json.verdict).toBe('No Public Record');
+		expect(json.lenz_score).toBeNull();
+		expect(json.confidence).toBe('medium');
+		expect(json.suggested_rewrite).toBe('');
+		expect(json.citations).toEqual([]);
+	});
+
+	it('Get Verify Status and Get Verification read it the same way', async () => {
+		const status = await runNode({ operation: 'verifyStatus', taskId: 'task_1' }, () => ({
+			status: 'completed',
+			result: noRecord,
+		}));
+		expect((status.output[0].json as IDataObject).passed).toBeNull();
+		const stored = await runNode(
+			{ operation: 'getVerification', verificationId: 'ver_np' },
+			() => noRecord,
+		);
+		const json = stored.output[0].json as IDataObject;
+		expect(json.passed).toBeNull();
+		expect(json.lenz_score).toBeNull();
+	});
+
+	it('still passes only True and Mostly True, and fails the rest', async () => {
+		const verdicts: Array<[string, boolean | null]> = [
+			['True', true],
+			['Mostly True', true],
+			['Mixed', false],
+			['Mostly False', false],
+			['False', false],
+			['No Public Record', null],
+		];
+		for (const [verdict, passed] of verdicts) {
+			const { output } = await runNode(
+				{ operation: 'getVerification', verificationId: 'ver_np' },
+				() => ({ ...noRecord, verdict }),
+			);
+			expect((output[0].json as IDataObject).passed).toBe(passed);
+		}
+	});
+
+	it('Assess: a row with this verdict has passed null', async () => {
+		const { output } = await runNode({ operation: 'assess', text: 'x' }, () => ({
+			claims: [{ claim: 'x', verdict: 'No Public Record', confidence: 'medium', language: 'en' }],
+		}));
+		const json = output[0].json as IDataObject;
+		const rows = json.claims as IDataObject[];
+		expect(rows[0].passed).toBeNull();
+		expect(rows[0].verdict).toBe('No Public Record');
+	});
+
+	describe('a review', () => {
+		const review = (outcome: string): IDataObject => ({
+			review_id: 'rev_1',
+			status: 'completed',
+			outcome,
+			summary: { claims_selected: 2, issues: 1 },
+			issues: [{ claim: 'A', verdict: 'No Public Record', confidence: 'medium' }],
+		});
+
+		it.each([1.2, 1.3])(
+			'follows clean exactly as before on a version %s node, and passes the No Public Record issue row on',
+			async (typeVersion) => {
+				for (const [outcome, passed] of [
+					['clean', true],
+					['issues_found', false],
+					['incomplete', false],
+				] as const) {
+					const { output } = await runNode(
+						{ operation: 'getReview', reviewId: 'rev_1' },
+						() => review(outcome),
+						false,
+						1,
+						{ typeVersion },
+					);
+					const json = output[0].json as IDataObject;
+					expect(json.passed).toBe(passed);
+					expect((json.issues as IDataObject[])[0].verdict).toBe('No Public Record');
+				}
+			},
+		);
+	});
+
+	describe('the collapsed failure codes', () => {
+		const failed = (code: string, failure_class: string, retryable: boolean): IDataObject => ({
+			status: 'failed',
+			failure: { code, detail: `Stopped: ${code}`, failure_class, retryable },
+		});
+
+		it.each([
+			['upstream_unavailable', 'upstream_unavailable', true],
+			['internal', 'internal', false],
+			['cancelled', 'cancelled', false],
+		])(
+			'%s is passed on as failure_reason with its class and retryable',
+			async (code, cls, retryable) => {
+				const { output } = await runNode(
+					{ operation: 'verifyStatus', taskId: 'task_1' },
+					() => failed(code, cls, retryable),
+					false,
+					1,
+					{ typeVersion: 1.3 },
+				);
+				const json = output[0].json as IDataObject;
+				expect(json.status).toBe('failed');
+				expect(json.passed).toBeNull();
+				expect(json.failure_reason).toBe(code);
+				expect(json.failure_class).toBe(cls);
+				expect(json.retryable).toBe(retryable);
+				expect(json.not_a_claim).toBe(false);
+			},
+		);
+
+		it('no_checkable_claim is still reported as not_a_claim, with not_a_claim true', async () => {
+			const { output } = await runNode(
+				{ operation: 'verifyStatus', taskId: 'task_1' },
+				() => failed('no_checkable_claim', 'invalid_input', false),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			const json = output[0].json as IDataObject;
+			expect(json.failure_reason).toBe('not_a_claim');
+			expect(json.not_a_claim).toBe(true);
+		});
+	});
+});
+
+describe('Lenz node - the collapsed failure codes and a quick No Public Record row', () => {
+	const noRecordRow: IDataObject = {
+		claim: 'The Smalltown council approved the bridge budget in 2019.',
+		language: 'en',
+		status: 'completed',
+		verdict: 'No Public Record',
+		confidence: 'medium',
+		rationale: 'Nothing the reviewers found records the vote.',
+		searched_pages: [],
+		failure: null,
+	};
+	const unavailableRow: IDataObject = {
+		claim: 'B',
+		language: 'en',
+		status: 'failed',
+		verdict: null,
+		confidence: null,
+		failure: {
+			code: 'upstream_unavailable',
+			detail: 'The check did not finish inside its time budget.',
+			failure_class: 'upstream_unavailable',
+			retryable: true,
+		},
+	};
+
+	it.each([1.2, 1.3])(
+		'Assess on a version %s node: a No Public Record row is passed null, beside a failed row that stays Error',
+		async (typeVersion) => {
+			const { output } = await runNode(
+				{ operation: 'assess', text: 'x' },
+				() => ({ status: 'ok', claims: [noRecordRow, unavailableRow, { claim: 'C', verdict: 'True', confidence: 'high', status: 'completed' }] }),
+				false,
+				1,
+				{ typeVersion },
+			);
+			const rows = (output[0].json as IDataObject).claims as IDataObject[];
+			expect(rows[0].verdict).toBe('No Public Record');
+			expect(rows[0].confidence).toBe('medium');
+			expect(rows[0].passed).toBeNull();
+			expect(rows[0].rationale).toBe('Nothing the reviewers found records the vote.');
+			expect(rows[1].verdict).toBe('Error');
+			expect(rows[1].confidence).toBe('low');
+			expect(rows[2].passed).toBe(true);
+			expect((output[0].json as IDataObject).not_a_claim).toBe(false);
+		},
+	);
+
+	it('a failure that is not "nothing to check" is not flagged not_a_claim, whatever its code', async () => {
+		for (const code of ['upstream_unavailable', 'internal', 'page_unreadable', 'cancelled']) {
+			const { output } = await runNode(
+				{ operation: 'assess', text: 'x' },
+				() => ({ status: 'ok', claims: [{ claim: 'A', status: 'failed', verdict: null, failure: { code, failure_class: 'internal', retryable: false } }] }),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			expect((output[0].json as IDataObject).not_a_claim).toBe(false);
+		}
+		// The 2026-10-11 shape has one word for nothing to check; the older
+		// `not_a_claim` / `no_claim` codes are no longer read.
+		for (const code of ['no_checkable_claim']) {
+			const { output } = await runNode(
+				{ operation: 'assess', text: 'x' },
+				() => ({ status: 'ok', claims: [{ claim: 'A', status: 'failed', verdict: null, failure: { code } }] }),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			expect((output[0].json as IDataObject).not_a_claim).toBe(true);
+		}
+	});
+
+	it('Extract: a 422 page_unreadable reaches the error output with its code and status', async () => {
+		const { output } = await runNode(
+			{ operation: 'extract', text: 'https://example.org/gone' },
+			() => {
+				throw apiError(422, {
+					detail: 'The page at the link could not be read.',
+					code: 'page_unreadable',
+					hint: "Paste the page's text instead.",
+				});
+			},
+			true,
+			1,
+			{ typeVersion: 1.3 },
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(422);
+		expect(json.code).toBe('page_unreadable');
+	});
+
+	it.each([
+		['extract', '/extract', 'extraction_failed'],
+		['assess', '/assess', 'framing_failed'],
+	])('%s: a 502 internal reads as the older %s on a version 1.3 node', async (operation, url, older) => {
+		const { output } = await runNode(
+			{ operation, text: 'x' },
+			(options) => {
+				expect(options.url).toBe(url);
+				throw apiError(502, { detail: 'Failed', code: 'internal' });
+			},
+			true,
+			1,
+			{ typeVersion: 1.3 },
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(502);
+		expect(json.code).toBe(older);
+	});
+
+	it('a 502 internal from another endpoint is left as it is', async () => {
+		const { output } = await runNode(
+			{ operation: 'ask', verificationId: 'ver_1', question: 'q' },
+			() => {
+				throw apiError(502, { detail: 'Failed', code: 'internal' });
+			},
+			true,
+			1,
+			{ typeVersion: 1.3 },
+		);
+		expect((output[0].json as IDataObject).code).toBe('internal');
+	});
+
+	it('Get Review: every failure code reads as the code it is, and nothing-to-check stays no_claim', async () => {
+		const failed = (code: string): IDataObject => ({
+			review_id: 'rev_1',
+			status: 'failed',
+			outcome: 'unchecked',
+			summary: {},
+			failure: { code, detail: 'd', failure_class: 'invalid_input', retryable: false },
+			claims: [],
+		});
+		for (const [code, reason] of [
+			['page_unreadable', 'page_unreadable'],
+			['upstream_unavailable', 'upstream_unavailable'],
+			['internal', 'internal'],
+			['insufficient_credits', 'insufficient_credits'],
+			['no_checkable_claim', 'no_claim'],
+		]) {
+			const { output } = await runNode(
+				{ operation: 'getReview', reviewId: 'rev_1' },
+				() => failed(code),
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+			const failure = (output[0].json as IDataObject).failure as IDataObject;
+			expect(failure.code).toBe(code);
+			expect(failure.failure_reason).toBe(reason);
+			expect((output[0].json as IDataObject).passed).toBeNull();
+		}
+	});
+
+	describe('File upload and export (extractFile, reviewFile, exportReview)', () => {
+		it('extract: uploads binary file to /extract/file with multipart body and normalized filename', async () => {
+			const dummyDocx = Buffer.from('PK\x03\x04test-docx-content');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'data',
+					focus: 'financial figures',
+					language: 'en',
+				},
+				(options) => {
+					capturedOptions = options;
+					return {
+						status: 'ready',
+						claim: 'Revenue was $10M.',
+						identified_claims: ['Revenue was $10M.'],
+						domain: 'Finance',
+					};
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyDocx, fileName: 'report.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } }],
+			);
+
+			expect(capturedOptions).toBeDefined();
+			expect(capturedOptions!.method).toBe('POST');
+			expect(capturedOptions!.url).toBe('/extract/file');
+			expect(capturedOptions!.json).toBe(false);
+			const headers = capturedOptions!.headers as IDataObject;
+			expect(headers['Content-Type']).toMatch(/^multipart\/form-data; boundary=----LenzN8nBoundary/);
+			expect(headers['Idempotency-Key']).toMatch(/^n8n:exec-1:/);
+
+			const bodyBuffer = capturedOptions!.body as Buffer;
+			const bodyString = bodyBuffer.toString('utf8');
+			expect(bodyString).toContain('name="file"; filename="report.docx"');
+			expect(bodyString).toContain('name="language"\r\n\r\nen');
+			expect(bodyString).toContain('name="focus"\r\n\r\nfinancial figures');
+			expect(bodyBuffer.includes(dummyDocx)).toBe(true);
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('ready');
+			expect(json.identified_claims).toEqual(['Revenue was $10M.']);
+			expect(json.not_a_claim).toBe(false);
+		});
+
+		it('extract: unnamed docx binary item defaults to upload.docx', async () => {
+			const dummyDocx = Buffer.from('PK\x03\x04test');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'data',
+				},
+				(options) => {
+					capturedOptions = options;
+					return { status: 'ready', identified_claims: [] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyDocx, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } }],
+			);
+
+			const bodyString = (capturedOptions!.body as Buffer).toString('utf8');
+			expect(bodyString).toContain('name="file"; filename="upload.docx"');
+		});
+
+		it('extract: saved workflow without inputSource defaults to text input', async () => {
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'extract',
+					text: 'The sky is blue.',
+				},
+				(options) => {
+					capturedOptions = options;
+					return { status: 'ready', identified_claims: ['The sky is blue.'] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			expect(capturedOptions!.url).toBe('/extract');
+			expect(capturedOptions!.body).toEqual({ text: 'The sky is blue.' });
+			expect((output[0].json as IDataObject).identified_claims).toEqual(['The sky is blue.']);
+		});
+
+		it('reviewDraft: uploads binary file to /review/file and polls until complete', async () => {
+			const dummyPdf = Buffer.from('%PDF-1.4 test pdf content');
+			let submitOptions: IHttpRequestOptions | undefined;
+			let pollOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'binary',
+					binaryPropertyName: 'attachment',
+					waitForCompletion: true,
+					visibility: 'private',
+					reviewOptions: {
+						maxWaitSeconds: 300,
+						webhookUrl: 'https://webhook.example/review',
+					},
+				},
+				(options) => {
+					if (options.method === 'POST' && options.url === '/review/file') {
+						submitOptions = options;
+						return { review_id: 'rev_file_1', status: 'queued' };
+					}
+					if (options.method === 'GET' && options.url === '/reviews/rev_file_1') {
+						pollOptions = options;
+						return {
+							review_id: 'rev_file_1',
+							status: 'completed',
+							outcome: 'clean',
+							issues: [],
+						};
+					}
+					throw new Error(`Unexpected request: ${options.method} ${options.url}`);
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ attachment: { buffer: dummyPdf, fileName: 'paper.pdf', mimeType: 'application/pdf' } }],
+			);
+
+			expect(submitOptions).toBeDefined();
+			expect(submitOptions!.url).toBe('/review/file');
+			const bodyString = (submitOptions!.body as Buffer).toString('utf8');
+			expect(bodyString).toContain('name="file"; filename="paper.pdf"');
+			expect(bodyString).toContain('name="visibility"\r\n\r\nprivate');
+			expect(bodyString).toContain('name="webhook_url"\r\n\r\nhttps://webhook.example/review');
+
+			expect(pollOptions).toBeDefined();
+			expect(pollOptions!.url).toBe('/reviews/rev_file_1');
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('completed');
+			expect(json.outcome).toBe('clean');
+			expect(json.passed).toBe(true);
+		});
+
+		it('reviewDraft: reuses idempotency key on review_in_flight (429) retry', async () => {
+			const dummyDocx = Buffer.from('PK\x03\x04test');
+			let attempts = 0;
+			const keysSeen: string[] = [];
+
+			await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'binary',
+					waitForCompletion: false,
+				},
+				(options) => {
+					if (options.method === 'POST' && options.url === '/review/file') {
+						attempts++;
+						const key = (options.headers as IDataObject)['Idempotency-Key'] as string;
+						keysSeen.push(key);
+						if (attempts === 1) {
+							throw apiError(429, { code: 'review_in_flight', retry_after_seconds: 1 });
+						}
+						return { review_id: 'rev_retry_1', status: 'queued' };
+					}
+					throw new Error(`Unexpected: ${options.method} ${options.url}`);
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyDocx, fileName: 'doc.docx' } }],
+			);
+
+			expect(attempts).toBe(2);
+			expect(keysSeen).toHaveLength(2);
+			expect(keysSeen[0]).toBe(keysSeen[1]);
+			expect(keysSeen[0]).toMatch(/^n8n:exec-1:/);
+		});
+
+		it('refuses 0-byte binary file upload', async () => {
+			const emptyBuffer = Buffer.alloc(0);
+
+			await expect(
+				runNode(
+					{
+						operation: 'extract',
+						inputSource: 'binary',
+					},
+					noCall,
+					false,
+					1,
+					{ typeVersion: 1.3 },
+					[{ data: { buffer: emptyBuffer, fileName: 'empty.docx' } }],
+				),
+			).rejects.toThrow('Binary field "data" is empty (0 bytes)');
+		});
+
+		it('refuses binary file exceeding 10 MB limit', async () => {
+			const oversizedBuffer = Buffer.alloc(10 * 1024 * 1024 + 1);
+
+			await expect(
+				runNode(
+					{
+						operation: 'extract',
+						inputSource: 'binary',
+					},
+					noCall,
+					false,
+					1,
+					{ typeVersion: 1.3 },
+					[{ data: { buffer: oversizedBuffer, fileName: 'big.docx' } }],
+				),
+			).rejects.toThrow('exceeds the 10 MB (10,485,760 bytes) limit');
+		});
+
+		it('exportReview: downloads docx binary and returns binary data with filename and export source', async () => {
+			const docxBytes = Buffer.from('PK\x03\x04word-document-content');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'exportReview',
+					reviewId: 'rev_123',
+					binaryPropertyName: 'exportedDoc',
+				},
+				(options) => {
+					capturedOptions = options;
+					return {
+						statusCode: 200,
+						headers: {
+							'content-disposition': 'attachment; filename="annotated-review.docx"',
+							'x-lenz-export-source': 'original',
+						},
+						body: docxBytes,
+					};
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			expect(capturedOptions).toBeDefined();
+			expect(capturedOptions!.method).toBe('GET');
+			expect(capturedOptions!.url).toBe('/reviews/rev_123/export');
+			expect(capturedOptions!.qs).toEqual({ format: 'docx' });
+			expect(capturedOptions!.encoding).toBe('arraybuffer');
+			expect(capturedOptions!.json).toBe(false);
+			expect(capturedOptions!.returnFullResponse).toBe(true);
+
+			const item = output[0];
+			expect(item.json).toEqual({
+				review_id: 'rev_123',
+				format: 'docx',
+				file_name: 'annotated-review.docx',
+				export_source: 'original',
+			});
+			expect(item.binary).toBeDefined();
+			expect(item.binary!.exportedDoc).toBeDefined();
+			expect(item.binary!.exportedDoc.fileName).toBe('annotated-review.docx');
+			expect(item.binary!.exportedDoc.mimeType).toBe(
+				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+			);
+			expect(Buffer.from(item.binary!.exportedDoc.data, 'base64')).toEqual(docxBytes);
+		});
+
+		it('exportReview: handles 409 error with binary response body', async () => {
+			const errorJson = JSON.stringify({
+				detail: 'Review is still processing',
+				code: 'not_ready',
+			});
+			const errorBuffer = Buffer.from(errorJson, 'utf8');
+
+			const err = apiError(409, undefined, 'Conflict');
+			(err as unknown as { context: { data: Buffer } }).context = { data: errorBuffer };
+
+			const { output } = await runNode(
+				{
+					operation: 'exportReview',
+					reviewId: 'rev_not_ready',
+				},
+				() => {
+					throw err;
+				},
+				true,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			// Under continueOnFail, error output is returned
+			expect(output[0].json).toBeDefined();
+			expect((output[0].json as IDataObject).code).toBe('not_ready');
+		});
+
+		it('exportReview: decodes binary error body properly in responseBodyOf', async () => {
+			const err = apiError(409, { code: 'not_ready', detail: 'Still running' });
+			// Simulate raw ArrayBuffer in error.body or context.data
+			const rawBuf = Buffer.from(JSON.stringify({ code: 'not_ready', detail: 'Still running' }));
+			(err as unknown as { context: { data: Buffer } }).context = { data: rawBuf };
+
+			const { output } = await runNode(
+				{
+					operation: 'exportReview',
+					reviewId: 'rev_not_ready_2',
+				},
+				() => {
+					throw err;
+				},
+				true,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			const json = output[0].json as IDataObject;
+			expect(json.code).toBe('not_ready');
+		});
+
+		it.each([1.2, 1.3])(
+			'exportReview: hydrates binary error body at typeVersion %s for thrown error description and continueOnFail output',
+			async (typeVersion) => {
+				const errorDetail = 'URL-sourced reviews cannot be exported as DOCX.';
+				const errorBuf = Buffer.from(
+					JSON.stringify({
+						detail: errorDetail,
+						code: 'not_exportable',
+					}),
+					'utf8',
+				);
+
+				const createErr = () => {
+					const transport = Object.assign(new Error('Request failed with status code 400'), {
+						statusCode: 400,
+						response: { status: 400, data: errorBuf },
+					});
+					return new NodeApiError(
+						{ name: 'Lenz', type: 'lenz', typeVersion, position: [0, 0] } as never,
+						transport as never,
+					);
+				};
+
+				// Thrown error has description populated from binary error body
+				let thrownError: unknown;
+				try {
+					await runNode(
+						{
+							operation: 'exportReview',
+							reviewId: 'rev_url_only',
+						},
+						() => {
+							throw createErr();
+						},
+						false,
+						1,
+						{ typeVersion },
+					);
+				} catch (err) {
+					thrownError = err;
+				}
+
+				expect(thrownError).toBeInstanceOf(NodeApiError);
+				expect((thrownError as NodeApiError).description).toContain(errorDetail);
+
+				// Under continueOnFail: true, output json has code and error populated
+				const { output } = await runNode(
+					{
+						operation: 'exportReview',
+						reviewId: 'rev_url_only',
+					},
+					() => {
+						throw createErr();
+					},
+					true,
+					1,
+					{ typeVersion },
+				);
+
+				expect(output).toHaveLength(1);
+				const json = output[0].json as IDataObject;
+				expect(json.code).toBe('not_exportable');
+				expect(typeof json.error).toBe('string');
+				expect(json.error).toBeTruthy();
+			},
+		);
+
+		it('generates different Idempotency-Key headers for two different file buffers on the same item index', async () => {
+			const bufA = Buffer.from('PDF file content version 1');
+			const bufB = Buffer.from('PDF file content version 2');
+			let keyA: string | undefined;
+			let keyB: string | undefined;
+
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'file',
+				},
+				(options) => {
+					keyA = (options.headers as IDataObject)?.['Idempotency-Key'] as string;
+					return { status: 'ready', identified_claims: [] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ file: { buffer: bufA, fileName: 'doc.pdf', mimeType: 'application/pdf' } }],
+			);
+
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'file',
+				},
+				(options) => {
+					keyB = (options.headers as IDataObject)?.['Idempotency-Key'] as string;
+					return { status: 'ready', identified_claims: [] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ file: { buffer: bufB, fileName: 'doc.pdf', mimeType: 'application/pdf' } }],
+			);
+
+			expect(keyA).toBeDefined();
+			expect(keyB).toBeDefined();
+			expect(keyA).not.toEqual(keyB);
+		});
+
+		it('reviewDraft: serializes escalate and supplied_sources as JSON strings in multipart form fields for binary upload', async () => {
+			const dummyDocx = Buffer.from('PK\x03\x04test-review-binary');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'binary',
+					binaryPropertyName: 'file',
+					waitForCompletion: false,
+					reviewOptions: {
+						depth: 'deep',
+						maxVerifications: 2,
+						suggestEdits: true,
+					},
+					additionalFields: {
+						supplied_sources: {
+							sources: [
+								{ url: 'https://example.com/source1', text: 'Supplied source content 1' },
+							],
+						},
+					},
+				},
+				(options) => {
+					capturedOptions = options;
+					return { review_id: 'rev_multipart_opt', status: 'queued' };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ file: { buffer: dummyDocx, fileName: 'brief.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } }],
+			);
+
+			expect(capturedOptions).toBeDefined();
+			expect(capturedOptions!.url).toBe('/review/file');
+			const bodyString = (capturedOptions!.body as Buffer).toString('utf8');
+
+			expect(bodyString).toContain('name="escalate"');
+			expect(bodyString).toContain(JSON.stringify({ max_verifications: 2, depth: 'deep', suggest_edits: true }));
+
+			expect(bodyString).toContain('name="supplied_sources"');
+			expect(bodyString).toContain(
+				JSON.stringify([{ text: 'Supplied source content 1', url: 'https://example.com/source1' }]),
+			);
+		});
+
+		it('normalizeUploadFile: correctly handles export.tmp with docx MIME and application/octet-stream with no filename', async () => {
+			const docxMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+			const res1 = normalizeUploadFile('export.tmp', docxMime);
+			expect(res1.filename).toBe('export.tmp.docx');
+			expect(res1.contentType).toBe(docxMime);
+
+			const res2 = normalizeUploadFile(undefined, 'application/octet-stream');
+			expect(res2.filename).toBe('upload');
+			expect(res2.contentType).toBe('application/octet-stream');
+
+			let capturedOptions: IHttpRequestOptions | undefined;
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'file',
+				},
+				(options) => {
+					capturedOptions = options;
+					return { status: 'ready', identified_claims: [] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ file: { buffer: Buffer.from('test-tmp'), fileName: 'export.tmp', mimeType: docxMime } }],
+			);
+
+			const bodyStr = (capturedOptions!.body as Buffer).toString('utf8');
+			expect(bodyStr).toContain('filename="export.tmp.docx"');
+		});
+
+		it('extract: blank text with invalid >300-char focus returns empty_input skipped instead of throwing', async () => {
+			const longFocus = 'x'.repeat(305);
+			const { output } = await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'text',
+					text: '   ',
+					focus: longFocus,
+				},
+				() => {
+					throw new Error('Should not be called');
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			expect(output).toHaveLength(1);
+			expect(output[0].json).toEqual({
+				skipped: true,
+				reason: 'empty_input',
+			});
+		});
+
+		it('reviewDraft: blank draft with invalid reviewOptions returns empty_input skipped instead of throwing', async () => {
+			const { output } = await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'text',
+					draft: '',
+					reviewOptions: {
+						maxWaitSeconds: 'invalid-non-number',
+					},
+				},
+				() => {
+					throw new Error('Should not be called');
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+			);
+
+			expect(output).toHaveLength(1);
+			expect(output[0].json).toEqual({
+				skipped: true,
+				reason: 'empty_input',
+			});
+		});
+
+		it('exportReview: throws NodeOperationError when export response body is empty (0 bytes)', async () => {
+			await expect(
+				runNode(
+					{
+						operation: 'exportReview',
+						reviewId: 'rev_empty_export',
+					},
+					() => ({
+						statusCode: 200,
+						headers: {
+							'content-disposition': 'attachment; filename="empty.docx"',
+						},
+						body: Buffer.from([]),
+					}),
+					false,
+					1,
+					{ typeVersion: 1.3 },
+				),
+			).rejects.toThrow('Lenz returned an empty document export.');
+		});
 	});
 });

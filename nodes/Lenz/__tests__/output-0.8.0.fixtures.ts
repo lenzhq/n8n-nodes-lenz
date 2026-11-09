@@ -646,7 +646,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining /assess units.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -734,8 +734,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "capacity",
     "retry_after": 100,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~100s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~100s before submitting again: send this node's error output into a Wait node set to 100 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~100s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~100s before submitting again: send this node's error output into a Wait node set to 100 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -746,8 +746,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -758,8 +758,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -1193,7 +1193,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 100,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining credits for citation checks.",
-    "error_description": "This call costs 1 credit and you have 100 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 100 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -1204,7 +1204,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 429,
     "code": "citecheck_in_flight",
     "retry_after": 60,
-    "error_message": "Lenz: this account already has 3 citation checks running \u2014 retry when one finishes.",
+    "error_message": "Lenz: this account already has 3 citation checks running — retry when one finishes.",
     "error_description": "HTTP 429 (citecheck_in_flight). Nothing was charged. Lenz runs at most 3 citation checks at a time per account; this is not a plan limit. The node waited for a slot and none opened in time. Send fewer items through at once, or send this node's error output into a Wait node with Wait Amount 60 and Wait Unit set to Seconds (it defaults to Hours), then loop it back."
    }
   ]
@@ -1216,8 +1216,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "capacity",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -1228,8 +1228,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "citations_unavailable",
     "retry_after": 300,
-    "error_message": "Lenz: citation checking is switched off for a moment \u2014 retry in ~300s.",
-    "error_description": "Transient (HTTP 503, code: citations_unavailable). Nothing was charged. Wait ~300s before submitting again: send this node's error output into a Wait node set to 300 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: citation checking is switched off for a moment — retry in ~300s.",
+    "error_description": "Transient (HTTP 503, code: citations_unavailable). Nothing was charged. Wait ~300s before submitting again: send this node's error output into a Wait node set to 300 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -2566,7 +2566,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining ask credits.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -2580,7 +2580,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining /assess units.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -2594,7 +2594,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining claim checks.",
-    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -2608,7 +2608,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 30,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: Insufficient credits for batch.",
-    "error_description": "This call costs 50 credits and you have 30 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 50 credits and you have 30 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -2633,8 +2633,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -2645,8 +2645,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "capacity",
     "retry_after": 60,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~60s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~60s before submitting again: send this node's error output into a Wait node set to 60 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~60s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~60s before submitting again: send this node's error output into a Wait node set to 60 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -2742,8 +2742,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -3000,7 +3000,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "presumed_intent": "",
     "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year.",
     "locations": null,
-    "message": "Claims were found, but none fall within the focus. Widen or reword it and run again \u2014 the unfocused claims are deliberately not substituted."
+    "message": "Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted."
    }
   ]
  },
@@ -3110,8 +3110,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "upstream_unavailable",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -3168,7 +3168,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 100,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining credits to assess the draft.",
-    "error_description": "This call costs 1 credit and you have 100 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 100 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -3182,7 +3182,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining credits to assess the draft.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -3351,7 +3351,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 429,
     "code": "review_in_flight",
     "retry_after": 60,
-    "error_message": "Lenz: this account already has 3 reviews running \u2014 retry when one finishes.",
+    "error_message": "Lenz: this account already has 3 reviews running — retry when one finishes.",
     "error_description": "HTTP 429 (review_in_flight). Nothing was charged. Lenz runs at most 3 reviews at a time per account; this is not a plan limit. The node waited for a slot and none opened in time. Send fewer items through at once, or send this node's error output into a Wait node with Wait Amount 60 and Wait Unit set to Seconds (it defaults to Hours), then loop it back."
    }
   ]
@@ -3363,8 +3363,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "capacity",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -3375,8 +3375,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "status_code": 503,
     "code": "capacity",
     "retry_after": 90,
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -9027,8 +9027,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "error": "Service unavailable - try again later or consider setting this node to retry automatically (in the node settings)",
     "status_code": 503,
     "code": "capacity",
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -9066,7 +9066,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: Insufficient credits for batch.",
-    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -9103,8 +9103,8 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "error": "Service unavailable - try again later or consider setting this node to retry automatically (in the node settings)",
     "status_code": 503,
     "code": "capacity",
-    "error_message": "Lenz: Lenz is at capacity right now \u2014 retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds \u2014 Wait Unit: Seconds, since it defaults to Hours \u2014 and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own \u2014 its tries are spaced too closely to clear the wait."
+    "error_message": "Lenz: Lenz is at capacity right now — retry in ~90s.",
+    "error_description": "Transient (HTTP 503, code: capacity). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
    }
   ]
  },
@@ -9316,7 +9316,7 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "credits_remaining": 0,
     "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
     "error_message": "Lenz: No remaining claim checks.",
-    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help \u2014 this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
+    "error_description": "This call costs 10 credits and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
    }
   ]
  },
@@ -11542,6 +11542,31 @@ export const output080: Record<string, { ok?: any[]; threw?: string }> = {
     "error": "Your request is invalid or could not be processed by the service",
     "status_code": 422,
     "code": "webhook_secret_missing"
+   }
+  ]
+ },
+ "assess__no_public_record_row": {
+  "ok": [
+   {
+    "status": "ok",
+    "claims": [
+     {
+      "claim": "The Smalltown council approved the new bridge budget in March 2019.",
+      "verdict": "Mixed",
+      "confidence": "low",
+      "passed": false,
+      "language": "en",
+      "verification_url": null
+     },
+     {
+      "claim": "The Danube flows through Vienna.",
+      "verdict": "True",
+      "confidence": "high",
+      "passed": true,
+      "language": "en",
+      "verification_url": null
+     }
+    ]
    }
   ]
  }

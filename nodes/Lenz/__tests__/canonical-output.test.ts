@@ -1,6 +1,6 @@
 // Release bar: the node reads only the `2026-10-11` shape, and every node
 // version returns, byte for byte (key order included), what a version 1.3 node
-// returned for the same response in 0.9.0, the release that still read both
+// returned for the same response in 0.9.1 (with #82-#85), the release that still read both
 // shapes (canonical-output.fixtures.ts, recorded from it). That covers the
 // items with Continue On Fail on, the message thrown with it on, and what a
 // workflow shows for a refusal with it off.
@@ -19,7 +19,7 @@ void sleep;
 
 const VERSIONS = [1, 1.1, 1.2, 1.3];
 
-describe('every node version gives the 0.9.0 version 1.3 output', () => {
+describe('every node version gives the 0.9.1 version 1.3 output', () => {
 	const names = Object.keys(canonicalCases);
 
 	it('covers every recorded case', () => {

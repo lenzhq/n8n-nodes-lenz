@@ -78,6 +78,8 @@ function parametersFor(operationValue) {
 			type: p.type,
 			required: p.required === true,
 			default: p.default,
+			showInputSource: show(p).inputSource,
+			hideInputSource: p.displayOptions?.hide?.inputSource,
 		}));
 }
 
@@ -118,7 +120,18 @@ for (const opProp of operationProps) {
 	for (const op of opProp.options) {
 		const params = parametersFor(op.value);
 		const rendered = params.length
-			? params.map((p) => `\`${p.name}\`${p.required ? '**\\***' : ''}`).join(', ')
+			? params
+					.map((p) => {
+						const req = p.required ? '**\\***' : '';
+						if (Array.isArray(p.showInputSource) && p.showInputSource.includes('binary')) {
+							return `\`${p.name}\`${req} *(when \`inputSource: "binary"\`)*`;
+						}
+						if (Array.isArray(p.hideInputSource) && p.hideInputSource.includes('binary')) {
+							return `\`${p.name}\`${req} *(when \`inputSource: "text"\`)*`;
+						}
+						return `\`${p.name}\`${req}`;
+					})
+					.join(', ')
 			: '—';
 		const what = (op.description ?? op.action ?? op.name).replace(/\s+/g, ' ').trim();
 		lines.push(`| \`${op.value}\` | ${what} | ${rendered} |`);
