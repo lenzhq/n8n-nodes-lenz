@@ -1,7 +1,7 @@
 {
     "name": "n8n-nodes-lenz",
     "version": "0.10.0",
-    "description": "Fact-check claims and catch AI hallucinations with Lenz - verified, sourced verdicts inside your n8n workflows.",
+    "description": "Check the facts, figures, and citations in your work with Lenz — sourced verdicts and reasoning inside your n8n workflows.",
     "license": "MIT",
     "homepage": "https://lenz.io",
     "keywords": [

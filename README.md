@@ -2,7 +2,7 @@
 
 This is an n8n community node. It lets you use **Lenz** in your n8n workflows.
 
-**Lenz** is an audit-grade AI fact-checking API. It catches hallucinations and gives sourced, branch-ready verdicts on any claim or piece of text — not just a bare confidence score.
+**Lenz** checks the facts, figures, and citations in your work so you can sign off or publish with confidence. Whether it's AI-generated content, a client deliverable, or a research report, Lenz verifies factual statements against primary and authoritative sources or your own reference documents, and checks that the references you cite exist and support what's written.
 
 [n8n](https://n8n.io/) is a [fair-code licensed](https://docs.n8n.io/sustainable-use-license/) workflow automation platform.
 
