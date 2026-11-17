@@ -149,7 +149,7 @@ New to n8n? See the [Try it out](https://docs.n8n.io/try-it-out/) documentation 
 
 ## Example workflow
 
-A simple "fact-check gate" pattern — verify an LLM's output before acting on it:
+A simple "verification gate" pattern — verify an LLM's output before acting on it:
 
 ```
 [LLM node]  ──▶  [Lenz node]  ──▶  [IF node]  ──┬─▶ (true)  continue normally
