@@ -1626,7 +1626,7 @@ export class Lenz implements INodeType {
 		group: ['transform'],
 		version: [1, 1.1, 1.2, 1.3],
 		subtitle: '={{$parameter["operation"]}}',
-		description: 'Check facts, figures, and citations in drafts or AI output with sourced verdicts',
+		description: 'Check facts, figures, and citations in your workflows with sourced verdicts',
 		defaults: {
 			name: 'Lenz',
 		},
