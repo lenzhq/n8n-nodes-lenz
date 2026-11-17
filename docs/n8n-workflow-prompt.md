@@ -1,6 +1,6 @@
-# Build me a Lenz fact-checking workflow for n8n
+# Build me a Lenz verification workflow for n8n
 
-You are building an **n8n workflow** that uses the Lenz node to fact-check text.
+You are building an **n8n workflow** that uses the Lenz node to check facts and citations in text.
 I will describe what I want checked. You produce a workflow JSON that I paste
 directly onto my n8n canvas.
 
@@ -146,7 +146,7 @@ either one silently:
 ## Where the check belongs
 
 Immediately after whatever step produces text a person will act on, and
-immediately before the step that acts on it. A fact-check that runs after the
+immediately before the step that acts on it. A verification step that runs after the
 message is sent is decoration.
 
 ## Output shapes — these differ, and it matters for wiring
@@ -288,7 +288,7 @@ it later. Add an error branch for it only if the user asked for one.
 
 ```json
 {
-  "name": "Fact-check before publishing",
+  "name": "Verify before publishing",
   "nodes": [
     {
       "parameters": {},
