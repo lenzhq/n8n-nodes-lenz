@@ -602,22 +602,42 @@ function fnv1aBytes(buf: Buffer): string {
 	return hash.toString(36);
 }
 
-const SUPPORTED_UPLOAD_EXTENSIONS: Record<string, string> = {
+export const EXT_TO_MIME: Record<string, string> = {
 	'.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 	'.pdf': 'application/pdf',
 	'.png': 'image/png',
 	'.jpg': 'image/jpeg',
 	'.jpeg': 'image/jpeg',
 	'.webp': 'image/webp',
+	'.mp3': 'audio/mpeg',
+	'.m4a': 'audio/mp4',
+	'.wav': 'audio/wav',
+	'.ogg': 'audio/ogg',
+	'.webm': 'audio/webm',
 };
 
-const SUPPORTED_UPLOAD_MIMES: Record<string, string> = {
+export const SUPPORTED_UPLOAD_EXTENSIONS = EXT_TO_MIME;
+
+export const MIME_TO_EXT: Record<string, string> = {
 	'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
 	'application/pdf': '.pdf',
 	'image/png': '.png',
 	'image/jpeg': '.jpg',
 	'image/webp': '.webp',
+	'audio/mpeg': '.mp3',
+	'audio/mp3': '.mp3',
+	'audio/mp4': '.m4a',
+	'audio/x-m4a': '.m4a',
+	'audio/m4a': '.m4a',
+	'audio/wav': '.wav',
+	'audio/x-wav': '.wav',
+	'audio/wave': '.wav',
+	'audio/ogg': '.ogg',
+	'application/ogg': '.ogg',
+	'audio/webm': '.webm',
 };
+
+export const SUPPORTED_UPLOAD_MIMES = MIME_TO_EXT;
 
 export function normalizeUploadFile(fileName?: string, mimeType?: string): { filename: string; contentType: string } {
 	let raw = typeof fileName === 'string' ? fileName : '';
@@ -638,6 +658,10 @@ export function normalizeUploadFile(fileName?: string, mimeType?: string): { fil
 	const lastDot = lower.lastIndexOf('.');
 	const ext = lastDot !== -1 ? lower.slice(lastDot) : '';
 
+	if (ext === '.webm' && mime === 'video/webm') {
+		mime = 'audio/webm';
+	}
+
 	if (mime in SUPPORTED_UPLOAD_MIMES && !(ext in SUPPORTED_UPLOAD_EXTENSIONS)) {
 		filename = (filename || 'upload') + SUPPORTED_UPLOAD_MIMES[mime];
 	} else if (!filename) {
@@ -645,6 +669,9 @@ export function normalizeUploadFile(fileName?: string, mimeType?: string): { fil
 	}
 
 	let contentType = mime;
+	if (filename.toLowerCase().endsWith('.webm') && contentType === 'video/webm') {
+		contentType = 'audio/webm';
+	}
 	if (!contentType || contentType === 'application/octet-stream') {
 		const lowerName = filename.toLowerCase();
 		const matchedExt = Object.keys(SUPPORTED_UPLOAD_EXTENSIONS).find((e) => lowerName.endsWith(e));
@@ -1733,7 +1760,7 @@ export class Lenz implements INodeType {
 						name: 'Extract Claims',
 						value: 'extract',
 						description:
-							'Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp), or a public web page, Google Doc, PDF, YouTube video, or image URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
+							'Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm), or a public web page, Google Doc, PDF, YouTube video, image, or audio URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -1784,7 +1811,7 @@ export class Lenz implements INodeType {
 						name: 'Review Draft',
 						value: 'reviewDraft',
 						description:
-							'Review a whole draft, URL, or uploaded file (.docx, .pdf, .png, .jpg, .webp): find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations',
+							'Review a whole draft, URL, or uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm): find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations',
 						action: 'Review a draft',
 					},
 				],
@@ -1933,7 +1960,7 @@ export class Lenz implements INodeType {
 						name: 'Extract Claims',
 						value: 'extract',
 						description:
-							'Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp), or a public web page, Google Doc, PDF, YouTube video, or image URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
+							'Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm), or a public web page, Google Doc, PDF, YouTube video, image, or audio URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC).',
 						action: 'Extract claims from text',
 					},
 					{
@@ -1980,12 +2007,12 @@ export class Lenz implements INodeType {
 					{
 						name: 'Binary File',
 						value: 'binary',
-						description: 'An uploaded .docx, .pdf, .png, .jpg, or .webp file from an input binary field (up to 10 MB)',
+						description: 'An uploaded .docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, or .webm file from an input binary field (up to 10 MB)',
 					},
 					{
 						name: 'Text or URL',
 						value: 'text',
-						description: 'Plain text or a public http(s) URL (web page, Google Doc, PDF, YouTube video, or image)',
+						description: 'Plain text or a public http(s) URL (web page, Google Doc, PDF, YouTube video, image, or audio)',
 					},
 				],
 				default: 'text',
@@ -2003,7 +2030,7 @@ export class Lenz implements INodeType {
 					show: { operation: ['extract', 'reviewDraft'], inputSource: ['binary'] },
 				},
 				description:
-					'The name of the input binary field holding the file to upload (.docx, .pdf up to 100 pages, .png, .jpg, or .webp, up to 10 MB)',
+					'The name of the input binary field holding the file to upload (.docx, .pdf up to 100 pages, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, or .webm, up to 10 MB)',
 			},
 			{
 				displayName: 'Text',
@@ -2017,7 +2044,7 @@ export class Lenz implements INodeType {
 					hide: { inputSource: ['binary'] },
 				},
 				description:
-					"The text to pull the verifiable claims out of, or a single public web page, Google Doc, PDF, YouTube video, or image URL. Lenz reads the page, a Google Doc, a PDF (.pdf), a YouTube video's transcript, or an image (.png, .jpg, .jpeg, .webp), and extracts the claims from its first 50,000 characters; pages behind a login can't be read. A URL call typically takes 5-40 seconds.",
+					"The text to pull the verifiable claims out of, or a single public web page, Google Doc, PDF, YouTube video, image, or audio URL. Lenz reads the page, a Google Doc, a PDF (.pdf), a YouTube video's transcript, an image (.png, .jpg, .jpeg, .webp), or an audio recording (.mp3, .m4a, .wav, .ogg, .webm), and extracts the claims from its first 50,000 characters; pages behind a login can't be read. A URL call typically takes 5-40 seconds.",
 			},
 			{
 				displayName: 'Claims',
@@ -2209,7 +2236,7 @@ export class Lenz implements INodeType {
 					hide: { inputSource: ['binary'] },
 				},
 				description:
-					'The draft to review, up to 50,000 characters (longer text is cut and reported as input_truncated), or one public http(s) URL to a web page, Google Doc, PDF (.pdf), YouTube video, or image (.png, .jpg, .jpeg, .webp) to read it from',
+					'The draft to review, up to 50,000 characters (longer text is cut and reported as input_truncated), or one public http(s) URL to a web page, Google Doc, PDF (.pdf), YouTube video, image (.png, .jpg, .jpeg, .webp), or audio recording (.mp3, .m4a, .wav, .ogg, .webm) to read it from',
 			},
 			{
 				displayName: 'Input',
