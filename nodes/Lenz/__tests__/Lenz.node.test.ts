@@ -4612,6 +4612,129 @@ describe('Lenz node - the collapsed failure codes and a quick No Public Record r
 			expect(bodyStr).toContain('filename="export.tmp.docx"');
 		});
 
+		it('normalizeUploadFile: correctly handles audio extensions, MIME aliases, and webm normalization', () => {
+			// Extension to MIME
+			expect(normalizeUploadFile('speech.mp3')).toEqual({ filename: 'speech.mp3', contentType: 'audio/mpeg' });
+			expect(normalizeUploadFile('speech.m4a')).toEqual({ filename: 'speech.m4a', contentType: 'audio/mp4' });
+			expect(normalizeUploadFile('speech.wav')).toEqual({ filename: 'speech.wav', contentType: 'audio/wav' });
+			expect(normalizeUploadFile('speech.ogg')).toEqual({ filename: 'speech.ogg', contentType: 'audio/ogg' });
+			expect(normalizeUploadFile('speech.webm')).toEqual({ filename: 'speech.webm', contentType: 'audio/webm' });
+
+			// MIME to Extension & Aliases
+			expect(normalizeUploadFile('recording', 'audio/mpeg')).toEqual({ filename: 'recording.mp3', contentType: 'audio/mpeg' });
+			expect(normalizeUploadFile('recording', 'audio/mp3')).toEqual({ filename: 'recording.mp3', contentType: 'audio/mp3' });
+			expect(normalizeUploadFile('recording', 'audio/mp4')).toEqual({ filename: 'recording.m4a', contentType: 'audio/mp4' });
+			expect(normalizeUploadFile('recording', 'audio/x-m4a')).toEqual({ filename: 'recording.m4a', contentType: 'audio/x-m4a' });
+			expect(normalizeUploadFile('recording', 'audio/m4a')).toEqual({ filename: 'recording.m4a', contentType: 'audio/m4a' });
+			expect(normalizeUploadFile('recording', 'audio/wav')).toEqual({ filename: 'recording.wav', contentType: 'audio/wav' });
+			expect(normalizeUploadFile('recording', 'audio/x-wav')).toEqual({ filename: 'recording.wav', contentType: 'audio/x-wav' });
+			expect(normalizeUploadFile('recording', 'audio/wave')).toEqual({ filename: 'recording.wav', contentType: 'audio/wave' });
+			expect(normalizeUploadFile('recording', 'audio/ogg')).toEqual({ filename: 'recording.ogg', contentType: 'audio/ogg' });
+			expect(normalizeUploadFile('recording', 'application/ogg')).toEqual({ filename: 'recording.ogg', contentType: 'application/ogg' });
+			expect(normalizeUploadFile('recording', 'audio/webm')).toEqual({ filename: 'recording.webm', contentType: 'audio/webm' });
+
+			// .webm with video/webm normalization
+			expect(normalizeUploadFile('interview.webm', 'video/webm')).toEqual({
+				filename: 'interview.webm',
+				contentType: 'audio/webm',
+			});
+		});
+
+		it.each([
+			{ ext: '.mp3', mime: 'audio/mpeg', fileName: 'audio.mp3' },
+			{ ext: '.m4a', mime: 'audio/mp4', fileName: 'audio.m4a' },
+			{ ext: '.wav', mime: 'audio/wav', fileName: 'audio.wav' },
+			{ ext: '.ogg', mime: 'audio/ogg', fileName: 'audio.ogg' },
+			{ ext: '.webm', mime: 'audio/webm', fileName: 'audio.webm' },
+			{ ext: '.m4a', mime: 'audio/x-m4a', fileName: 'audio.m4a' },
+			{ ext: '.wav', mime: 'audio/x-wav', fileName: 'audio.wav' },
+			{ ext: '.webm', mime: 'video/webm', fileName: 'audio.webm', expectedMime: 'audio/webm' },
+		])('extract: uploads audio binary item $ext ($mime) to /extract/file with correct content-type', async ({ fileName, mime, expectedMime }) => {
+			const dummyAudio = Buffer.from('dummy-audio-bytes');
+			let capturedOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'data',
+				},
+				(options) => {
+					capturedOptions = options;
+					return { status: 'ready', identified_claims: ['Claim from audio'] };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyAudio, fileName, mimeType: mime } }],
+			);
+
+			expect(capturedOptions).toBeDefined();
+			expect(capturedOptions!.url).toBe('/extract/file');
+			const bodyString = (capturedOptions!.body as Buffer).toString('utf8');
+			expect(bodyString).toContain(`filename="${fileName}"`);
+			expect(bodyString).toContain(`Content-Type: ${expectedMime || mime}`);
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('ready');
+			expect(json.identified_claims).toEqual(['Claim from audio']);
+		});
+
+		it.each([
+			{ ext: '.mp3', mime: 'audio/mpeg', fileName: 'interview.mp3' },
+			{ ext: '.m4a', mime: 'audio/mp4', fileName: 'interview.m4a' },
+			{ ext: '.wav', mime: 'audio/wav', fileName: 'interview.wav' },
+			{ ext: '.ogg', mime: 'audio/ogg', fileName: 'interview.ogg' },
+			{ ext: '.webm', mime: 'audio/webm', fileName: 'interview.webm' },
+			{ ext: '.webm', mime: 'video/webm', fileName: 'interview.webm', expectedMime: 'audio/webm' },
+		])('reviewDraft: uploads audio binary item $ext ($mime) to /review/file and polls until complete', async ({ fileName, mime, expectedMime }) => {
+			const dummyAudio = Buffer.from('dummy-audio-bytes');
+			let submitOptions: IHttpRequestOptions | undefined;
+			let pollOptions: IHttpRequestOptions | undefined;
+
+			const { output } = await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'binary',
+					binaryPropertyName: 'data',
+					waitForCompletion: true,
+				},
+				(options) => {
+					if (options.method === 'POST' && options.url === '/review/file') {
+						submitOptions = options;
+						return { review_id: 'rev_audio_1', status: 'queued' };
+					}
+					if (options.method === 'GET' && options.url === '/reviews/rev_audio_1') {
+						pollOptions = options;
+						return {
+							review_id: 'rev_audio_1',
+							status: 'completed',
+							outcome: 'clean',
+							issues: [],
+						};
+					}
+					throw new Error(`Unexpected request: ${options.method} ${options.url}`);
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyAudio, fileName, mimeType: mime } }],
+			);
+
+			expect(submitOptions).toBeDefined();
+			expect(submitOptions!.url).toBe('/review/file');
+			const bodyString = (submitOptions!.body as Buffer).toString('utf8');
+			expect(bodyString).toContain(`filename="${fileName}"`);
+			expect(bodyString).toContain(`Content-Type: ${expectedMime || mime}`);
+
+			expect(pollOptions).toBeDefined();
+			expect(pollOptions!.url).toBe('/reviews/rev_audio_1');
+
+			const json = output[0].json as IDataObject;
+			expect(json.status).toBe('completed');
+			expect(json.outcome).toBe('clean');
+		});
+
 		it('extract: blank text with invalid >300-char focus returns empty_input skipped instead of throwing', async () => {
 			const longFocus = 'x'.repeat(305);
 			const { output } = await runNode(

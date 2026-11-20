@@ -44,11 +44,11 @@ long time inside a webhook. It also gives up if the pipeline overruns, returning
 `status: "timeout"` rather than a verdict; see the branching rule below.
 
 **`extract`** — free, and does not check anything. It pulls the verifiable
-claims out of a block of text, an uploaded document or image file, or a public
+claims out of a block of text, an uploaded document, image, or audio file, or a public
 URL, as plain strings. You can hand it text, binary data from an incoming file
-node (.docx, .pdf up to 100 pages, .png, .jpg/.jpeg, .webp up to 10 MB), or a
-single public web page, Google Doc, PDF, YouTube video, or image URL: Lenz reads
-the page, document, video transcript, or image and extracts claims. A URL call
+node (.docx, .pdf up to 100 pages, .png, .jpg/.jpeg, .webp, .mp3, .m4a, .wav, .ogg, .webm up to 10 MB), or a
+single public web page, Google Doc, PDF, YouTube video, image, or audio URL: Lenz reads
+the page, document, video transcript, image, or audio recording and extracts claims. A URL call
 typically takes 5-40 seconds; pages behind a login (Facebook, Instagram, Threads,
 LinkedIn) can't be read.
 
