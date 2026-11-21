@@ -363,7 +363,8 @@ it later. Add an error branch for it only if the user asked for one.
      meaningful once you know a verdict exists. `assess` returns `no_claim`
      with no `claims` array at all, and `verify` returns
      `needs_input`, `failed`, `cancelled`, `timeout` or `queued` whose `passed` is `null`
-     (`queued` omits it entirely); a review or citation check that is
+     (`queued` omits it entirely); the `verifyStatus` poll answers
+     `processing` with `passed: null` while the task runs; a review or citation check that is
      `cancelled`, `failed` or still running has `passed: null` too. Null is falsy, so branching straight on
      `passed` reports every one of those as "the claim is false" — a provider
      outage becomes a debunking. Gate on `status` first, route the non-verdict
