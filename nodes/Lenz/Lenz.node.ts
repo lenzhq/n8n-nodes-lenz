@@ -1071,6 +1071,12 @@ function mapVerifyStatus(status: IDataObject, taskId: string, includeAudit: bool
 			status: 'cancelled',
 			passed: null,
 			task_id: taskId,
+			// The keys a cancel has always come with (as `failed` with class
+			// `cancelled`), so a branch on them catches both shapes.
+			failure_reason: 'cancelled',
+			failure_class: 'cancelled',
+			retryable: false,
+			not_a_claim: false,
 			message: 'This verification was cancelled before it finished. It was not charged and nothing was saved.',
 		};
 	}
@@ -3064,8 +3070,9 @@ export class Lenz implements INodeType {
 		const jobWait = (raw: unknown): unknown =>
 			raw === undefined || raw === null || String(raw).trim() === '' ? JOB_MAX_WAIT_DEFAULT_SECONDS : raw;
 
-		// Polls a review or a citation check until it is completed or failed,
-		// with the rules Verify's loop follows and for the same reasons: the
+		// Polls a job until its status is one of `opts.terminal` (by default
+		// completed, failed or cancelled; Verify passes its own list with
+		// needs_input), with the same rules for every caller and for these reasons: the
 		// job is already paid for, so a 5xx / 429 / 408 / 425 poll is retried
 		// for the window, a status-less failure gets a small bounded number of
 		// tries, a stated wait (429 Retry-After, the body's poll_after_seconds)
@@ -3235,7 +3242,7 @@ export class Lenz implements INodeType {
 			last_status: polled.lastStatus || null,
 			last_error: polled.lastError?.message ?? null,
 			last_error_status: polled.lastError?.status ?? null,
-			message: `Still running when Max Wait ran out. The node did not cancel it: fetch it with ${getOperation} using this ${idKey}, stop it with ${getOperation.replace('Get', 'Cancel')}, or raise Max Wait (Seconds).`,
+			message: `Still running when Max Wait ran out. The node did not cancel it: fetch it with ${getOperation} using this ${idKey}, stop it with ${idKey === 'review_id' ? 'Cancel Review' : 'Cancel Citation Check'}, or raise Max Wait (Seconds).`,
 		});
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {

@@ -97,7 +97,7 @@ Every claim-checking operation returns a branch-ready `passed` boolean (derived 
 | `True`, `Mostly True` | `true` |
 | `Mostly False`, `False`, `Mixed` | `false` |
 | `No Public Record` | `null` |
-| no verdict yet or none (timeout, `failed`, `needs_input`) | `null` |
+| no verdict yet or none (timeout, `failed`, `needs_input`, `cancelled`) | `null` |
 
 `No Public Record` means Lenz found no public record of the claim. It is neither passed nor failed, and its `lenz_score` is `null`. Route it on its own: branch on `{{ $json.verdict }}` or check `{{ $json.passed }}` **is null** after the `status` check. An Assess row can carry it too (with a `confidence` that is never `high`), and a quick check that finds no record is an issue in a review.
 
@@ -163,11 +163,11 @@ A simple "verification gate" pattern — verify an LLM's output before acting on
 
 1. Add an **LLM node** (or any node producing text) upstream.
 2. Add the **Lenz node**, set Operation to **Verify (Deep)**, and set the Claim field to an expression referencing the upstream output, e.g. `{{ $json.text }}`.
-3. Add an **IF node** after Lenz with the condition `{{ $json.status }}` **equals** `completed`. Send the false branch wherever unfinished work should go — a timeout, a `failed` pipeline or a `needs_input` interrupt is not a verdict, and its `passed` is `null`.
+3. Add an **IF node** after Lenz with the condition `{{ $json.status }}` **equals** `completed`. Send the false branch wherever unfinished work should go — a timeout, a `failed` pipeline, a `needs_input` interrupt or a `cancelled` task is not a verdict, and its `passed` is `null`.
 4. After that, add a second **IF node** with the condition `{{ $json.passed }}` **is true**.
 5. Wire its true branch to continue the workflow normally, and its false branch to whatever your "needs review" path is (Slack alert, email, a manual-approval step, etc.).
 
-> **Check `status` before `passed`.** `passed` only means something once a verdict exists. A timeout, a `failed` pipeline or a `needs_input` interrupt has no verdict, and `passed` is `null` or absent — which an IF reads as false. Branching straight on `passed` therefore reports "this claim did not pass" for a claim nobody ever checked, and a provider outage becomes a debunking.
+> **Check `status` before `passed`.** `passed` only means something once a verdict exists. A timeout, a `failed` pipeline, a `needs_input` interrupt or a `cancelled` task has no verdict, and `passed` is `null` or absent — which an IF reads as false. Branching straight on `passed` therefore reports "this claim did not pass" for a claim nobody ever checked, and a provider outage becomes a debunking.
 
 For a lighter check on lower-stakes content, swap the Lenz operation to **Assess (Fast)** instead — same wiring, ~15s instead of ~90s.
 
@@ -211,7 +211,7 @@ A paused task stays open for **24 hours from submission** (not 10 minutes, as ea
 
 ### When a verification fails
 
-A verification that stops before reaching a verdict comes back with `status: "failed"` and three fields a downstream **IF** node can branch on:
+A verification that stops before reaching a verdict comes back with `status: "failed"` (or `status: "cancelled"` when it was stopped with **Cancel**, carrying `failure_reason` and `failure_class` `cancelled` and `retryable: false`) and three fields a downstream **IF** node can branch on:
 
 | Field | What it says |
 |---|---|

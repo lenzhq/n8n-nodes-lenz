@@ -4888,7 +4888,13 @@ describe('Cancel operations', () => {
 		expect(output[0].json).toMatchObject({ status: 'cancelled', passed: null, task_id: 'task_9' });
 
 		const status = await runNode({ operation: 'verifyStatus', taskId: 'task_9' }, () => ({ status: 'cancelled' }));
-		expect(status.output[0].json).toMatchObject({ status: 'cancelled', passed: null });
+		expect(status.output[0].json).toMatchObject({
+			status: 'cancelled',
+			passed: null,
+			failure_class: 'cancelled',
+			failure_reason: 'cancelled',
+			retryable: false,
+		});
 		expect(String((status.output[0].json as IDataObject).message)).toMatch(/not charged/);
 	});
 
