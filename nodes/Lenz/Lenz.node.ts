@@ -530,6 +530,17 @@ function capacityMessageFor(error: unknown): { message: string; description: str
 function conflictMessageFor(error: unknown): { message: string; description: string } | undefined {
 	if (statusCodeOf(error) !== 409) return undefined;
 	const body = responseBodyOf(error);
+	// Cancel Verification on a task that is one of a review's deep checks: the
+	// API cancels reviews as a whole, so name the operation that can.
+	if (body.code === 'use_review_cancel') {
+		return {
+			message: 'Lenz: this verification belongs to a review, so it can only be stopped with the review.',
+			description:
+				'HTTP 409 (use_review_cancel). Nothing was cancelled. Use Cancel Review (Review resource) with the ' +
+				"review's ID instead: it stops the review's quick checks, deep checks and citation checks, and you pay " +
+				'only for what it delivered.',
+		};
+	}
 	if (body.code !== 'idempotency_conflict') return undefined;
 	// Only Review Draft and Check Citations retry a conflict first (submitJob
 	// marks the error); any other operation gets it on its first try, and may
@@ -1782,6 +1793,20 @@ export class Lenz implements INodeType {
 				},
 				options: [
 					{
+						name: 'Cancel Citation Check',
+						value: 'cancelCitationCheck',
+						description:
+							'Stop a running citation check. You pay only for the citations it checked; the rest is refunded. A check that already finished is returned unchanged.',
+						action: 'Cancel a citation check',
+					},
+					{
+						name: 'Cancel Review',
+						value: 'cancelReview',
+						description:
+							'Stop a running review: its quick checks, deep checks and citation checks. You pay only for what it delivered; the rest is refunded. A review that already finished is returned unchanged.',
+						action: 'Cancel a review',
+					},
+					{
 						name: 'Check Citations',
 						value: 'checkCitations',
 						description:
@@ -1826,6 +1851,13 @@ export class Lenz implements INodeType {
 					show: { resource: ['verification'], '@version': [{ _cnd: { gte: 1.1 } }] },
 				},
 				options: [
+					{
+						name: 'Cancel',
+						value: 'cancelVerification',
+						description:
+							'Stop a submitted verification task that has not finished. A cancelled run is not charged; one that finished first is left as it is.',
+						action: 'Cancel a verification task',
+					},
 					{
 						name: 'Delete',
 						value: 'deleteVerification',
@@ -2178,7 +2210,7 @@ export class Lenz implements INodeType {
 				default: '',
 				required: true,
 				displayOptions: {
-					show: { operation: ['select', 'verifyStatus'] },
+					show: { operation: ['select', 'verifyStatus', 'cancelVerification'] },
 				},
 				description: 'The task_id returned when the claim was submitted for verification',
 			},
@@ -2394,7 +2426,7 @@ export class Lenz implements INodeType {
 				default: '',
 				required: true,
 				displayOptions: {
-					show: { operation: ['getReview', 'exportReview'] },
+					show: { operation: ['getReview', 'exportReview', 'cancelReview'] },
 				},
 				description: 'The review_id Review Draft returned',
 			},
@@ -2427,7 +2459,7 @@ export class Lenz implements INodeType {
 				default: '',
 				required: true,
 				displayOptions: {
-					show: { operation: ['getCitationCheck'] },
+					show: { operation: ['getCitationCheck', 'cancelCitationCheck'] },
 				},
 				description: 'The citecheck_id Check Citations returned',
 			},
@@ -3388,6 +3420,19 @@ export class Lenz implements INodeType {
 					const includeAudit = this.getNodeParameter('includeAudit', itemIndex, false) as boolean;
 					const status = await lenzRequest('GET', `/verify/status/${encodeURIComponent(taskId)}`);
 					responseData = mapVerifyStatus(status, taskId, includeAudit);
+				} else if (operation === 'cancelVerification') {
+					const taskId = readText('taskId', itemIndex);
+					if (!taskId) {
+						returnData.push({
+							json: { skipped: true, reason: 'empty_input' },
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					// Safe to repeat and 200 in every state, so no Idempotency-Key:
+					// `cancelled` says whether the run is stopped, and `status` how it
+					// ended when it finished first (completed: saved and charged).
+					responseData = await lenzRequest('POST', `/verify/${encodeURIComponent(taskId)}/cancel`);
 				} else if (operation === 'verifyBatch') {
 					const batchUi = this.getNodeParameter('batchClaims', itemIndex, {}) as IDataObject;
 					const entries = ((batchUi.claim ?? []) as IDataObject[]).filter(
@@ -4024,6 +4069,26 @@ export class Lenz implements INodeType {
 					}
 					responseData = withPassed(
 						await lenzRequest('GET', `/citechecks/${encodeURIComponent(citecheckId)}`),
+					);
+				} else if (operation === 'cancelReview' || operation === 'cancelCitationCheck') {
+					const review = operation === 'cancelReview';
+					const id = readText(review ? 'reviewId' : 'citecheckId', itemIndex);
+					if (!id) {
+						returnData.push({
+							json: { skipped: true, reason: 'empty_input' },
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					// The API answers with the job as it stands afterwards (status
+					// cancelled, or completed/failed unchanged if it finished first), the
+					// same body Get Review / Get Citation Check return, so it gets the
+					// same `passed`. Repeating the call is safe: no Idempotency-Key.
+					responseData = withPassed(
+						await lenzRequest(
+							'POST',
+							`/${review ? 'reviews' : 'citechecks'}/${encodeURIComponent(id)}/cancel`,
+						),
 					);
 				} else if (operation === 'exportReview') {
 					const reviewId = readText('reviewId', itemIndex);

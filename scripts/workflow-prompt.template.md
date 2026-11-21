@@ -290,8 +290,8 @@ it later. Add an error branch for it only if the user asked for one.
    Two limits on this rule, both of which matter more than the rule:
 
    - **Only `assess` and `verify` emit `passed`.** `extract`, `verifyBatch`,
-     `ask`, `usage`, `select`, the `verifyStatus` poll and every list or delete
-     operation do not. Do not put an IF on `passed` after one of those — the
+     `ask`, `usage`, `select`, the `verifyStatus` poll, `cancelVerification`
+     and every list or delete operation do not. Do not put an IF on `passed` after one of those — the
      field is `undefined` and every item takes the false branch. A workflow that
      ends in "list my verifications" is finished when it has listed them.
    - **Check `status` BEFORE `passed`, never instead of it.** `passed` is only

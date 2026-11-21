@@ -4806,3 +4806,60 @@ describe('Lenz node - the collapsed failure codes and a quick No Public Record r
 		});
 	});
 });
+
+describe('Cancel operations', () => {
+	it('Cancel Verification POSTs to the task cancel path with no body or Idempotency-Key and returns the answer', async () => {
+		const { calls, output } = await runNode({ operation: 'cancelVerification', taskId: ' task_1 ' }, () => ({
+			task_id: 'task_1',
+			cancelled: true,
+			status: 'cancelled',
+		}));
+		expect(calls).toHaveLength(1);
+		expect(calls[0].method).toBe('POST');
+		expect(String(calls[0].url)).toMatch(/\/verify\/task_1\/cancel$/);
+		expect(calls[0].body).toBeUndefined();
+		expect(JSON.stringify(calls[0].headers ?? {})).not.toMatch(/Idempotency-Key/i);
+		expect(output[0].json).toEqual({ task_id: 'task_1', cancelled: true, status: 'cancelled' });
+	});
+
+	it('Cancel Verification passes through a run that finished first', async () => {
+		const { output } = await runNode({ operation: 'cancelVerification', taskId: 'task_2' }, () => ({
+			task_id: 'task_2',
+			cancelled: false,
+			status: 'completed',
+		}));
+		expect(output[0].json).toMatchObject({ cancelled: false, status: 'completed' });
+	});
+
+	it('Cancel Verification on a review deep check names Cancel Review', async () => {
+		const ctx = createContext({ operation: 'cancelVerification', taskId: 'task_3' }, () => {
+			throw apiError(409, { code: 'use_review_cancel', detail: 'part of a review' });
+		});
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		expect((err as Error).message).toMatch(/belongs to a review/);
+		expect((err as { description?: string }).description ?? '').toMatch(/Use Cancel Review/);
+	});
+
+	it.each([
+		['cancelReview', { reviewId: 'rev_1' }, /\/reviews\/rev_1\/cancel$/],
+		['cancelCitationCheck', { citecheckId: 'cc_1' }, /\/citechecks\/cc_1\/cancel$/],
+	])('%s POSTs to its cancel path and adds passed like the Get operation', async (operation, ids, path) => {
+		const { calls, output } = await runNode({ operation, ...ids }, () => ({ status: 'cancelled' }));
+		expect(calls).toHaveLength(1);
+		expect(calls[0].method).toBe('POST');
+		expect(String(calls[0].url)).toMatch(path);
+		expect(JSON.stringify(calls[0].headers ?? {})).not.toMatch(/Idempotency-Key/i);
+		expect((output[0].json as IDataObject).status).toBe('cancelled');
+		expect(output[0].json).toHaveProperty('passed');
+	});
+
+	it.each([
+		['cancelVerification', { taskId: '  ' }],
+		['cancelReview', { reviewId: '' }],
+		['cancelCitationCheck', { citecheckId: '' }],
+	])('%s skips an empty ID without calling Lenz', async (operation, ids) => {
+		const { calls, output } = await runNode({ operation, ...ids }, noCall);
+		expect(calls).toHaveLength(0);
+		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
+	});
+});
