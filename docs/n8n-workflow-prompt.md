@@ -48,6 +48,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 | `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language`, `additionalFields` |
 | `exportReview` | Download an annotated Word document (.docx) with inline verification comments for a completed text or file review | `reviewId`**\***, `binaryPropertyName`**\*** |
 | `getCitationCheck` | Retrieve a citation check by its ID | `citecheckId`**\*** |
+| `listReviews` | Retrieve the reviews stored in your Lenz account | `returnAll`, `limit` |
 | `getReview` | Retrieve a review by its ID | `reviewId`**\***, `issuesOnly` |
 | `reviewDraft` | Review a whole draft, URL, or uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm): find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `draft`**\*** *(when `inputSource: "text"`)*, `waitForCompletion`, `reviewOptions`, `visibility`, `language`, `additionalFields` |
 

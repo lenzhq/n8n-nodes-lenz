@@ -1432,6 +1432,7 @@ const ERROR_ECHO_CODES = new Set([
 const isReviewFamily = (path: string): boolean =>
 	path === '/review' ||
 	path === '/review/file' ||
+	path === '/reviews' ||
 	path.startsWith('/reviews/') ||
 	path === '/citecheck' ||
 	path.startsWith('/citechecks/');
@@ -1835,6 +1836,12 @@ export class Lenz implements INodeType {
 						value: 'getCitationCheck',
 						description: 'Retrieve a citation check by its ID',
 						action: 'Get a citation check',
+					},
+					{
+						name: 'Get Many Reviews',
+						value: 'listReviews',
+						description: 'Retrieve the reviews stored in your Lenz account',
+						action: 'Get many reviews',
 					},
 					{
 						name: 'Get Review',
@@ -2615,7 +2622,7 @@ export class Lenz implements INodeType {
 				type: 'boolean',
 				default: false,
 				displayOptions: {
-					show: { operation: ['listVerifications'] },
+					show: { operation: ['listReviews', 'listVerifications'] },
 				},
 				description: 'Whether to return all results or only up to a given limit',
 			},
@@ -2626,7 +2633,7 @@ export class Lenz implements INodeType {
 				typeOptions: { minValue: 1 },
 				default: 50,
 				displayOptions: {
-					show: { operation: ['listVerifications'], returnAll: [false] },
+					show: { operation: ['listReviews', 'listVerifications'], returnAll: [false] },
 				},
 				description: 'Max number of results to return',
 			},
@@ -3984,6 +3991,37 @@ export class Lenz implements INodeType {
 							issuesOnly ? { qs: { view: 'issues' } } : undefined,
 						),
 					);
+				} else if (operation === 'listReviews') {
+					const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
+					const limit = returnAll
+						? Number.POSITIVE_INFINITY
+						: (this.getNodeParameter('limit', itemIndex, 50) as number);
+
+					let page = 1;
+					let collected = 0;
+					const pageSize = returnAll ? MAX_PAGE_SIZE : Math.min(MAX_PAGE_SIZE, limit);
+					while (collected < limit) {
+						const response = await lenzRequest('GET', '/reviews', undefined, {
+							qs: { page, page_size: pageSize },
+						});
+						const pageItems = (response.items ?? []) as IDataObject[];
+						for (const review of pageItems) {
+							if (collected >= limit) {
+								break;
+							}
+							returnData.push({
+								json: withPassed(review),
+								pairedItem: { item: itemIndex },
+							});
+							collected += 1;
+						}
+						const total = (response.total as number) ?? 0;
+						if (pageItems.length < pageSize || collected >= total) {
+							break;
+						}
+						page += 1;
+					}
+					continue;
 				} else if (operation === 'checkCitations') {
 					const input = this.getNodeParameter('citationInput', itemIndex, 'text') as string;
 					const body: IDataObject = {};

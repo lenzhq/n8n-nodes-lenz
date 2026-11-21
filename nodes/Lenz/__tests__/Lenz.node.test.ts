@@ -3461,6 +3461,133 @@ describe('Lenz node - Review', () => {
 	});
 });
 
+describe('Lenz node - Get Many Reviews', () => {
+	it('returns each listed review as its own item, honouring the limit', async () => {
+		const responder: Responder = (options) => {
+			expect(options.url).toBe('/reviews');
+			expect(options.qs).toEqual({ page: 1, page_size: 2 });
+			return {
+				items: [
+					{ review_id: 'rev_1', status: 'completed', outcome: 'clean' },
+					{ review_id: 'rev_2', status: 'completed', outcome: 'issues_found' },
+				],
+				total: 10,
+				page: 1,
+				page_size: 2,
+			};
+		};
+		const { output, calls } = await runNode({ operation: 'listReviews', limit: 2 }, responder);
+		expect(output).toHaveLength(2);
+		expect(calls).toHaveLength(1);
+		expect((output[0].json as IDataObject).review_id).toBe('rev_1');
+		expect((output[0].json as IDataObject).passed).toBe(true);
+		expect((output[1].json as IDataObject).review_id).toBe('rev_2');
+		expect((output[1].json as IDataObject).passed).toBe(false);
+	});
+
+	it('pages through every review when Return All is set', async () => {
+		const firstPage = Array.from({ length: 100 }, (_, i) => ({
+			review_id: `rev_a${i}`,
+			status: 'completed',
+			outcome: 'clean',
+		}));
+		const secondPage = Array.from({ length: 50 }, (_, i) => ({
+			review_id: `rev_b${i}`,
+			status: 'completed',
+			outcome: 'clean',
+		}));
+		const responder: Responder = (options) => {
+			const page = (options.qs as IDataObject).page as number;
+			expect((options.qs as IDataObject).page_size).toBe(100);
+			return {
+				items: page === 1 ? firstPage : secondPage,
+				total: 150,
+				page,
+				page_size: 100,
+			};
+		};
+		const { output, calls } = await runNode(
+			{ operation: 'listReviews', returnAll: true },
+			responder,
+		);
+		expect(output).toHaveLength(150);
+		expect(calls).toHaveLength(2);
+		expect((output[0].json as IDataObject).review_id).toBe('rev_a0');
+		expect((output[149].json as IDataObject).review_id).toBe('rev_b49');
+	});
+
+	it('keeps page_size constant past 100 so a Limit never duplicates or skips rows', async () => {
+		const all = Array.from({ length: 200 }, (_, i) => ({
+			review_id: `rev_${i}`,
+			status: 'completed',
+			outcome: 'clean',
+		}));
+		const responder: Responder = (options) => {
+			const { page, page_size } = options.qs as { page: number; page_size: number };
+			const start = (page - 1) * page_size;
+			return { items: all.slice(start, start + page_size), total: all.length, page, page_size };
+		};
+
+		const { output, calls } = await runNode({ operation: 'listReviews', limit: 150 }, responder);
+
+		const ids = output.map((o) => (o.json as IDataObject).review_id);
+		expect(ids).toHaveLength(150);
+		expect(new Set(ids).size).toBe(150);
+		expect(ids[0]).toBe('rev_0');
+		expect(ids[149]).toBe('rev_149');
+		const sizes = calls.map((c) => (c.qs as IDataObject).page_size);
+		expect(new Set(sizes).size).toBe(1);
+		expect(sizes[0]).toBe(100);
+	});
+
+	it('shapes output with withPassed: sets passed, summary.claim_limit_reached, and failure_reason', async () => {
+		const responder: Responder = () => ({
+			items: [
+				{
+					review_id: 'rev_clean',
+					status: 'completed',
+					outcome: 'clean',
+					summary: {
+						claims_found: 25,
+						claim_limit: 20,
+						claim_limit_exceeded: true,
+					},
+				},
+				{
+					review_id: 'rev_failed',
+					status: 'failed',
+					failure: {
+						code: 'no_checkable_claim',
+						message: 'No factual claims found to verify',
+					},
+				},
+				{
+					review_id: 'rev_running',
+					status: 'running',
+				},
+			],
+			total: 3,
+			page: 1,
+			page_size: 3,
+		});
+
+		const { output } = await runNode({ operation: 'listReviews', limit: 3 }, responder);
+		expect(output).toHaveLength(3);
+
+		const item0 = output[0].json as IDataObject;
+		expect(item0.passed).toBe(true);
+		expect((item0.summary as IDataObject).claim_limit_reached).toBe(true);
+
+		const item1 = output[1].json as IDataObject;
+		expect(item1.passed).toBeNull();
+		expect((item1.failure as IDataObject).code).toBe('no_checkable_claim');
+		expect((item1.failure as IDataObject).failure_reason).toBe('no_claim');
+
+		const item2 = output[2].json as IDataObject;
+		expect(item2.passed).toBeNull();
+	});
+});
+
 describe('Lenz node - a job accepted without its ID', () => {
 	it.each([
 		['reviewDraft', { draft: 'x' }, /returned no review_id/],
