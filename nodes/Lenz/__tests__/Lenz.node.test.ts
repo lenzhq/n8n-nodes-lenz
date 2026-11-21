@@ -4957,3 +4957,119 @@ describe('Lenz node - the collapsed failure codes and a quick No Public Record r
 		});
 	});
 });
+
+describe('Cancel operations', () => {
+	it('Cancel Verification POSTs to the task cancel path with no body or Idempotency-Key and returns the answer', async () => {
+		const { calls, output } = await runNode({ operation: 'cancelVerification', taskId: ' task_1 ' }, () => ({
+			task_id: 'task_1',
+			cancelled: true,
+			status: 'cancelled',
+		}));
+		expect(calls).toHaveLength(1);
+		expect(calls[0].method).toBe('POST');
+		expect(String(calls[0].url)).toMatch(/\/verify\/task_1\/cancel$/);
+		expect(calls[0].body).toBeUndefined();
+		expect(JSON.stringify(calls[0].headers ?? {})).not.toMatch(/Idempotency-Key/i);
+		expect(output[0].json).toEqual({ task_id: 'task_1', cancelled: true, status: 'cancelled' });
+	});
+
+	it('Cancel Verification passes through a run that finished first', async () => {
+		const { output } = await runNode({ operation: 'cancelVerification', taskId: 'task_2' }, () => ({
+			task_id: 'task_2',
+			cancelled: false,
+			status: 'completed',
+		}));
+		expect(output[0].json).toMatchObject({ cancelled: false, status: 'completed' });
+	});
+
+	it('Cancel Verification on a review deep check names Cancel Review', async () => {
+		const ctx = createContext({ operation: 'cancelVerification', taskId: 'task_3' }, () => {
+			throw apiError(409, { code: 'use_review_cancel', detail: 'part of a review' });
+		});
+		const err = await new Lenz().execute.call(ctx.ctx).catch((e: Error) => e);
+		expect((err as Error).message).toMatch(/belongs to a review/);
+		expect((err as { description?: string }).description ?? '').toMatch(/Use Cancel Review/);
+	});
+
+	it.each([
+		['cancelReview', { reviewId: 'rev_1' }, /\/reviews\/rev_1\/cancel$/],
+		['cancelCitationCheck', { citecheckId: 'cc_1' }, /\/citechecks\/cc_1\/cancel$/],
+	])('%s POSTs to its cancel path and adds passed like the Get operation', async (operation, ids, path) => {
+		const { calls, output } = await runNode({ operation, ...ids }, () => ({ status: 'cancelled' }));
+		expect(calls).toHaveLength(1);
+		expect(calls[0].method).toBe('POST');
+		expect(String(calls[0].url)).toMatch(path);
+		expect(JSON.stringify(calls[0].headers ?? {})).not.toMatch(/Idempotency-Key/i);
+		expect(output[0].json).toMatchObject({ status: 'cancelled', passed: null });
+	});
+
+	it.each([
+		['clean', true],
+		['issues_found', false],
+	])('Cancel Review on a review that finished first (%s) keeps its passed: %p', async (outcome, passed) => {
+		const { output } = await runNode({ operation: 'cancelReview', reviewId: 'rev_1' }, () => ({
+			status: 'completed',
+			outcome,
+		}));
+		expect(output[0].json).toMatchObject({ status: 'completed', passed });
+	});
+
+	it.each([
+		['reviewDraft', { draft: 'x' }, { review_id: 'rev_1', status: 'queued' }],
+		['checkCitations', { citationInput: 'text', citationText: 'See [1].' }, { citecheck_id: 'cc_1', status: 'queued' }],
+	])('%s stops waiting when the job is cancelled elsewhere instead of timing out', async (operation, params, accepted) => {
+		let polls = 0;
+		const { output } = await runNode({ operation, ...params }, (options) => {
+			if (options.method === 'POST') return accepted;
+			polls += 1;
+			return { ...accepted, status: 'cancelled' };
+		});
+		expect(polls).toBe(1);
+		expect(output[0].json).toMatchObject({ status: 'cancelled', passed: null });
+	});
+
+	it('Verify stops waiting on a task cancelled elsewhere, and Get Status reports it as cancelled', async () => {
+		let polls = 0;
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, (options) => {
+			if (options.url === '/verify') return { task_id: 'task_9', status: 'queued' };
+			polls += 1;
+			return { status: 'cancelled' };
+		});
+		expect(polls).toBe(1);
+		expect(output[0].json).toMatchObject({ status: 'cancelled', passed: null, task_id: 'task_9' });
+
+		const status = await runNode({ operation: 'verifyStatus', taskId: 'task_9' }, () => ({ status: 'cancelled' }));
+		expect(status.output[0].json).toMatchObject({
+			status: 'cancelled',
+			passed: null,
+			failure_class: 'cancelled',
+			failure_reason: 'cancelled',
+			retryable: false,
+		});
+		expect(String((status.output[0].json as IDataObject).message)).toMatch(/not charged/);
+	});
+
+	it('puts the use_review_cancel guidance on the continueOnFail error item', async () => {
+		const { output } = await runNode(
+			{ operation: 'cancelVerification', taskId: 'task_3' },
+			() => {
+				throw apiError(409, { code: 'use_review_cancel', detail: 'part of a review' });
+			},
+			true,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(409);
+		expect(json.code).toBe('use_review_cancel');
+		expect(String(json.error_description)).toMatch(/Use Cancel Review/);
+	});
+
+	it.each([
+		['cancelVerification', { taskId: '  ' }],
+		['cancelReview', { reviewId: '' }],
+		['cancelCitationCheck', { citecheckId: '' }],
+	])('%s skips an empty ID without calling Lenz', async (operation, ids) => {
+		const { calls, output } = await runNode({ operation, ...ids }, noCall);
+		expect(calls).toHaveLength(0);
+		expect(output[0].json).toEqual({ skipped: true, reason: 'empty_input' });
+	});
+});

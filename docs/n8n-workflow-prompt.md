@@ -45,6 +45,8 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 
 | `operation` | What it does | Parameters |
 |---|---|---|
+| `cancelCitationCheck` | Stop a running citation check. You pay only for the citations it checked; the rest is refunded. A check that already finished is returned unchanged. | `citecheckId`**\*** |
+| `cancelReview` | Stop a running review: its quick checks, deep checks and citation checks. You pay only for what it delivered; the rest is refunded. A review that already finished is returned unchanged. | `reviewId`**\*** |
 | `checkCitations` | Check whether each cited source says what the text says it does: the links and DOIs in a text, or statement-source pairs you list. 1 credit per citation checked. | `citationInput`, `citationText`**\***, `citationPairs`, `maxCitations`, `citationOptions`, `waitForCompletion`, `language`, `additionalFields` |
 | `exportReview` | Download an annotated Word document (.docx) with inline verification comments for a completed text or file review | `reviewId`**\***, `binaryPropertyName`**\*** |
 | `getCitationCheck` | Retrieve a citation check by its ID | `citecheckId`**\*** |
@@ -55,6 +57,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 
 | `operation` | What it does | Parameters |
 |---|---|---|
+| `cancelVerification` | Stop a submitted verification task that has not finished. A cancelled run is not charged; one that finished first is left as it is. | `taskId`**\*** |
 | `deleteVerification` | Permanently delete a stored verification | `verificationId`**\*** |
 | `getVerification` | Retrieve a stored verification report by its ID | `verificationId`**\***, `includeAudit` |
 | `listVerifications` | Retrieve the verifications stored in your Lenz account | `returnAll`, `limit` |
@@ -358,16 +361,21 @@ it later. Add an error branch for it only if the user asked for one.
 
    Two limits on this rule, both of which matter more than the rule:
 
-   - **Only `assess` and `verify` emit `passed`.** `extract`, `verifyBatch`,
-     `ask`, `usage`, `select`, the `verifyStatus` poll and every list or delete
-     operation do not. Do not put an IF on `passed` after one of those — the
+   - **Only verdict operations emit `passed`:** `assess`, `verify`, the
+     `verifyStatus` poll, and the review and citation-check operations
+     (`reviewDraft`, `getReview`, `cancelReview`, `checkCitations`,
+     `getCitationCheck`, `cancelCitationCheck`). `extract`, `verifyBatch`,
+     `ask`, `usage`, `select`, `cancelVerification`
+     and every list or delete operation do not. Do not put an IF on `passed` after one of those — the
      field is `undefined` and every item takes the false branch. A workflow that
      ends in "list my verifications" is finished when it has listed them.
    - **Check `status` BEFORE `passed`, never instead of it.** `passed` is only
      meaningful once you know a verdict exists. `assess` returns `no_claim`
      with no `claims` array at all, and `verify` returns
-     `needs_input`, `failed`, `timeout` or `queued` whose `passed` is `null`
-     (`queued` omits it entirely). Null is falsy, so branching straight on
+     `needs_input`, `failed`, `cancelled`, `timeout` or `queued` whose `passed` is `null`
+     (`queued` omits it entirely); the `verifyStatus` poll answers
+     `processing` with `passed: null` while the task runs; a review or citation check that is
+     `cancelled`, `failed` or still running has `passed: null` too. Null is falsy, so branching straight on
      `passed` reports every one of those as "the claim is false" — a provider
      outage becomes a debunking. Gate on `status` first, route the non-verdict
      statuses somewhere of their own, and only then branch on `passed`.
