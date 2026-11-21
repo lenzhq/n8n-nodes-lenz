@@ -4849,8 +4849,61 @@ describe('Cancel operations', () => {
 		expect(calls[0].method).toBe('POST');
 		expect(String(calls[0].url)).toMatch(path);
 		expect(JSON.stringify(calls[0].headers ?? {})).not.toMatch(/Idempotency-Key/i);
-		expect((output[0].json as IDataObject).status).toBe('cancelled');
-		expect(output[0].json).toHaveProperty('passed');
+		expect(output[0].json).toMatchObject({ status: 'cancelled', passed: null });
+	});
+
+	it.each([
+		['clean', true],
+		['issues_found', false],
+	])('Cancel Review on a review that finished first (%s) keeps its passed: %p', async (outcome, passed) => {
+		const { output } = await runNode({ operation: 'cancelReview', reviewId: 'rev_1' }, () => ({
+			status: 'completed',
+			outcome,
+		}));
+		expect(output[0].json).toMatchObject({ status: 'completed', passed });
+	});
+
+	it.each([
+		['reviewDraft', { draft: 'x' }, { review_id: 'rev_1', status: 'queued' }],
+		['checkCitations', { citationInput: 'text', citationText: 'See [1].' }, { citecheck_id: 'cc_1', status: 'queued' }],
+	])('%s stops waiting when the job is cancelled elsewhere instead of timing out', async (operation, params, accepted) => {
+		let polls = 0;
+		const { output } = await runNode({ operation, ...params }, (options) => {
+			if (options.method === 'POST') return accepted;
+			polls += 1;
+			return { ...accepted, status: 'cancelled' };
+		});
+		expect(polls).toBe(1);
+		expect(output[0].json).toMatchObject({ status: 'cancelled', passed: null });
+	});
+
+	it('Verify stops waiting on a task cancelled elsewhere, and Get Status reports it as cancelled', async () => {
+		let polls = 0;
+		const { output } = await runNode({ operation: 'verify', claim: 'Some claim' }, (options) => {
+			if (options.url === '/verify') return { task_id: 'task_9', status: 'queued' };
+			polls += 1;
+			return { status: 'cancelled' };
+		});
+		expect(polls).toBe(1);
+		expect(output[0].json).toMatchObject({ status: 'cancelled', passed: null, task_id: 'task_9' });
+
+		const status = await runNode({ operation: 'verifyStatus', taskId: 'task_9' }, () => ({ status: 'cancelled' }));
+		expect(status.output[0].json).toMatchObject({ status: 'cancelled', passed: null });
+		expect(String((status.output[0].json as IDataObject).message)).toMatch(/not charged/);
+	});
+
+	it('puts the use_review_cancel guidance on the continueOnFail error item', async () => {
+		const { output } = await runNode(
+			{ operation: 'cancelVerification', taskId: 'task_3' },
+			() => {
+				throw apiError(409, { code: 'use_review_cancel', detail: 'part of a review' });
+			},
+			true,
+		);
+		const json = output[0].json as IDataObject;
+		expect(json.status_code).toBe(409);
+		expect(json.code).toBe('use_review_cancel');
+		expect(String(json.error_description)).toMatch(/Use Cancel Review/);
 	});
 
 	it.each([

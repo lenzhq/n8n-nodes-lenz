@@ -53,7 +53,7 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | **Get Many** | Lists the verifications stored in your Lenz account, with **Return All** / **Limit**. |
 | **List Related** | Public verifications semantically related to a given one — useful for "see also" surfaces. |
 | **Delete** | Permanently deletes one of your stored verifications. |
-| **Cancel** | Stops a submitted verification by `task_id` before it finishes; a cancelled run is not charged. Returns `task_id`, `cancelled` and `status` (`completed` when it finished first, saved and charged). Safe to repeat. A deep check started by a review can only be stopped with **Cancel Review**. |
+| **Cancel** | Stops a submitted verification by `task_id` before it finishes; a cancelled run is not charged. Returns `task_id`, `cancelled` and `status`: `cancelled: true` with `status: "cancelled"` once stopped, or `cancelled: false` with how it ended if it got there first (`completed`: saved and charged as usual; `failed`: it had already failed). Safe to repeat. **Get Status** then answers `status: "cancelled"`. A deep check started by a review can only be stopped with **Cancel Review**. |
 
 ### Review — check a whole draft, or its citations
 

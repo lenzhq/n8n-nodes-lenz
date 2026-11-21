@@ -519,6 +519,13 @@ function capacityMessageFor(error: unknown): { message: string; description: str
 }
 
 /**
+ * Our wording for the two 409s an operation can end on (used on the thrown
+ * error and on the continueOnFail error item alike):
+ *
+ *  - `use_review_cancel`: Cancel Verification on a task that is one of a
+ *    review's deep checks. Points at Cancel Review, the only way to stop it.
+ *  - `idempotency_conflict`, below. Any other 409 returns undefined.
+ *
  * A 409 idempotency_conflict the node gave up retrying: the same request is
  * still being created, and the node could not learn its ID.
  *
@@ -1055,6 +1062,17 @@ function mapVerifyStatus(status: IDataObject, taskId: string, includeAudit: bool
 
 	if (state === 'failed') {
 		return { status: 'failed', passed: null, task_id: taskId, ...failureFields(status) };
+	}
+
+	// Stopped with Cancel: final, uncharged and with no verification saved.
+	// Reporting it as `processing` would keep a polling loop going forever.
+	if (state === 'cancelled') {
+		return {
+			status: 'cancelled',
+			passed: null,
+			task_id: taskId,
+			message: 'This verification was cancelled before it finished. It was not charged and nothing was saved.',
+		};
 	}
 
 	return {
@@ -3060,7 +3078,9 @@ export class Lenz implements INodeType {
 			opts: {
 				terminal: readonly string[];
 				pollAfterMs: (body: IDataObject) => number | undefined;
-			} = { terminal: ['completed', 'failed'], pollAfterMs: (body) => statedPollAfterMs(body) },
+			// `cancelled` (by Cancel Review / Cancel Citation Check, here or in another
+			// workflow) is final too: waiting on it would only end in a false timeout.
+			} = { terminal: ['completed', 'failed', 'cancelled'], pollAfterMs: (body) => statedPollAfterMs(body) },
 		): Promise<{
 			terminal?: IDataObject;
 			lastStatus: string;
@@ -3215,7 +3235,7 @@ export class Lenz implements INodeType {
 			last_status: polled.lastStatus || null,
 			last_error: polled.lastError?.message ?? null,
 			last_error_status: polled.lastError?.status ?? null,
-			message: `Still running when Max Wait ran out. Nothing was cancelled: fetch it with ${getOperation} using this ${idKey}, or raise Max Wait (Seconds).`,
+			message: `Still running when Max Wait ran out. The node did not cancel it: fetch it with ${getOperation} using this ${idKey}, stop it with ${getOperation.replace('Get', 'Cancel')}, or raise Max Wait (Seconds).`,
 		});
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
@@ -3353,7 +3373,7 @@ export class Lenz implements INodeType {
 						// never on a sleep. waitSeconds was validated before the submit.
 						const statusPath = `/verify/status/${encodeURIComponent(taskId)}`;
 						const polled = await pollJob(statusPath, itemIndex, waitSeconds, {
-							terminal: ['completed', 'needs_input', 'failed'],
+							terminal: ['completed', 'needs_input', 'failed', 'cancelled'],
 							pollAfterMs: (status) => statedPollAfterMs(status.progress),
 						});
 						const terminal = polled.terminal;

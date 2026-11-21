@@ -351,7 +351,10 @@ it later. Add an error branch for it only if the user asked for one.
 
    Two limits on this rule, both of which matter more than the rule:
 
-   - **Only `assess` and `verify` emit `passed`.** `extract`, `verifyBatch`,
+   - **Only verdict operations emit `passed`:** `assess`, `verify`, and the
+     review and citation-check operations (`reviewDraft`, `getReview`,
+     `cancelReview`, `checkCitations`, `getCitationCheck`,
+     `cancelCitationCheck`). `extract`, `verifyBatch`,
      `ask`, `usage`, `select`, the `verifyStatus` poll, `cancelVerification`
      and every list or delete operation do not. Do not put an IF on `passed` after one of those — the
      field is `undefined` and every item takes the false branch. A workflow that
@@ -360,7 +363,8 @@ it later. Add an error branch for it only if the user asked for one.
      meaningful once you know a verdict exists. `assess` returns `no_claim`
      with no `claims` array at all, and `verify` returns
      `needs_input`, `failed`, `timeout` or `queued` whose `passed` is `null`
-     (`queued` omits it entirely). Null is falsy, so branching straight on
+     (`queued` omits it entirely); a review or citation check that is
+     `cancelled`, `failed` or still running has `passed: null` too. Null is falsy, so branching straight on
      `passed` reports every one of those as "the claim is false" — a provider
      outage becomes a debunking. Gate on `status` first, route the non-verdict
      statuses somewhere of their own, and only then branch on `passed`.
