@@ -54,6 +54,7 @@ describe('Review resource parameter keys (saved in 0.8.0 workflows)', () => {
 	it.each([
 		['reviewDraft', ['draft', 'waitForCompletion', 'reviewOptions', 'visibility', 'language', 'inputSource', 'binaryPropertyName']],
 		['getReview', ['reviewId', 'issuesOnly']],
+		['listReviews', ['returnAll', 'limit']],
 		['exportReview', ['reviewId', 'binaryPropertyName']],
 		['checkCitations', ['citationInput', 'citationText', 'citationPairs', 'maxCitations', 'citationOptions']],
 		['getCitationCheck', ['citecheckId']],
