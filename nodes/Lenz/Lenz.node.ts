@@ -1217,8 +1217,13 @@ function fillReviewOutputKeys(body: IDataObject): IDataObject {
  * `candidate_claims` (always []) and `locations` (every claim with its
  * positions when every claim has them, else null), and `status` in this
  * node's word: `not_a_claim` where the API says `no_checkable_claim`.
+ *
+ * `located` says the request asked for positions (Locate Claims). With it, an
+ * empty claim list means every claim was dropped for not being found in the
+ * text, so `locations` is [] — what this node returned for that answer
+ * before 0.9.0 — rather than null, which still means "not located".
  */
-function fillExtractOutputKeys(body: IDataObject): void {
+function fillExtractOutputKeys(body: IDataObject, located = false): void {
 	if (!Array.isArray(body.claims)) return;
 	const claims = body.claims.filter((entry) => entry && typeof entry === 'object').map((entry) => asObject(entry));
 	const texts = claims.map((c) => asText(c.claim));
@@ -1226,10 +1231,14 @@ function fillExtractOutputKeys(body: IDataObject): void {
 	body.claim = texts[0] ?? '';
 	body.identified_claims = texts.length > 1 ? texts : [];
 	body.candidate_claims = [];
-	body.locations =
-		claims.length && claims.every((c) => Array.isArray(c.positions))
-			? claims.map((c, i) => ({ claim: texts[i], positions: c.positions }))
-			: null;
+	if (located && !claims.length) {
+		body.locations = [];
+	} else {
+		body.locations =
+			claims.length && claims.every((c) => Array.isArray(c.positions))
+				? claims.map((c, i) => ({ claim: texts[i], positions: c.positions }))
+				: null;
+	}
 }
 
 // The per-capability blocks this node has always output for /me/usage, in
@@ -2000,6 +2009,17 @@ export class Lenz implements INodeType {
 				description: 'The claim to check. If it contains several claims, each is assessed separately.',
 			},
 			{
+				displayName: 'Suggest Rewrite',
+				name: 'suggestRewrite',
+				type: 'boolean',
+				default: false,
+				displayOptions: {
+					show: { operation: ['assess'] },
+				},
+				description:
+					"Whether to add a Suggested Rewrite to each row: the claim with its wrong part corrected, when the check found it False or Mostly False with high confidence (null otherwise). No extra credits. It comes from the quick check's reasoning and is not itself verified: review it, or run it through Verify, before using it.",
+			},
+			{
 				displayName: 'Input',
 				name: 'inputSource',
 				type: 'options',
@@ -2669,6 +2689,17 @@ export class Lenz implements INodeType {
 					show: { operation: ['extract'] },
 				},
 				description: 'Optional hint that narrows the result to the claims it describes, at most 300 characters. It only selects from the claims the extractor already found — it cannot add one, reword one, or change what counts as a claim. When nothing matches, Status comes back as no_match with an empty list; the unfocused claims are never substituted. Costs no extra credits.',
+			},
+			{
+				displayName: 'Locate Claims',
+				name: 'locate',
+				type: 'boolean',
+				default: false,
+				displayOptions: {
+					show: { operation: ['extract'] },
+				},
+				description:
+					'Whether to return only the claims traced back to the text, with where each is made in Locations: up to 10 positions per claim, each with Start and End (in Unicode code points of the text as sent) and the passage. A claim found nowhere in the text, or with a different figure, is left out, so the list can come back empty. Adds a few seconds, at most 20. If Lenz cannot locate the claims, every position is null and the list is returned unfiltered. For a URL or a file, Start and End are null and the passage is given. No extra credits.',
 			},
 			{
 				displayName: 'Language',
@@ -3526,6 +3557,12 @@ export class Lenz implements INodeType {
 					if (language) {
 						body.language = language;
 					}
+					// Sent only when asked for, so a request with it off is the body this
+					// node has always sent (and fingerprints into the same Idempotency-Key).
+					const suggestRewrite = this.getNodeParameter('suggestRewrite', itemIndex, false) as boolean;
+					if (suggestRewrite) {
+						body.suggest_rewrite = true;
+					}
 					const result = await lenzRequest('POST', '/assess', body, {
 						idempotent: { operation, itemIndex },
 					});
@@ -3566,6 +3603,13 @@ export class Lenz implements INodeType {
 								// checked sources. `[]` on an Error row and on a response from
 								// an API that does not send the key.
 								searched_pages: readSearchedPages(c.searched_pages),
+								// Only with Suggest Rewrite on, so a node without it keeps the
+								// keys it always had. Null when the row has no rewrite (not False
+								// or Mostly False with high confidence, an Error row, or a
+								// response that predates the field).
+								...(suggestRewrite
+									? { suggested_rewrite: typeof c.suggested_rewrite === 'string' ? c.suggested_rewrite : null }
+									: {}),
 							})),
 						};
 					}
@@ -3601,11 +3645,16 @@ export class Lenz implements INodeType {
 						);
 					}
 
+					// Sent only when asked for: off, the request is the one this node has
+					// always sent. The API reads the multipart field as the string "true".
+					const locate = this.getNodeParameter('locate', itemIndex, false) as boolean;
+
 					if (inputSource === 'binary') {
 						const file = await readBinaryUpload(itemIndex);
 						const fields: Record<string, string> = {};
 						if (language) fields.language = language;
 						if (focus) fields.focus = focus;
+						if (locate) fields.locate = 'true';
 
 						responseData = await lenzRequest('POST', '/extract/file', undefined, {
 							idempotent: { operation, itemIndex },
@@ -3624,6 +3673,9 @@ export class Lenz implements INodeType {
 						if (focus) {
 							body.focus = focus;
 						}
+						if (locate) {
+							body.locate = true;
+						}
 						responseData = await lenzRequest('POST', '/extract', body, {
 							idempotent: { operation, itemIndex },
 						});
@@ -3633,7 +3685,7 @@ export class Lenz implements INodeType {
 					// its own it is indistinguishable from "nothing here", so name the
 					// cause and the way out.
 					const nothing = isNoCheckable(responseData.status);
-					fillExtractOutputKeys(responseData);
+					fillExtractOutputKeys(responseData, locate);
 					responseData.not_a_claim = nothing;
 					if (responseData.status === 'no_match') {
 						responseData.message =

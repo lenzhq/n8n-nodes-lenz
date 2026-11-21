@@ -212,6 +212,34 @@ describe('Lenz node - Assess (Fast)', () => {
 		for (const row of claims) expect('dissent' in row).toBe(false);
 	});
 
+	describe('Suggest Rewrite', () => {
+		const rows = {
+			claims: [
+				{ claim: 'The Eiffel Tower is in Berlin.', verdict: 'False', confidence: 'high', suggested_rewrite: 'The Eiffel Tower is in Paris.' },
+				{ claim: 'Water boils at 100 C at sea level.', verdict: 'True', confidence: 'high', suggested_rewrite: null },
+				// A response stored before the API added the field replays without it
+				{ claim: 'C', verdict: 'Mixed', confidence: 'low' },
+			],
+		};
+
+		it('sends nothing new and adds no key while it is off', async () => {
+			const { calls, output } = await runNode({ operation: 'assess', text: 'some text' }, () => rows);
+			expect(calls[0].body).toEqual({ text: 'some text' });
+			const claims = (output[0].json as IDataObject).claims as IDataObject[];
+			for (const row of claims) expect('suggested_rewrite' in row).toBe(false);
+		});
+
+		it('asks for suggest_rewrite and passes each row\'s rewrite on, null where there is none', async () => {
+			const { calls, output } = await runNode(
+				{ operation: 'assess', text: 'some text', suggestRewrite: true },
+				() => rows,
+			);
+			expect(calls[0].body).toEqual({ text: 'some text', suggest_rewrite: true });
+			const claims = (output[0].json as IDataObject).claims as IDataObject[];
+			expect(claims.map((c) => c.suggested_rewrite)).toEqual(['The Eiffel Tower is in Paris.', null, null]);
+		});
+	});
+
 	describe('searched_pages', () => {
 		const rowsOf = async (searched: unknown, extra: IDataObject = {}) => {
 			const { output } = await runNode({ operation: 'assess', text: 'some text' }, () => ({
@@ -1261,6 +1289,62 @@ describe('Lenz node - Extract Claims', () => {
 			claims: [],
 		}));
 		expect(output[0].json).toMatchObject({ status: 'not_a_claim', claim: '', not_a_claim: true });
+	});
+
+	describe('Locate Claims', () => {
+		const located = {
+			status: 'ready',
+			claims: [
+				{ claim: 'Alpha rose 5% in 2024.', positions: [{ start: 0, end: 22, text: 'Alpha rose 5% in 2024.' }] },
+				{ claim: 'Beta fell 3% last year.', positions: [{ start: 23, end: 46, text: 'Beta fell 3% last year.' }] },
+			],
+		};
+
+		it('sends no locate key while it is off', async () => {
+			const { calls } = await runNode({ operation: 'extract', text: 'Some text' }, () => ({ status: 'ready' }));
+			expect(calls[0].body).toEqual({ text: 'Some text' });
+		});
+
+		it('asks for locate and lists every claim with its positions', async () => {
+			const { calls, output } = await runNode(
+				{ operation: 'extract', text: 'Alpha rose 5% in 2024. Beta fell 3% last year.', locate: true },
+				() => located,
+			);
+			expect(calls[0].body).toEqual({ text: 'Alpha rose 5% in 2024. Beta fell 3% last year.', locate: true });
+			expect((output[0].json as IDataObject).locations).toEqual([
+				{ claim: 'Alpha rose 5% in 2024.', positions: [{ start: 0, end: 22, text: 'Alpha rose 5% in 2024.' }] },
+				{ claim: 'Beta fell 3% last year.', positions: [{ start: 23, end: 46, text: 'Beta fell 3% last year.' }] },
+			]);
+		});
+
+		it('says [] when every claim was dropped for not being in the text', async () => {
+			const { output } = await runNode({ operation: 'extract', text: 'x', locate: true }, () => ({
+				status: 'no_checkable_claim',
+				claims: [],
+			}));
+			expect(output[0].json).toMatchObject({ status: 'not_a_claim', locations: [], not_a_claim: true });
+		});
+
+		it('keeps locations null when Lenz could not locate the claims', async () => {
+			const { output } = await runNode({ operation: 'extract', text: 'x', locate: true }, () => ({
+				status: 'ready',
+				claims: [
+					{ claim: 'Alpha rose 5% in 2024.', positions: null },
+					{ claim: 'Beta fell 3% last year.', positions: null },
+				],
+			}));
+			const json = output[0].json as IDataObject;
+			expect(json.locations).toBeNull();
+			expect(json.identified_claims).toEqual(['Alpha rose 5% in 2024.', 'Beta fell 3% last year.']);
+		});
+
+		it('keeps locations null for an empty answer while it is off', async () => {
+			const { output } = await runNode({ operation: 'extract', text: 'x' }, () => ({
+				status: 'no_checkable_claim',
+				claims: [],
+			}));
+			expect((output[0].json as IDataObject).locations).toBeNull();
+		});
 	});
 });
 
@@ -4144,12 +4228,37 @@ describe('Lenz node - the collapsed failure codes and a quick No Public Record r
 			expect(bodyString).toContain('name="file"; filename="report.docx"');
 			expect(bodyString).toContain('name="language"\r\n\r\nen');
 			expect(bodyString).toContain('name="focus"\r\n\r\nfinancial figures');
+			expect(bodyString).not.toContain('name="locate"');
 			expect(bodyBuffer.includes(dummyDocx)).toBe(true);
 
 			const json = output[0].json as IDataObject;
 			expect(json.status).toBe('ready');
 			expect(json.identified_claims).toEqual(['Revenue was $10M.']);
 			expect(json.not_a_claim).toBe(false);
+		});
+
+		it('extract: Locate Claims sends the multipart field locate as the string "true"', async () => {
+			let capturedOptions: IHttpRequestOptions | undefined;
+			const { output } = await runNode(
+				{ operation: 'extract', inputSource: 'binary', binaryPropertyName: 'data', locate: true },
+				(options) => {
+					capturedOptions = options;
+					return {
+						status: 'ready',
+						claims: [{ claim: 'Revenue was $10M.', positions: [{ start: null, end: null, text: 'Revenue was $10M.' }] }],
+					};
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: Buffer.from('%PDF-1.7 test'), fileName: 'report.pdf', mimeType: 'application/pdf' } }],
+			);
+			const bodyString = (capturedOptions!.body as Buffer).toString('utf8');
+			expect(bodyString).toContain('name="locate"\r\n\r\ntrue');
+			// A file has no offsets to give: start and end are null, the passage is there.
+			expect((output[0].json as IDataObject).locations).toEqual([
+				{ claim: 'Revenue was $10M.', positions: [{ start: null, end: null, text: 'Revenue was $10M.' }] },
+			]);
 		});
 
 		it('extract: unnamed docx binary item defaults to upload.docx', async () => {

@@ -37,8 +37,8 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 
 | `operation` | What it does | Parameters |
 |---|---|---|
-| `assess` | Fast 3-model panel verdict (~15s), one entry per claim found in the text | `text`**\***, `language` |
-| `extract` | Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm), or a public web page, Google Doc, PDF, YouTube video, image, or audio URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `text`**\*** *(when `inputSource: "text"`)*, `focus`, `language` |
+| `assess` | Fast 3-model panel verdict (~15s), one entry per claim found in the text | `text`**\***, `suggestRewrite`, `language` |
+| `extract` | Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm), or a public web page, Google Doc, PDF, YouTube video, image, or audio URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `text`**\*** *(when `inputSource: "text"`)*, `focus`, `locate`, `language` |
 | `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language`, `additionalFields` |
 
 ### `resource: "review"` — Review
@@ -142,6 +142,14 @@ either one silently:
   only selects among the claims the extractor already found — it cannot add
   one or reword one — and when nothing matches you get `status: "no_match"`
   and an empty list rather than the unfocused claims.
+- **`locate` on `extract`** ("Locate Claims") keeps only the claims found in
+  the text and fills `locations: [ { claim, positions: [ { start, end, text } ] } ]`
+  (`start`/`end` are `null` for a URL or a file). `locations` is `[]` when no
+  claim was found in the text and `null` when Lenz could not locate them.
+- **`suggestRewrite` on `assess`** ("Suggest Rewrite") adds `suggested_rewrite`
+  to each claim: a corrected sentence for a high-confidence False or Mostly
+  False claim, else `null`. It is not verified itself; show it to a person,
+  never write it back automatically.
 
 ## Where the check belongs
 
