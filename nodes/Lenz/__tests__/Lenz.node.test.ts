@@ -1357,6 +1357,9 @@ describe('Lenz node - Extract Claims', () => {
 				}
 			}
 			expect(locations[0].positions[0]).toEqual({ start: 4, end: 26, text: 'Alpha rose 5% in 2024.' });
+			// The raw claims carry the same offsets, so the two keys never disagree.
+			const claims = (output[0].json as IDataObject).claims as Array<{ positions: IDataObject[] }>;
+			expect(claims.map((c) => c.positions)).toEqual(locations.map((l) => l.positions));
 		});
 
 		it('leaves null offsets null when shifting (a URL answer)', async () => {

@@ -1211,25 +1211,15 @@ function fillReviewOutputKeys(body: IDataObject): IDataObject {
 }
 
 /**
- * An /extract answer (`claims: [{ claim, positions }]`), given the keys this
- * node has always output: `claim` (the first claim, or ''),
- * `identified_claims` (every claim when there are several, else []),
- * `candidate_claims` (always []) and `locations` (every claim with its
- * positions when every claim has them, else null), and `status` in this
- * node's word: `not_a_claim` where the API says `no_checkable_claim`.
- *
- * `located` says the request asked for positions (Locate Claims). With it, an
- * empty claim list (other than a Focus's `no_match`) gives `locations: []`:
- * no claim was left, either because none was found in the text or because
- * the text had none to check. Lenz answers both the same way, and this node
- * returned [] for that answer before 0.9.0. Null still means "not located".
- */
-/**
  * Move every numeric `start`/`end` in `claims[].positions` along by `by`
- * code points. The node trims the text it sends, and Lenz measures positions
- * against what it received, so without this a claim in a field that starts
- * with blank lines would point that many characters too early in the field
- * the user wrote. Null offsets (a URL or a file) stay null.
+ * code points. Lenz's offsets index the text exactly as it received it (it
+ * strips the text itself and adds its own leading offset back, and maps any
+ * normalised match back to raw code points), but this node trims the field
+ * before sending it, so without this a claim in a field that starts with
+ * blank lines would point that many characters too early in the field the
+ * user wrote. The raw `claims[].positions` are shifted in place, so they and
+ * `locations` (built from them) both index the field. Null offsets (a URL or
+ * a file) stay null.
  */
 function shiftPositions(claims: unknown, by: number): void {
 	if (!by || !Array.isArray(claims)) return;
@@ -1245,6 +1235,20 @@ function shiftPositions(claims: unknown, by: number): void {
 	}
 }
 
+/**
+ * An /extract answer (`claims: [{ claim, positions }]`), given the keys this
+ * node has always output: `claim` (the first claim, or ''),
+ * `identified_claims` (every claim when there are several, else []),
+ * `candidate_claims` (always []) and `locations` (every claim with its
+ * positions when every claim has them, else null), and `status` in this
+ * node's word: `not_a_claim` where the API says `no_checkable_claim`.
+ *
+ * `located` says the request asked for positions (Locate Claims). With it, an
+ * empty claim list (other than a Focus's `no_match`) gives `locations: []`:
+ * no claim was left, either because none was found in the text or because
+ * the text had none to check. Lenz answers both the same way, and this node
+ * returned [] for that answer before 0.9.0. Null still means "not located".
+ */
 function fillExtractOutputKeys(body: IDataObject, located = false): void {
 	if (!Array.isArray(body.claims)) return;
 	const claims = body.claims.filter((entry) => entry && typeof entry === 'object').map((entry) => asObject(entry));
@@ -2721,7 +2725,7 @@ export class Lenz implements INodeType {
 					show: { operation: ['extract'] },
 				},
 				description:
-					'Whether to return only the claims traced back to the text, with where each is made in Locations: up to 10 positions per claim, each with Start and End (in Unicode code points of the Text field, so in a Code node use Array.from(text).slice(start, end), not text.slice) and the passage. A claim found nowhere in the text, or with a different figure, is left out; Locations is an empty list when no claim is left. Adds a few seconds, at most 20. If Lenz cannot locate the claims, Locations is null and the list is returned unfiltered. For a URL or a file, Start and End are null and the passage is given. No extra credits.',
+					'Whether to return only the claims traced back to the text, with where each is made in Locations: up to 10 positions per claim, each with Start and End (in Unicode code points of the Text field, so in a Code node use Array.from(text).slice(start, end), not text.slice) and the passage. A claim found nowhere in the text, or with a different figure, is left out; Locations is an empty list when no claim is left, and null on a Focus no_match. Adds a few seconds, at most 20. If Lenz cannot locate the claims, Locations is null and the list is returned unfiltered. For a URL or a file, Start and End are null and the passage is given. No extra credits.',
 			},
 			{
 				displayName: 'Language',
