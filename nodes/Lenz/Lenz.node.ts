@@ -1219,10 +1219,32 @@ function fillReviewOutputKeys(body: IDataObject): IDataObject {
  * node's word: `not_a_claim` where the API says `no_checkable_claim`.
  *
  * `located` says the request asked for positions (Locate Claims). With it, an
- * empty claim list means every claim was dropped for not being found in the
- * text, so `locations` is [] — what this node returned for that answer
- * before 0.9.0 — rather than null, which still means "not located".
+ * empty claim list (other than a Focus's `no_match`) gives `locations: []`:
+ * no claim was left, either because none was found in the text or because
+ * the text had none to check. Lenz answers both the same way, and this node
+ * returned [] for that answer before 0.9.0. Null still means "not located".
  */
+/**
+ * Move every numeric `start`/`end` in `claims[].positions` along by `by`
+ * code points. The node trims the text it sends, and Lenz measures positions
+ * against what it received, so without this a claim in a field that starts
+ * with blank lines would point that many characters too early in the field
+ * the user wrote. Null offsets (a URL or a file) stay null.
+ */
+function shiftPositions(claims: unknown, by: number): void {
+	if (!by || !Array.isArray(claims)) return;
+	for (const claim of claims) {
+		const positions = claim && typeof claim === 'object' ? (claim as IDataObject).positions : undefined;
+		if (!Array.isArray(positions)) continue;
+		for (const position of positions) {
+			if (!position || typeof position !== 'object') continue;
+			const p = position as IDataObject;
+			if (typeof p.start === 'number') p.start += by;
+			if (typeof p.end === 'number') p.end += by;
+		}
+	}
+}
+
 function fillExtractOutputKeys(body: IDataObject, located = false): void {
 	if (!Array.isArray(body.claims)) return;
 	const claims = body.claims.filter((entry) => entry && typeof entry === 'object').map((entry) => asObject(entry));
@@ -1231,7 +1253,7 @@ function fillExtractOutputKeys(body: IDataObject, located = false): void {
 	body.claim = texts[0] ?? '';
 	body.identified_claims = texts.length > 1 ? texts : [];
 	body.candidate_claims = [];
-	if (located && !claims.length) {
+	if (located && !claims.length && body.status !== 'no_match') {
 		body.locations = [];
 	} else {
 		body.locations =
@@ -2699,7 +2721,7 @@ export class Lenz implements INodeType {
 					show: { operation: ['extract'] },
 				},
 				description:
-					'Whether to return only the claims traced back to the text, with where each is made in Locations: up to 10 positions per claim, each with Start and End (in Unicode code points of the text as sent) and the passage. A claim found nowhere in the text, or with a different figure, is left out, so the list can come back empty. Adds a few seconds, at most 20. If Lenz cannot locate the claims, every position is null and the list is returned unfiltered. For a URL or a file, Start and End are null and the passage is given. No extra credits.',
+					'Whether to return only the claims traced back to the text, with where each is made in Locations: up to 10 positions per claim, each with Start and End (in Unicode code points of the Text field, so in a Code node use Array.from(text).slice(start, end), not text.slice) and the passage. A claim found nowhere in the text, or with a different figure, is left out; Locations is an empty list when no claim is left. Adds a few seconds, at most 20. If Lenz cannot locate the claims, Locations is null and the list is returned unfiltered. For a URL or a file, Start and End are null and the passage is given. No extra credits.',
 			},
 			{
 				displayName: 'Language',
@@ -3648,6 +3670,9 @@ export class Lenz implements INodeType {
 					// Sent only when asked for: off, the request is the one this node has
 					// always sent. The API reads the multipart field as the string "true".
 					const locate = this.getNodeParameter('locate', itemIndex, false) as boolean;
+					// Code points the node trims off the front of the text before sending it,
+					// to put Lenz's positions back on the text as the user wrote it.
+					let leadingTrimmed = 0;
 
 					if (inputSource === 'binary') {
 						const file = await readBinaryUpload(itemIndex);
@@ -3675,6 +3700,10 @@ export class Lenz implements INodeType {
 						}
 						if (locate) {
 							body.locate = true;
+							const raw = this.getNodeParameter('text', itemIndex, '');
+							if (typeof raw === 'string') {
+								leadingTrimmed = Array.from(raw).length - Array.from(raw.trimStart()).length;
+							}
 						}
 						responseData = await lenzRequest('POST', '/extract', body, {
 							idempotent: { operation, itemIndex },
@@ -3685,6 +3714,7 @@ export class Lenz implements INodeType {
 					// its own it is indistinguishable from "nothing here", so name the
 					// cause and the way out.
 					const nothing = isNoCheckable(responseData.status);
+					shiftPositions(responseData.claims, leadingTrimmed);
 					fillExtractOutputKeys(responseData, locate);
 					responseData.not_a_claim = nothing;
 					if (responseData.status === 'no_match') {

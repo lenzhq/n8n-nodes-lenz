@@ -1338,6 +1338,45 @@ describe('Lenz node - Extract Claims', () => {
 			expect(json.identified_claims).toEqual(['Alpha rose 5% in 2024.', 'Beta fell 3% last year.']);
 		});
 
+		it('puts positions back on the field as written when it starts with blank lines', async () => {
+			// The node sends the trimmed text; Lenz counts from its first character.
+			const field = '\n\n  Alpha rose 5% in 2024. 🚀 Beta fell 3%.';
+			const { calls, output } = await runNode({ operation: 'extract', text: field, locate: true }, () => ({
+				status: 'ready',
+				claims: [
+					{ claim: 'Alpha rose 5% in 2024.', positions: [{ start: 0, end: 22, text: 'Alpha rose 5% in 2024.' }] },
+					{ claim: 'Beta fell 3%.', positions: [{ start: 25, end: 38, text: 'Beta fell 3%.' }] },
+				],
+			}));
+			expect((calls[0].body as IDataObject).text).toBe('Alpha rose 5% in 2024. 🚀 Beta fell 3%.');
+			const locations = (output[0].json as IDataObject).locations as Array<{ positions: IDataObject[] }>;
+			const chars = Array.from(field);
+			for (const { positions } of locations) {
+				for (const p of positions) {
+					expect(chars.slice(p.start as number, p.end as number).join('')).toBe(p.text);
+				}
+			}
+			expect(locations[0].positions[0]).toEqual({ start: 4, end: 26, text: 'Alpha rose 5% in 2024.' });
+		});
+
+		it('leaves null offsets null when shifting (a URL answer)', async () => {
+			const { output } = await runNode(
+				{ operation: 'extract', text: '  https://example.com/article', locate: true },
+				() => ({ status: 'ready', claims: [{ claim: 'A', positions: [{ start: null, end: null, text: 'A' }] }] }),
+			);
+			expect((output[0].json as IDataObject).locations).toEqual([
+				{ claim: 'A', positions: [{ start: null, end: null, text: 'A' }] },
+			]);
+		});
+
+		it('keeps locations null on a Focus no_match, which is not about locating', async () => {
+			const { output } = await runNode(
+				{ operation: 'extract', text: 'Some text', focus: 'unrelated', locate: true },
+				() => ({ status: 'no_match', claims: [] }),
+			);
+			expect(output[0].json).toMatchObject({ status: 'no_match', locations: null });
+		});
+
 		it('keeps locations null for an empty answer while it is off', async () => {
 			const { output } = await runNode({ operation: 'extract', text: 'x' }, () => ({
 				status: 'no_checkable_claim',

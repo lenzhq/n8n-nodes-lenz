@@ -85,8 +85,10 @@ either one silently:
   and an empty list rather than the unfocused claims.
 - **`locate` on `extract`** ("Locate Claims") keeps only the claims found in
   the text and fills `locations: [ { claim, positions: [ { start, end, text } ] } ]`
-  (`start`/`end` are `null` for a URL or a file). `locations` is `[]` when no
-  claim was found in the text and `null` when Lenz could not locate them.
+  (`start`/`end` are `null` for a URL or a file). `start`/`end` count Unicode
+  code points of the Text field: slice with `Array.from(text).slice(start, end)`,
+  not `text.slice`. `locations` is `[]` when no claim is left and `null` when
+  Lenz could not locate them (or on a `no_match`).
 - **`suggestRewrite` on `assess`** ("Suggest Rewrite") adds `suggested_rewrite`
   to each claim: a corrected sentence for a high-confidence False or Mostly
   False claim, else `null`. It is not verified itself; show it to a person,
