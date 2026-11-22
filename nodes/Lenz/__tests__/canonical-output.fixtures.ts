@@ -3228,17 +3228,6 @@ export const canonicalOutput: Record<
       "positions": null
      }
     ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
-     }
-    ],
     "presumed_intent": "Verify reported figures",
     "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year.",
     "claim": "Beta fell 3% last year.",
@@ -3279,17 +3268,6 @@ export const canonicalOutput: Record<
       "positions": null
      }
     ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
-     }
-    ],
     "presumed_intent": "Verify reported figures",
     "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year.",
     "claim": "Alpha rose 5% in 2024.",
@@ -3310,17 +3288,6 @@ export const canonicalOutput: Record<
    {
     "status": "not_a_claim",
     "claims": [],
-    "domain": "",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
-     }
-    ],
     "presumed_intent": "Verify reported figures",
     "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year.",
     "claim": "",
@@ -3345,17 +3312,6 @@ export const canonicalOutput: Record<
      {
       "claim": "Beta fell 3% last year.",
       "positions": null
-     }
-    ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
      }
     ],
     "presumed_intent": "Verify reported figures",
@@ -3387,17 +3343,6 @@ export const canonicalOutput: Record<
         "text": "Alpha rose 5% in 2024."
        }
       ]
-     }
-    ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
      }
     ],
     "presumed_intent": "Verify reported figures",
@@ -3447,17 +3392,6 @@ export const canonicalOutput: Record<
         "text": "Beta fell 3% last year."
        }
       ]
-     }
-    ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
      }
     ],
     "presumed_intent": "Verify reported figures",
@@ -3522,17 +3456,6 @@ export const canonicalOutput: Record<
       ]
      }
     ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
-     }
-    ],
     "presumed_intent": "Verify reported figures",
     "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year.",
     "claim": "Alpha rose 5% in 2024.",
@@ -3574,8 +3497,6 @@ export const canonicalOutput: Record<
    {
     "status": "no_match",
     "claims": [],
-    "domain": "",
-    "key_entities": [],
     "presumed_intent": "",
     "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year.",
     "claim": "",
@@ -3594,8 +3515,6 @@ export const canonicalOutput: Record<
    {
     "status": "not_a_claim",
     "claims": [],
-    "domain": "",
-    "key_entities": [],
     "presumed_intent": "",
     "original_input": "What a lovely day.",
     "claim": "",
@@ -3618,17 +3537,6 @@ export const canonicalOutput: Record<
       "positions": null
      }
     ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
-     }
-    ],
     "presumed_intent": "Verify reported figures",
     "original_input": "Alpha rose 5% in 2024.",
     "claim": "Alpha rose 5% in 2024.",
@@ -3649,17 +3557,6 @@ export const canonicalOutput: Record<
      {
       "claim": "Alpha rose 5% in 2024.",
       "positions": null
-     }
-    ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
      }
     ],
     "presumed_intent": "Verify reported figures",
@@ -3686,17 +3583,6 @@ export const canonicalOutput: Record<
      {
       "claim": "Beta fell 3% last year.",
       "positions": null
-     }
-    ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
      }
     ],
     "presumed_intent": "Verify reported figures",
@@ -3761,17 +3647,6 @@ export const canonicalOutput: Record<
         "text": "Alpha rose 5% in 2024."
        }
       ]
-     }
-    ],
-    "domain": "Economics",
-    "key_entities": [
-     {
-      "name": "Alpha",
-      "type": "organization"
-     },
-     {
-      "name": "Beta",
-      "type": "organization"
      }
     ],
     "presumed_intent": "Verify reported figures",
@@ -7321,8 +7196,6 @@ export const canonicalOutput: Record<
        "language": "en",
        "visibility": "private",
        "depth": "standard",
-       "domain": "",
-       "entities": [],
        "verdict": "False",
        "confidence": "high",
        "lenz_score": 2,
@@ -7380,8 +7253,6 @@ export const canonicalOutput: Record<
        "language": "en",
        "visibility": "private",
        "depth": "standard",
-       "domain": "",
-       "entities": [],
        "verdict": "False",
        "confidence": "high",
        "lenz_score": 2,
@@ -7612,8 +7483,6 @@ export const canonicalOutput: Record<
        "language": "en",
        "visibility": "private",
        "depth": "standard",
-       "domain": "",
-       "entities": [],
        "verdict": "False",
        "confidence": "high",
        "lenz_score": 2,
@@ -7700,8 +7569,6 @@ export const canonicalOutput: Record<
        "language": null,
        "visibility": null,
        "depth": null,
-       "domain": null,
-       "entities": [],
        "verdict": null,
        "confidence": null,
        "lenz_score": null,
@@ -8993,8 +8860,6 @@ export const canonicalOutput: Record<
        "language": "en",
        "visibility": "private",
        "depth": "standard",
-       "domain": "",
-       "entities": [],
        "verdict": "False",
        "confidence": "high",
        "lenz_score": 2,
@@ -9148,8 +9013,6 @@ export const canonicalOutput: Record<
        "language": "en",
        "visibility": "private",
        "depth": "standard",
-       "domain": "",
-       "entities": [],
        "verdict": "False",
        "confidence": "high",
        "lenz_score": 2,
@@ -9511,8 +9374,6 @@ export const canonicalOutput: Record<
        "language": "en",
        "visibility": "private",
        "depth": "standard",
-       "domain": "",
-       "entities": [],
        "verdict": "False",
        "confidence": "high",
        "lenz_score": 2,
@@ -9587,8 +9448,6 @@ export const canonicalOutput: Record<
        "language": null,
        "visibility": null,
        "depth": null,
-       "domain": null,
-       "entities": [],
        "verdict": null,
        "confidence": null,
        "lenz_score": null,
@@ -9982,8 +9841,6 @@ export const canonicalOutput: Record<
        "language": null,
        "visibility": null,
        "depth": null,
-       "domain": null,
-       "entities": [],
        "verdict": null,
        "confidence": null,
        "lenz_score": null,
@@ -10431,8 +10288,6 @@ export const canonicalOutput: Record<
    {
     "verification_id": "0cce5f94",
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "verdict": "True",
     "confidence": "high",
     "lenz_score": 9,
@@ -10447,8 +10302,6 @@ export const canonicalOutput: Record<
    {
     "verification_id": "0f67b4fc",
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "verdict": "True",
     "confidence": "high",
     "lenz_score": 9,
@@ -10469,8 +10322,6 @@ export const canonicalOutput: Record<
    {
     "verification_id": "0cce5f94",
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "verdict": "True",
     "confidence": "high",
     "lenz_score": 9,
@@ -10491,8 +10342,6 @@ export const canonicalOutput: Record<
    {
     "verification_id": "0cce5f94",
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "verdict": "True",
     "confidence": "high",
     "lenz_score": 9,
@@ -10523,8 +10372,6 @@ export const canonicalOutput: Record<
    {
     "verification_id": "0cce5f94",
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "verdict": "True",
     "confidence": "high",
     "lenz_score": 9,
@@ -10711,13 +10558,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -10761,13 +10601,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -10811,13 +10644,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -10861,13 +10687,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -10911,13 +10730,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -10961,13 +10773,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11070,12 +10875,10 @@ export const canonicalOutput: Record<
     "claims": [
      {
       "claim": "The Earth is round.",
-      "domain": "Science",
       "text": "The Earth is round."
      },
      {
       "claim": "Water boils at 100C at sea level.",
-      "domain": "Science",
       "text": "Water boils at 100C at sea level."
      }
     ],
@@ -11214,13 +11017,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11364,13 +11160,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11414,13 +11203,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11496,13 +11278,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11546,13 +11321,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11628,13 +11396,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11678,13 +11439,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11760,13 +11514,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11810,13 +11557,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11892,13 +11632,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -11942,13 +11675,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12024,13 +11750,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12074,13 +11793,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12154,8 +11866,6 @@ export const canonicalOutput: Record<
     "suggested_rewrite": "",
     "warnings": [],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "presumed_intent": "",
     "citations": [],
     "verification_id": "0cce5f94",
@@ -12182,8 +11892,6 @@ export const canonicalOutput: Record<
     "suggested_rewrite": "",
     "warnings": [],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "presumed_intent": "",
     "citations": [],
     "verification_id": "0cce5f94",
@@ -12225,8 +11933,6 @@ export const canonicalOutput: Record<
     "suggested_rewrite": "",
     "warnings": [],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "presumed_intent": "",
     "citations": [],
     "verification_id": "0cce5f94",
@@ -12253,8 +11959,6 @@ export const canonicalOutput: Record<
     "suggested_rewrite": "",
     "warnings": [],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "presumed_intent": "",
     "citations": [],
     "verification_id": "0cce5f94",
@@ -12296,8 +12000,6 @@ export const canonicalOutput: Record<
     "suggested_rewrite": "",
     "warnings": [],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "presumed_intent": "",
     "citations": [
      {
@@ -12332,8 +12034,6 @@ export const canonicalOutput: Record<
     "suggested_rewrite": "",
     "warnings": [],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [],
     "presumed_intent": "",
     "citations": [
      {
@@ -12407,13 +12107,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12457,13 +12150,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12598,13 +12284,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12648,13 +12327,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12730,13 +12402,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12780,13 +12445,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12891,13 +12549,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {
@@ -12941,13 +12592,6 @@ export const canonicalOutput: Record<
      "Relies on limited sources"
     ],
     "claim": "The Earth is round.",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "citations": [
      {

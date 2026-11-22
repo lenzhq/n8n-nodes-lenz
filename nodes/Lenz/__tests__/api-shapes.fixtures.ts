@@ -45,12 +45,10 @@ export const shapes: Record<string, any> = {
   "reason": "multi_claim",
   "claims": [
    {
-    "claim": "The Earth is round.",
-    "domain": "Science"
+    "claim": "The Earth is round."
    },
    {
-    "claim": "Water boils at 100C at sea level.",
-    "domain": "Science"
+    "claim": "Water boils at 100C at sea level."
    }
   ],
   "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
@@ -63,13 +61,6 @@ export const shapes: Record<string, any> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -154,13 +145,6 @@ export const shapes: Record<string, any> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -581,13 +565,6 @@ export const shapes: Record<string, any> = {
   "claim": "The Earth is round.",
   "visibility": "private",
   "depth": "standard",
-  "domain": "Science",
-  "entities": [
-   {
-    "name": "Earth",
-    "qid": null
-   }
-  ],
   "presumed_intent": "Verify a basic scientific fact",
   "verdict": "True",
   "confidence": "high",

@@ -104,7 +104,6 @@ describe('recorded API responses', () => {
 				'The Earth is round.',
 				'Water boils at 100C at sea level.',
 			]);
-			expect(claims.map((c) => c.domain)).toEqual(['Science', 'Science']);
 			// The API's own `claim` stays beside it.
 			expect(claims.map((c) => c.claim)).toEqual(claims.map((c) => c.text));
 		});
