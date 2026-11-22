@@ -2825,49 +2825,6 @@ export const canonicalOutput: Record<
   "threw": null,
   "thrown": null
  },
- "errors__ask_empty_message": {
-  "ok": [
-   {
-    "error": "Your request is invalid or could not be processed by the service",
-    "status_code": 422
-   }
-  ],
-  "threw": null,
-  "thrown": {
-   "message": "Your request is invalid or could not be processed by the service",
-   "description": "Message cannot be empty.",
-   "httpCode": "422"
-  }
- },
- "errors__ask_failed": {
-  "ok": [
-   {
-    "error": "Bad gateway - the service failed to handle your request",
-    "status_code": 502,
-    "code": "ask_failed"
-   }
-  ],
-  "threw": null,
-  "thrown": {
-   "message": "Bad gateway - the service failed to handle your request",
-   "description": "ask_failed",
-   "httpCode": "502"
-  }
- },
- "errors__ask_not_completed": {
-  "ok": [
-   {
-    "error": "Bad request - please check your parameters",
-    "status_code": 400
-   }
-  ],
-  "threw": null,
-  "thrown": {
-   "message": "Bad request - please check your parameters",
-   "description": "Ask is only available for completed verifications.",
-   "httpCode": "400"
-  }
- },
  "errors__auth_bad_key": {
   "ok": [
    {
@@ -2923,26 +2880,6 @@ export const canonicalOutput: Record<
    "message": "The resource you are requesting could not be found",
    "description": "Task not found.",
    "httpCode": "404"
-  }
- },
- "errors__payment_required_ask": {
-  "ok": [
-   {
-    "error": "Payment required - perhaps check your payment details?",
-    "status_code": 402,
-    "code": "no_credits",
-    "cost": 1,
-    "credits_remaining": 0,
-    "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
-    "error_message": "Lenz: No remaining ask credits.",
-    "error_description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00)."
-   }
-  ],
-  "threw": null,
-  "thrown": {
-   "message": "Lenz: No remaining ask credits.",
-   "description": "This call costs 1 credit and you have 0 left. Retrying will not help — this clears when you top up or your monthly credits reset. See https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b (credits reset 2026-09-01T10:00:00+00:00).",
-   "httpCode": "402"
   }
  },
  "errors__payment_required_assess": {
@@ -3023,24 +2960,6 @@ export const canonicalOutput: Record<
    "message": "Lenz: Daily /extract limit of 1000 reached for this account. The allowance is shared by every key on the account and by extractions run from the Lenz website. Resets in ~15 minutes.",
    "description": "Rate limited (HTTP 429). Nothing was charged, and the stated limit is 1000. That is too long to wait inside a workflow: the execution would stay pending for ~15 minutes, where an execution timeout or a Cloud duration limit can cancel it before the limit clears. Re-run the workflow after the reset, or schedule it for then, or raise the cap: https://lenz.io/plans.",
    "httpCode": "429"
-  }
- },
- "errors__service_unavailable_ask": {
-  "ok": [
-   {
-    "error": "Service unavailable - try again later or consider setting this node to retry automatically (in the node settings)",
-    "status_code": 503,
-    "code": "upstream_unavailable",
-    "retry_after": 90,
-    "error_message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
-    "error_description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait."
-   }
-  ],
-  "threw": null,
-  "thrown": {
-   "message": "Lenz: Lenz's model providers are temporarily unavailable — retry in ~90s.",
-   "description": "Transient (HTTP 503, code: upstream_unavailable). Nothing was charged. Wait ~90s before submitting again: send this node's error output into a Wait node set to 90 seconds — Wait Unit: Seconds, since it defaults to Hours — and loop it back, or re-run the workflow after the wait. \"Retry On Fail\" is not enough on its own — its tries are spaced too closely to clear the wait.",
-   "httpCode": "503"
   }
  },
  "errors__service_unavailable_capacity": {

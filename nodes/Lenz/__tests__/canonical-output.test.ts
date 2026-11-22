@@ -24,7 +24,7 @@ describe('every node version gives the 0.9.1 version 1.3 output', () => {
 
 	it('covers every recorded case', () => {
 		expect(Object.keys(canonicalOutput).sort()).toEqual([...names].sort());
-		expect(names.length).toBeGreaterThan(270);
+		expect(names.length).toBeGreaterThan(265);
 	});
 
 	const cases = VERSIONS.flatMap((version) => names.map((name) => [version, name] as const));

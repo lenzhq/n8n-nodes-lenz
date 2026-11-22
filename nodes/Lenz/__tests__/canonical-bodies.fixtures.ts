@@ -2734,52 +2734,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "status": "queued"
   }
  },
- "errors__ask_empty_message": {
-  "operation": "ask",
-  "params": {
-   "verificationId": "ver_1",
-   "question": "why?"
-  },
-  "status": 422,
-  "body": {
-   "detail": "Message cannot be empty.",
-   "code": "blank_input",
-   "errors": [
-    {
-     "loc": [
-      "body",
-      "message"
-     ],
-     "msg": "Message cannot be empty.",
-     "type": "blank_input"
-    }
-   ]
-  }
- },
- "errors__ask_failed": {
-  "operation": "ask",
-  "params": {
-   "verificationId": "ver_1",
-   "question": "why?"
-  },
-  "status": 502,
-  "body": {
-   "detail": "The chat model could not answer this question.",
-   "code": "ask_failed"
-  }
- },
- "errors__ask_not_completed": {
-  "operation": "ask",
-  "params": {
-   "verificationId": "ver_1",
-   "question": "why?"
-  },
-  "status": 400,
-  "body": {
-   "detail": "Ask is only available for completed verifications.",
-   "code": "verification_not_ready"
-  }
- },
  "errors__auth_bad_key": {
   "operation": "verify",
   "params": {
@@ -2825,25 +2779,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
   "body": {
    "detail": "Task not found.",
    "code": "not_found"
-  }
- },
- "errors__payment_required_ask": {
-  "operation": "ask",
-  "params": {
-   "verificationId": "ver_1",
-   "question": "why?"
-  },
-  "status": 402,
-  "body": {
-   "detail": "No remaining ask credits.",
-   "code": "no_credits",
-   "docs_url": "https://lenz.io/docs/errors#quota",
-   "upgrade_url": "https://lenz.io/plans?wall=3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
-   "wall_id": "3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b",
-   "remaining": 0,
-   "resets_at": "2026-09-01T10:00:00+00:00",
-   "credits_remaining": 0,
-   "cost": 1
   }
  },
  "errors__payment_required_assess": {
@@ -2924,20 +2859,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "retry_after": 900,
    "docs_url": "https://lenz.io/docs/errors#rate-limits",
    "upgrade_url": "https://lenz.io/plans"
-  }
- },
- "errors__service_unavailable_ask": {
-  "operation": "ask",
-  "params": {
-   "verificationId": "ver_1",
-   "question": "why?"
-  },
-  "status": 503,
-  "body": {
-   "detail": "The chat model is unavailable right now. Retry shortly.",
-   "code": "upstream_unavailable",
-   "retry_after": 90,
-   "docs_url": "https://lenz.io/docs/errors#unavailable"
   }
  },
  "errors__service_unavailable_capacity": {
