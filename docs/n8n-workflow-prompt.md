@@ -64,14 +64,6 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 | `select` | Resolve a needs-input interrupt by picking which offered claims to verify | `taskId`**\***, `selectedClaims`**\*** |
 | `verifyBatch` | Submit up to 20 claims for deep verification at once, without waiting | `batchClaims`, `webhookUrl`, `visibility`, `depth`, `language` |
 
-### `resource: "askResource"` — Ask
-
-| `operation` | What it does | Parameters |
-|---|---|---|
-| `askHistory` | Retrieve the follow-up conversation, how many questions were used and whether another can be asked | `verificationId`**\*** |
-| `resetAsk` | Delete the follow-up conversation stored for a verification | `verificationId`**\*** |
-| `ask` | Ask a grounded follow-up question about a completed Verify (Deep) result | `verificationId`**\***, `question`**\***, `language` |
-
 ### `resource: "account"` — Account
 
 | `operation` | What it does | Parameters |
@@ -97,8 +89,7 @@ regenerated when the node changes.
 **`verify`** — the full multi-model pipeline (research → debate → adjudication).
 Worth it when a wrong answer is expensive and someone will want to see the
 reasoning: publishing, legal or medical copy, anything a customer sees unedited.
-It returns citations, an executive summary, and a `verification_id` you can ask
-follow-up questions about. Do not put a `verify` on a path that needs to respond
+It returns citations, an executive summary, and a `verification_id`. Do not put a `verify` on a path that needs to respond
 quickly — it is the slowest thing here by two orders of magnitude, which is a
 long time inside a webhook. It also gives up if the pipeline overruns, returning
 `status: "timeout"` rather than a verdict; see the branching rule below.
@@ -360,7 +351,7 @@ it later. Add an error branch for it only if the user asked for one.
    Two limits on this rule, both of which matter more than the rule:
 
    - **Only `assess` and `verify` emit `passed`.** `extract`, `verifyBatch`,
-     `ask`, `usage`, `select`, the `verifyStatus` poll and every list or delete
+     `usage`, `select`, the `verifyStatus` poll and every list or delete
      operation do not. Do not put an IF on `passed` after one of those — the
      field is `undefined` and every item takes the false branch. A workflow that
      ends in "list my verifications" is finished when it has listed them.
@@ -372,12 +363,11 @@ it later. Add an error branch for it only if the user asked for one.
      `passed` reports every one of those as "the claim is false" — a provider
      outage becomes a debunking. Gate on `status` first, route the non-verdict
      statuses somewhere of their own, and only then branch on `passed`.
-7. **`language` is an ISO 639-1 code, or `auto` on five operations.** Leave it
+7. **`language` is an ISO 639-1 code, or `auto` on four operations.** Leave it
    out for English. `auto` answers in the language of the submitted text, and is
-   accepted by `assess`, `verify`, `ask`, `extract` and `reviewDraft` only; on `extract` it means
-   the language of the text (of the page when the input is a URL), English for a text too short to tell; on `ask` it means
-   the language of the claim being discussed, on `reviewDraft` the language of
-   the draft (one language for the whole review), and on `assess` with several claims one
+   accepted by `assess`, `verify`, `extract` and `reviewDraft` only; on `extract` it means
+   the language of the text (of the page when the input is a URL), English for a text too short to tell;
+   on `reviewDraft` the language of the draft (one language for the whole review), and on `assess` with several claims one
    language is chosen for the whole request, so name a code for a list in mixed
    languages. Select, Verify Batch and Check Citations need a code, not `auto`.
 

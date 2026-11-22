@@ -1423,7 +1423,6 @@ const CODELESS = new Set([
 const ERROR_ECHO_CODES = new Set([
 	'framing_failed',
 	'extraction_failed',
-	'ask_failed',
 	'private_claim',
 	'invalid_selection',
 	'no_selection_pending',
@@ -1588,11 +1587,9 @@ export function errorBodyAsNodeReads(
 			out.detail = 'texts is required and must be non-empty.';
 		}
 	}
-	// Assess sent `too_many_items`; Ask sent no code for an unfinished
-	// verification.
+	// Assess sent `too_many_items`.
 	const codeless =
-		(CODELESS.has(code) && !(code === 'too_many_items' && path === '/assess')) ||
-		(code === 'verification_not_ready' && path.startsWith('/ask/'));
+		CODELESS.has(code) && !(code === 'too_many_items' && path === '/assess');
 	if (codeless) delete out.code;
 	delete out.errors;
 	nodeWaitAndLink(out, status);
@@ -1756,10 +1753,6 @@ export class Lenz implements INodeType {
 						value: 'account',
 					},
 					{
-						name: 'Ask',
-						value: 'askResource',
-					},
-					{
 						name: 'Claim',
 						value: 'claim',
 					},
@@ -1919,36 +1912,6 @@ export class Lenz implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				displayOptions: {
-					show: { resource: ['askResource'], '@version': [{ _cnd: { gte: 1.1 } }] },
-				},
-				options: [
-					{
-						name: 'Get History',
-						value: 'askHistory',
-						description: 'Retrieve the follow-up conversation, how many questions were used and whether another can be asked',
-						action: 'Get ask history for a verification',
-					},
-					{
-						name: 'Reset History',
-						value: 'resetAsk',
-						description: 'Delete the follow-up conversation stored for a verification',
-						action: 'Reset ask history for a verification',
-					},
-					{
-						name: 'Send',
-						value: 'ask',
-						description: 'Ask a grounded follow-up question about a completed Verify (Deep) result',
-						action: 'Ask a follow up question',
-					},
-				],
-				default: 'ask',
-			},
-			{
-				displayName: 'Operation',
-				name: 'operation',
-				type: 'options',
-				noDataExpression: true,
-				displayOptions: {
 					show: { resource: ['account'], '@version': [{ _cnd: { gte: 1.1 } }] },
 				},
 				options: [
@@ -1980,12 +1943,6 @@ export class Lenz implements INodeType {
 					show: { '@version': [{ _cnd: { lt: 1.1 } }] },
 				},
 				options: [
-					{
-						name: 'Ask Follow-Up',
-						value: 'ask',
-						description: 'Ask a grounded follow-up question about a completed Verify (Deep) result',
-						action: 'Ask a follow up question',
-					},
 					{
 						name: 'Assess (Fast)',
 						value: 'assess',
@@ -2202,27 +2159,13 @@ export class Lenz implements INodeType {
 				displayOptions: {
 					show: {
 						operation: [
-							'ask',
-							'askHistory',
 							'deleteVerification',
 							'getVerification',
 							'listRelated',
-							'resetAsk',
 						],
 					},
 				},
 				description: 'The verification_id from a successful Verify (Deep) result. A timed-out or needs-input result returns a task_id instead, which won\'t work here.',
-			},
-			{
-				displayName: 'Question',
-				name: 'question',
-				type: 'string',
-				default: '',
-				required: true,
-				displayOptions: {
-					show: { operation: ['ask'] },
-				},
-				description: 'The follow-up question, answered from the verification full research and evidence',
 			},
 			{
 				displayName: 'Task ID',
@@ -2740,10 +2683,10 @@ export class Lenz implements INodeType {
 				type: 'string',
 				default: '',
 				placeholder: 'Es',
-				description: 'Optional ISO 639-1 response language code. Defaults to English. Assess, Verify, Ask, Extract and Review Draft also accept `auto`, which answers in the language of the submitted text (for Extract, the language of the text, or of the page when the input is a URL, with English for a text too short to tell; for Ask, the language of the claim being discussed; for Review Draft, the language of the draft, one language for the whole review). With several claims in one Assess request, Auto picks one language for the whole request, the one most items agree on and otherwise English; enter a language code to avoid that for a list in mixed languages. Select, Verify Batch and Check Citations need a language code, not `auto`.',
+				description: 'Optional ISO 639-1 response language code. Defaults to English. Assess, Verify, Extract and Review Draft also accept `auto`, which answers in the language of the submitted text (for Extract, the language of the text, or of the page when the input is a URL, with English for a text too short to tell; for Review Draft, the language of the draft, one language for the whole review). With several claims in one Assess request, Auto picks one language for the whole request, the one most items agree on and otherwise English; enter a language code to avoid that for a list in mixed languages. Select, Verify Batch and Check Citations need a language code, not `auto`.',
 				displayOptions: {
 					show: {
-						operation: ['ask', 'assess', 'extract', 'verify', 'verifyBatch', 'reviewDraft', 'checkCitations'],
+						operation: ['assess', 'extract', 'verify', 'verifyBatch', 'reviewDraft', 'checkCitations'],
 					},
 				},
 			},
@@ -2848,9 +2791,9 @@ export class Lenz implements INodeType {
 		// position alone, the second run would reuse the first run's key with
 		// different text and the API would reject it (422, or 409 while the first
 		// is still in flight). The path belongs in the fingerprint for the same
-		// reason the body does: Ask Follow-Up and Select Claims carry the thing
-		// they act on in the URL, so asking one question of two verifications is
-		// two identical bodies and must not be one key.
+		// reason the body does: Select Claims carries the thing it acts on in the
+		// URL, so selecting claims across different tasks produces identical bodies
+		// that must not share one key.
 		// The node's identity is HASHED into the key, never written into it raw.
 		// Node refuses to send a header value containing anything above U+00FF —
 		// verified: `Prüfung` and `Vérification` are accepted (Latin-1 passes),
@@ -3732,54 +3675,6 @@ export class Lenz implements INodeType {
 						responseData.message =
 							'Claims were found, but none fall within the focus. Widen or reword it and run again — the unfocused claims are deliberately not substituted.';
 					}
-				} else if (operation === 'ask') {
-					const verificationId = readText('verificationId', itemIndex);
-					const question = readText('question', itemIndex);
-					if (!verificationId || !question) {
-						returnData.push({
-							json: { skipped: true, reason: 'empty_input' },
-							pairedItem: { item: itemIndex },
-						});
-						continue;
-					}
-
-					const body: IDataObject = { message: question };
-					if (language) {
-						body.language = language;
-					}
-					// Billable, and the only one where paying twice is also visible in
-					// the product: an unkeyed retry asks again, so the question and a
-					// second answer join the conversation that Get Ask History returns
-					// and that the next follow-up reads as context. With the key, Lenz
-					// replays the first answer instead. A retry that arrives while the
-					// first question is still being answered gets a 409: there is no
-					// answer yet to replay.
-					const reply = await lenzRequest('POST', `/ask/${encodeURIComponent(verificationId)}`, body, {
-						idempotent: { operation, itemIndex },
-					});
-					responseData = {
-						answer: reply.content ?? '',
-					};
-				} else if (operation === 'askHistory') {
-					const verificationId = readText('verificationId', itemIndex);
-					if (!verificationId) {
-						returnData.push({
-							json: { skipped: true, reason: 'empty_input' },
-							pairedItem: { item: itemIndex },
-						});
-						continue;
-					}
-					responseData = await lenzRequest('GET', `/ask/${encodeURIComponent(verificationId)}`);
-				} else if (operation === 'resetAsk') {
-					const verificationId = readText('verificationId', itemIndex);
-					if (!verificationId) {
-						returnData.push({
-							json: { skipped: true, reason: 'empty_input' },
-							pairedItem: { item: itemIndex },
-						});
-						continue;
-					}
-					responseData = await lenzRequest('DELETE', `/ask/${encodeURIComponent(verificationId)}`);
 				} else if (operation === 'getVerification') {
 					const verificationId = readText('verificationId', itemIndex);
 					if (!verificationId) {

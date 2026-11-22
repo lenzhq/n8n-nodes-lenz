@@ -392,10 +392,6 @@ describe('Lenz node - what an expression hands a text field', () => {
 		['getVerification', { verificationId: undefined }],
 		['deleteVerification', { verificationId: undefined }],
 		['listRelated', { verificationId: undefined }],
-		['askHistory', { verificationId: undefined }],
-		['resetAsk', { verificationId: undefined }],
-		['ask', { verificationId: undefined, question: 'Why?' }],
-		['ask', { verificationId: 'ver_1', question: undefined }],
 		['getReview', { reviewId: undefined }],
 		['getCitationCheck', { citecheckId: undefined }],
 	];
@@ -470,9 +466,6 @@ describe('Lenz node - what an expression hands a text field', () => {
 		['getVerification', { verificationId: 'a/b?c' }, '/verifications/a%2Fb%3Fc'],
 		['deleteVerification', { verificationId: 'a/b' }, '/verifications/a%2Fb'],
 		['listRelated', { verificationId: 'a/b' }, '/verifications/a%2Fb/related'],
-		['askHistory', { verificationId: 'a/b' }, '/ask/a%2Fb'],
-		['resetAsk', { verificationId: 'a/b' }, '/ask/a%2Fb'],
-		['ask', { verificationId: 'a/b', question: 'Why?' }, '/ask/a%2Fb'],
 		['verifyStatus', { taskId: 'a/b' }, '/verify/status/a%2Fb'],
 	])('%s encodes the ID into the path', async (operation, params, path) => {
 		const { calls } = await runNode({ operation, ...params }, () => ({ status: 'processing' }), true);
@@ -1390,7 +1383,7 @@ describe('Lenz node - Extract Claims', () => {
 	});
 });
 
-// `auto` is a request value the API understands on assess, verify, ask and extract. The
+// `auto` is a request value the API understands on assess, verify and extract. The
 // field is free text, so the node has to send it exactly as typed, and keep
 // sending no `language` key at all when the field is empty.
 describe('Lenz node - Language "auto"', () => {
@@ -1404,7 +1397,6 @@ describe('Lenz node - Language "auto"', () => {
 	const assessResponder: Responder = () => ({
 		claims: [{ claim: 'A', verdict: 'True', confidence: 'high', verification_url: null }],
 	});
-	const askResponder: Responder = () => ({ role: 'expert', content: 'An answer.' });
 	const extractResponder: Responder = () => ({
 		status: 'ok',
 		language: 'de',
@@ -1414,7 +1406,6 @@ describe('Lenz node - Language "auto"', () => {
 	const cases: Array<[string, Record<string, unknown>, Responder, string]> = [
 		['assess', { operation: 'assess', text: 'Berlin ist die Hauptstadt.' }, assessResponder, '/assess'],
 		['verify', { operation: 'verify', claim: 'Berlin ist die Hauptstadt.' }, verifyResponder, '/verify'],
-		['ask', { operation: 'ask', verificationId: 'ver_1', question: 'Warum?' }, askResponder, '/ask/ver_1'],
 		['extract', { operation: 'extract', text: 'Berlin ist die Hauptstadt.' }, extractResponder, '/extract'],
 	];
 
@@ -1425,7 +1416,7 @@ describe('Lenz node - Language "auto"', () => {
 		expect(field?.type).toBe('string');
 		expect(field?.default).toBe('');
 		expect(field?.description).toContain('`auto`');
-		expect(field?.description).toContain('Assess, Verify, Ask, Extract and Review Draft');
+		expect(field?.description).toContain('Assess, Verify, Extract and Review Draft');
 	});
 
 	it.each(cases)('sends auto unchanged as body.language on %s', async (_op, params, responder, url) => {
@@ -1447,54 +1438,6 @@ describe('Lenz node - Language "auto"', () => {
 		const submit = calls.find((c) => c.method === 'POST' && c.url === url);
 		expect(submit?.body).toBeDefined();
 		expect(submit?.body as IDataObject).not.toHaveProperty('language');
-	});
-});
-
-describe('Lenz node - Ask Follow-Up', () => {
-	it('returns the answer text from a completed verification', async () => {
-		const responder: Responder = (options) => {
-			expect(options.method).toBe('POST');
-			expect(options.url).toBe('/ask/ver_123');
-			expect(options.body).toEqual({ message: 'Which source is strongest?' });
-			return { role: 'expert', content: 'Source X is strongest.' };
-		};
-		const { output } = await runNode(
-			{ operation: 'ask', verificationId: 'ver_123', question: 'Which source is strongest?' },
-			responder,
-		);
-		expect(output[0].json).toEqual({ answer: 'Source X is strongest.' });
-	});
-
-	it('returns the stored conversation and quota for Get Ask History', async () => {
-		const responder: Responder = (options) => {
-			expect(options.method).toBe('GET');
-			expect(options.url).toBe('/ask/ver_123');
-			return {
-				messages: [{ role: 'user', content: 'Why?', created_at: '2026-08-01T00:00:00Z' }],
-				exchanges_used: 1,
-				exchange_limit: 10,
-				can_send: true,
-			};
-		};
-		const { output } = await runNode(
-			{ operation: 'askHistory', verificationId: 'ver_123' },
-			responder,
-		);
-		expect((output[0].json as IDataObject).exchanges_used).toBe(1);
-		expect((output[0].json as IDataObject).can_send).toBe(true);
-	});
-
-	it('deletes the stored conversation for Reset Ask History', async () => {
-		const responder: Responder = (options) => {
-			expect(options.method).toBe('DELETE');
-			expect(options.url).toBe('/ask/ver_123');
-			return { ok: true };
-		};
-		const { output } = await runNode(
-			{ operation: 'resetAsk', verificationId: 'ver_123' },
-			responder,
-		);
-		expect(output[0].json).toEqual({ ok: true });
 	});
 });
 
@@ -1818,38 +1761,6 @@ describe('Lenz node - idempotency', () => {
 		const runB = await runNode({ operation: 'assess', text: 'second batch' }, assessResponder);
 		expect(runA.calls[0].headers?.['Idempotency-Key']).not.toBe(
 			runB.calls[0].headers?.['Idempotency-Key'],
-		);
-	});
-
-	it('sends an Idempotency-Key on Ask Follow-Up, which is billable too', async () => {
-		const { calls } = await runNode(
-			{ operation: 'ask', verificationId: 'ver_123', question: 'Which source is strongest?' },
-			() => ({ role: 'expert', content: 'Source X is strongest.' }),
-		);
-		expect(calls[0].headers?.['Idempotency-Key']).toMatch(
-			/^n8n:exec-1:[0-9a-z]+:ask:0:[0-9a-z]+$/,
-		);
-	});
-
-	it('asks the same question of two verifications under two different keys', async () => {
-		// The verification being asked about is in the URL, not the body, so a key
-		// built from the body alone would be the same for both, and the second
-		// question would be taken for a retry of the first. Loop Over Items and
-		// AI Agent tool calls make this ordinary: each re-execution restarts the
-		// item index at 0, so only the request itself can tell them apart — and
-		// the README recommends keeping the question fixed and varying only the
-		// verification, which is exactly this shape.
-		const responder: Responder = () => ({ role: 'expert', content: 'Because.' });
-		const one = await runNode(
-			{ operation: 'ask', verificationId: 'ver_1', question: 'Why?' },
-			responder,
-		);
-		const two = await runNode(
-			{ operation: 'ask', verificationId: 'ver_2', question: 'Why?' },
-			responder,
-		);
-		expect(one.calls[0].headers?.['Idempotency-Key']).not.toBe(
-			two.calls[0].headers?.['Idempotency-Key'],
 		);
 	});
 
@@ -4315,7 +4226,7 @@ describe('Lenz node - the collapsed failure codes and a quick No Public Record r
 
 	it('a 502 internal from another endpoint is left as it is', async () => {
 		const { output } = await runNode(
-			{ operation: 'ask', verificationId: 'ver_1', question: 'q' },
+			{ operation: 'getVerification', verificationId: 'ver_1' },
 			() => {
 				throw apiError(502, { detail: 'Failed', code: 'internal' });
 			},

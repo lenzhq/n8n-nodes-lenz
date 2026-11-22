@@ -131,7 +131,7 @@ describe('every node version gives the 0.8.0 output from the 2026-10-11 shape', 
 
 	it('covers every recorded case', () => {
 		expect(Object.keys(output080).sort()).toEqual([...names].sort());
-		expect(names.length).toBeGreaterThan(270);
+		expect(names.length).toBeGreaterThan(265);
 		for (const name of Object.keys(KNOWN)) expect(names).toContain(name);
 	});
 
