@@ -26,7 +26,10 @@ import { runRecordedCase } from './recorded-harness';
 void sleep;
 
 // Every place `actual` lacks a key `expected` has, or holds another value.
-// Paths read like `[0].claims[1].verdict`. Keys only `actual` has are allowed.
+// Paths read like `[0].claims[1].verdict`. Keys only `actual` has are allowed,
+// and retired output fields are excluded.
+const RETIRED_FIELDS = new Set(['domain', 'entities', 'key_entities']);
+
 function differences(actual: unknown, expected: unknown, path = ''): string[] {
 	if (Array.isArray(expected)) {
 		if (!Array.isArray(actual) || actual.length !== expected.length) return [path];
@@ -34,11 +37,12 @@ function differences(actual: unknown, expected: unknown, path = ''): string[] {
 	}
 	if (expected && typeof expected === 'object') {
 		if (!actual || typeof actual !== 'object' || Array.isArray(actual)) return [path];
-		return Object.entries(expected).flatMap(([k, v]) =>
-			k in (actual as object)
+		return Object.entries(expected).flatMap(([k, v]) => {
+			if (RETIRED_FIELDS.has(k)) return [];
+			return k in (actual as object)
 				? differences((actual as IDataObject)[k], v, `${path}.${k}`)
-				: [`${path}.${k}`],
-		);
+				: [`${path}.${k}`];
+		});
 	}
 	return actual === expected ? [] : [path];
 }

@@ -500,8 +500,6 @@ describe('Lenz node - Verify (Deep)', () => {
 			executive_summary: 'This claim is false.',
 			suggested_rewrite: 'The figure is closer to 4 million.',
 			warnings: ['stale source'],
-			domain: 'Finance',
-			entities: [{ name: 'Acme', qid: 'Q42' }],
 			presumed_intent: 'informative',
 			language: 'en',
 			visibility: 'private',
@@ -680,15 +678,15 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(submitBody?.supplied_sources).toBeUndefined();
 	});
 
-	it('surfaces the fields the API added: key_finding, domain, entities, warnings, visibility', async () => {
+	it('surfaces the fields the API added: key_finding, warnings, visibility', async () => {
 		const { output } = await runNode(
 			{ operation: 'verify', claim: 'Some claim' },
 			verifyResponder(completedStatus),
 		);
 		const json = output[0].json as IDataObject;
 		expect(json.key_finding).toBe('The figure is off by an order of magnitude.');
-		expect(json.domain).toBe('Finance');
-		expect(json.entities).toEqual([{ name: 'Acme', qid: 'Q42' }]);
+		expect(json.domain).toBeUndefined();
+		expect(json.entities).toBeUndefined();
 		expect(json.warnings).toEqual(['stale source']);
 		expect(json.visibility).toBe('private');
 		expect(json.language).toBe('en');
@@ -843,8 +841,8 @@ describe('Lenz node - Verify (Deep)', () => {
 			status: 'needs_input',
 			reason: 'multi_claim',
 			claims: [
-				{ claim: 'Claim one', domain: 'General' },
-				{ claim: 'Claim two', domain: 'Finance' },
+				{ claim: 'Claim one' },
+				{ claim: 'Claim two' },
 			],
 		});
 		const { output } = await runNode({ operation: 'verify', claim: 'two claims' }, responder);
@@ -854,8 +852,8 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.task_id).toBe('task_1');
 		// `text` is this node's name for an option's claim.
 		expect(json.claims).toEqual([
-			{ claim: 'Claim one', domain: 'General', text: 'Claim one' },
-			{ claim: 'Claim two', domain: 'Finance', text: 'Claim two' },
+			{ claim: 'Claim one', text: 'Claim one' },
+			{ claim: 'Claim two', text: 'Claim two' },
 		]);
 		expect(json.message).toContain('Select Claims');
 		expect(json).toHaveProperty('candidates', []);
@@ -1258,7 +1256,6 @@ describe('Lenz node - Extract Claims', () => {
 			return {
 				status: 'ready',
 				claims: [{ claim: 'Claim A' }, { claim: 'Claim B' }],
-				domain: 'General',
 			};
 		};
 		const { output } = await runNode({ operation: 'extract', text: 'Claim A. Claim B.' }, responder);
@@ -1266,7 +1263,6 @@ describe('Lenz node - Extract Claims', () => {
 			JSON.stringify({
 				status: 'ready',
 				claims: [{ claim: 'Claim A' }, { claim: 'Claim B' }],
-				domain: 'General',
 				claim: 'Claim A',
 				identified_claims: ['Claim A', 'Claim B'],
 				candidate_claims: [],
@@ -4286,7 +4282,6 @@ describe('Lenz node - the collapsed failure codes and a quick No Public Record r
 						status: 'ready',
 						claim: 'Revenue was $10M.',
 						identified_claims: ['Revenue was $10M.'],
-						domain: 'Finance',
 					};
 				},
 				false,

@@ -3071,17 +3071,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
      "positions": null
     }
    ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
-    }
-   ],
    "presumed_intent": "Verify reported figures",
    "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year."
   }
@@ -3115,17 +3104,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
      "positions": null
     }
    ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
-    }
-   ],
    "presumed_intent": "Verify reported figures",
    "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year."
   }
@@ -3139,17 +3117,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
   "body": {
    "status": "no_checkable_claim",
    "claims": [],
-   "domain": "",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
-    }
-   ],
    "presumed_intent": "Verify reported figures",
    "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year."
   }
@@ -3170,17 +3137,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     {
      "claim": "Beta fell 3% last year.",
      "positions": null
-    }
-   ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
     }
    ],
    "presumed_intent": "Verify reported figures",
@@ -3205,17 +3161,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
        "text": "Alpha rose 5% in 2024."
       }
      ]
-    }
-   ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
     }
    ],
    "presumed_intent": "Verify reported figures",
@@ -3252,17 +3197,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
      ]
     }
    ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
-    }
-   ],
    "presumed_intent": "Verify reported figures",
    "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year."
   }
@@ -3297,17 +3231,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
      ]
     }
    ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
-    }
-   ],
    "presumed_intent": "Verify reported figures",
    "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year."
   }
@@ -3321,8 +3244,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
   "body": {
    "status": "no_match",
    "claims": [],
-   "domain": "",
-   "key_entities": [],
    "presumed_intent": "",
    "original_input": "Alpha rose 5% in 2024. Beta fell 3% last year."
   }
@@ -3336,8 +3257,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
   "body": {
    "status": "no_checkable_claim",
    "claims": [],
-   "domain": "",
-   "key_entities": [],
    "presumed_intent": "",
    "original_input": "What a lovely day."
   }
@@ -3356,17 +3275,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
      "positions": null
     }
    ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
-    }
-   ],
    "presumed_intent": "Verify reported figures",
    "original_input": "Alpha rose 5% in 2024."
   }
@@ -3383,17 +3291,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     {
      "claim": "Alpha rose 5% in 2024.",
      "positions": null
-    }
-   ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
     }
    ],
    "presumed_intent": "Verify reported figures",
@@ -3416,17 +3313,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     {
      "claim": "Beta fell 3% last year.",
      "positions": null
-    }
-   ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
     }
    ],
    "presumed_intent": "Verify reported figures",
@@ -3476,17 +3362,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
        "text": "Alpha rose 5% in 2024."
       }
      ]
-    }
-   ],
-   "domain": "Economics",
-   "key_entities": [
-    {
-     "name": "Alpha",
-     "type": "organization"
-    },
-    {
-     "name": "Beta",
-     "type": "organization"
     }
    ],
    "presumed_intent": "Verify reported figures",
@@ -7029,8 +6904,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": "en",
       "visibility": "private",
       "depth": "standard",
-      "domain": "",
-      "entities": [],
       "verdict": "False",
       "confidence": "high",
       "lenz_score": 2,
@@ -7084,8 +6957,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": "en",
       "visibility": "private",
       "depth": "standard",
-      "domain": "",
-      "entities": [],
       "verdict": "False",
       "confidence": "high",
       "lenz_score": 2,
@@ -7305,8 +7176,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": "en",
       "visibility": "private",
       "depth": "standard",
-      "domain": "",
-      "entities": [],
       "verdict": "False",
       "confidence": "high",
       "lenz_score": 2,
@@ -7385,8 +7254,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": null,
       "visibility": null,
       "depth": null,
-      "domain": null,
-      "entities": [],
       "verdict": null,
       "confidence": null,
       "lenz_score": null,
@@ -8611,8 +8478,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": "en",
       "visibility": "private",
       "depth": "standard",
-      "domain": "",
-      "entities": [],
       "verdict": "False",
       "confidence": "high",
       "lenz_score": 2,
@@ -8760,8 +8625,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": "en",
       "visibility": "private",
       "depth": "standard",
-      "domain": "",
-      "entities": [],
       "verdict": "False",
       "confidence": "high",
       "lenz_score": 2,
@@ -9110,8 +8973,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": "en",
       "visibility": "private",
       "depth": "standard",
-      "domain": "",
-      "entities": [],
       "verdict": "False",
       "confidence": "high",
       "lenz_score": 2,
@@ -9182,8 +9043,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": null,
       "visibility": null,
       "depth": null,
-      "domain": null,
-      "entities": [],
       "verdict": null,
       "confidence": null,
       "lenz_score": null,
@@ -9564,8 +9423,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
       "language": null,
       "visibility": null,
       "depth": null,
-      "domain": null,
-      "entities": [],
       "verdict": null,
       "confidence": null,
       "lenz_score": null,
@@ -10123,8 +9980,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     {
      "verification_id": "0cce5f94",
      "claim": "The Earth is round.",
-     "domain": "Science",
-     "entities": [],
      "verdict": "True",
      "confidence": "high",
      "lenz_score": 9,
@@ -10138,8 +9993,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     {
      "verification_id": "0f67b4fc",
      "claim": "The Earth is round.",
-     "domain": "Science",
-     "entities": [],
      "verdict": "True",
      "confidence": "high",
      "lenz_score": 9,
@@ -10168,8 +10021,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     {
      "verification_id": "0cce5f94",
      "claim": "The Earth is round.",
-     "domain": "Science",
-     "entities": [],
      "verdict": "True",
      "confidence": "high",
      "lenz_score": 9,
@@ -10198,8 +10049,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     {
      "verification_id": "0cce5f94",
      "claim": "The Earth is round.",
-     "domain": "Science",
-     "entities": [],
      "verdict": "True",
      "confidence": "high",
      "lenz_score": 9,
@@ -10256,8 +10105,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     {
      "verification_id": "0cce5f94",
      "claim": "The Earth is round.",
-     "domain": "Science",
-     "entities": [],
      "verdict": "True",
      "confidence": "high",
      "lenz_score": 9,
@@ -10500,13 +10347,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     "claim": "The Earth is round.",
     "visibility": "private",
     "depth": "standard",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "verdict": "True",
     "confidence": "high",
@@ -10598,13 +10438,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     "claim": "The Earth is round.",
     "visibility": "private",
     "depth": "standard",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "verdict": "True",
     "confidence": "high",
@@ -10696,13 +10529,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     "claim": "The Earth is round.",
     "visibility": "private",
     "depth": "standard",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "verdict": "True",
     "confidence": "high",
@@ -10794,13 +10620,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     "claim": "The Earth is round.",
     "visibility": "private",
     "depth": "standard",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "verdict": "True",
     "confidence": "high",
@@ -10892,13 +10711,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     "claim": "The Earth is round.",
     "visibility": "private",
     "depth": "standard",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "verdict": "True",
     "confidence": "high",
@@ -10990,13 +10802,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     "claim": "The Earth is round.",
     "visibility": "private",
     "depth": "standard",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "verdict": "True",
     "confidence": "high",
@@ -11162,12 +10967,10 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "reason": "multi_claim",
    "claims": [
     {
-     "claim": "The Earth is round.",
-     "domain": "Science"
+     "claim": "The Earth is round."
     },
     {
-     "claim": "Water boils at 100C at sea level.",
-     "domain": "Science"
+     "claim": "Water boils at 100C at sea level."
     }
    ],
    "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
@@ -11302,13 +11105,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
     "claim": "The Earth is round.",
     "visibility": "private",
     "depth": "standard",
-    "domain": "Science",
-    "entities": [
-     {
-      "name": "Earth",
-      "qid": null
-     }
-    ],
     "presumed_intent": "Verify a basic scientific fact",
     "verdict": "True",
     "confidence": "high",
@@ -11501,13 +11297,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -11596,13 +11385,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -11690,13 +11472,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -11783,13 +11558,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -11875,13 +11643,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -11970,13 +11731,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -12064,13 +11818,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -12159,13 +11906,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -12253,13 +11993,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -12348,13 +12081,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -12442,13 +12168,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -12537,13 +12256,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -12631,8 +12343,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [],
    "presumed_intent": "",
    "verdict": "True",
    "confidence": "high",
@@ -12687,8 +12397,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [],
    "presumed_intent": "",
    "verdict": "True",
    "confidence": "high",
@@ -12742,8 +12450,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [],
    "presumed_intent": "",
    "verdict": "True",
    "confidence": "high",
@@ -12798,8 +12504,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [],
    "presumed_intent": "",
    "verdict": "True",
    "confidence": "high",
@@ -12853,8 +12557,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [],
    "presumed_intent": "",
    "verdict": "True",
    "confidence": "high",
@@ -12925,8 +12627,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [],
    "presumed_intent": "",
    "verdict": "True",
    "confidence": "high",
@@ -13007,13 +12707,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -13102,13 +12795,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -13265,13 +12951,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "public",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -13348,13 +13027,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "public",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -13430,13 +13102,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "public",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -13525,13 +13190,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "public",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -13643,13 +13301,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",
@@ -13738,13 +13389,6 @@ export const canonicalCases: Record<string, RecordedCase> = {
    "claim": "The Earth is round.",
    "visibility": "private",
    "depth": "standard",
-   "domain": "Science",
-   "entities": [
-    {
-     "name": "Earth",
-     "qid": null
-    }
-   ],
    "presumed_intent": "Verify a basic scientific fact",
    "verdict": "True",
    "confidence": "high",

@@ -191,7 +191,7 @@ a silent false.
 name from `assess`, with a different set of status values:
 
 ```
-{ status: "ready",       identified_claims: [ "Claim A", "Claim B" ], claim: "…", domain: "General" }
+{ status: "ready",       identified_claims: [ "Claim A", "Claim B" ], claim: "…" }
 { status: "not_a_claim", identified_claims: [], claim: "" }
 { status: "no_match",    identified_claims: [], claim: "", message: "…" }
 ```

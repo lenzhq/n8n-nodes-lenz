@@ -943,8 +943,6 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 		suggested_rewrite: typeof result.suggested_rewrite === 'string' ? result.suggested_rewrite : '',
 		warnings: result.warnings ?? [],
 		claim: result.claim ?? '',
-		domain: result.domain ?? '',
-		entities: result.entities ?? [],
 		presumed_intent: result.presumed_intent ?? '',
 		citations: mapCitations(sources),
 		verification_id: result.verification_id ?? null,
