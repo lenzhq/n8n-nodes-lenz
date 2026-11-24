@@ -116,6 +116,7 @@ describe('recorded API responses', () => {
 				status(shapes.statusCompletedSameDay),
 			);
 			expect(json.status).toBe('completed');
+			expect(json.url).toBe('https://lenz.io/c/the-earth-is-round-ab6b91fe');
 			expect(json.modified_at).toBeNull();
 		});
 
@@ -124,6 +125,7 @@ describe('recorded API responses', () => {
 				{ operation: 'verifyStatus', taskId: 'task_1' },
 				status(shapes.statusCompletedCrossesMidnight),
 			);
+			expect(json.url).toBe('https://lenz.io/c/the-earth-is-round-ab6b91fe');
 			expect(json.modified_at).toBe('2026-09-02T00:03:00.000000+00:00');
 			expect(json).not.toHaveProperty('completed_at');
 		});
@@ -135,6 +137,7 @@ describe('recorded API responses', () => {
 			);
 			expect(json.status).toBe('completed');
 			expect(json.verdict).toEqual(expect.any(String));
+			expect(json.url).toBe('https://lenz.io/c/the-earth-is-round-0cce5f94');
 			expect(json).toHaveProperty('modified_at');
 			expect(json).not.toHaveProperty('completed_at');
 		});

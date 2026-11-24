@@ -73,6 +73,7 @@ export const shapes: Record<string, any> = {
    "suggested_rewrite": null,
    "created_at": "2026-09-01T10:00:00.000000+00:00",
    "completed_at": "2026-09-01T16:00:00.000000+00:00",
+   "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
    "sources": [
     {
      "source_name": "NASA",
@@ -157,6 +158,7 @@ export const shapes: Record<string, any> = {
    "suggested_rewrite": null,
    "created_at": "2026-09-01T23:58:00.000000+00:00",
    "completed_at": "2026-09-02T00:03:00.000000+00:00",
+   "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
    "sources": [
     {
      "source_name": "NASA",
@@ -577,6 +579,7 @@ export const shapes: Record<string, any> = {
   "suggested_rewrite": null,
   "created_at": "2026-09-01T10:00:00.000000+00:00",
   "completed_at": "2026-09-01T10:00:00.000000+00:00",
+  "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
   "sources": [
    {
     "source_name": "NASA",
