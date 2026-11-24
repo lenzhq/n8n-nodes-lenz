@@ -10215,6 +10215,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
+     "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "language": "en",
     "modified_at": null
    },
@@ -10229,6 +10230,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
+     "url": "https://lenz.io/c/the-earth-is-round-0f67b4fc",
     "language": "en",
     "modified_at": null
    }
@@ -10249,6 +10251,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
+     "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "language": "en",
     "modified_at": null
    }
@@ -10269,6 +10272,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
+     "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "language": "en",
     "modified_at": null
    }
@@ -10299,6 +10303,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
+     "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "language": "en",
     "modified_at": null
    }
@@ -10495,6 +10500,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "ab6b91fe",
+    "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -10538,6 +10544,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "ab6b91fe",
+    "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -10581,6 +10588,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "ab6b91fe",
+    "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -10624,6 +10632,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "ab6b91fe",
+    "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -10667,6 +10676,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "ab6b91fe",
+    "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -10710,6 +10720,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "ab6b91fe",
+    "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -10954,6 +10965,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "ab6b91fe",
+    "url": "https://lenz.io/c/the-earth-is-round-ab6b91fe",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11097,6 +11109,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11140,6 +11153,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11215,6 +11229,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11258,6 +11273,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11333,6 +11349,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11376,6 +11393,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11451,6 +11469,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11494,6 +11513,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11569,6 +11589,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11612,6 +11633,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11687,6 +11709,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11730,6 +11753,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11788,6 +11812,7 @@ export const canonicalOutput: Record<
     "presumed_intent": "",
     "citations": [],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11814,6 +11839,7 @@ export const canonicalOutput: Record<
     "presumed_intent": "",
     "citations": [],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11855,6 +11881,7 @@ export const canonicalOutput: Record<
     "presumed_intent": "",
     "citations": [],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11881,6 +11908,7 @@ export const canonicalOutput: Record<
     "presumed_intent": "",
     "citations": [],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11930,6 +11958,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -11964,6 +11993,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -12044,6 +12074,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -12087,6 +12118,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -12221,6 +12253,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "public",
     "depth": "standard",
     "language": "en",
@@ -12264,6 +12297,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "public",
     "depth": "standard",
     "language": "en",
@@ -12339,6 +12373,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "public",
     "depth": "standard",
     "language": "en",
@@ -12382,6 +12417,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "visibility": "public",
     "depth": "standard",
     "language": "en",
@@ -12486,6 +12522,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/claim-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",
@@ -12529,6 +12566,7 @@ export const canonicalOutput: Record<
      }
     ],
     "verification_id": "0cce5f94",
+    "url": "https://lenz.io/c/claim-0cce5f94",
     "visibility": "private",
     "depth": "standard",
     "language": "en",

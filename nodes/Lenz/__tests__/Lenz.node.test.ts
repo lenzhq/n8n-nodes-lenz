@@ -492,6 +492,7 @@ describe('Lenz node - Verify (Deep)', () => {
 		status: 'completed',
 		result: {
 			verification_id: 'ver_123',
+			url: 'https://lenz.io/c/some-claim-ver_123',
 			claim: 'Some claim',
 			verdict: 'False',
 			confidence: 'high',
@@ -531,6 +532,7 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.verdict).toBe('False');
 		expect(json.lenz_score).toBe(2);
 		expect(json.verification_id).toBe('ver_123');
+		expect(json.url).toBe('https://lenz.io/c/some-claim-ver_123');
 		// url-less sources are filtered out; the rest keep their full detail
 		expect(json.citations).toEqual([
 			{
@@ -678,7 +680,7 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(submitBody?.supplied_sources).toBeUndefined();
 	});
 
-	it('surfaces the fields the API added: key_finding, warnings, visibility', async () => {
+	it('surfaces the fields the API added: key_finding, warnings, visibility, url', async () => {
 		const { output } = await runNode(
 			{ operation: 'verify', claim: 'Some claim' },
 			verifyResponder(completedStatus),
@@ -689,8 +691,36 @@ describe('Lenz node - Verify (Deep)', () => {
 		expect(json.entities).toBeUndefined();
 		expect(json.warnings).toEqual(['stale source']);
 		expect(json.visibility).toBe('private');
+		expect(json.url).toBe('https://lenz.io/c/some-claim-ver_123');
 		expect(json.language).toBe('en');
 		expect(json.presumed_intent).toBe('informative');
+	});
+
+	it('maps url on completed verifications (and null when absent)', async () => {
+		const withUrl = verifyResponder({
+			status: 'completed',
+			result: {
+				verification_id: 'ver_url',
+				url: 'https://lenz.io/c/test-ver_url',
+				verdict: 'True',
+				confidence: 'high',
+				sources: [],
+			},
+		});
+		const { output: out1 } = await runNode({ operation: 'verify', claim: 'Claim' }, withUrl);
+		expect((out1[0].json as IDataObject).url).toBe('https://lenz.io/c/test-ver_url');
+
+		const withoutUrl = verifyResponder({
+			status: 'completed',
+			result: {
+				verification_id: 'ver_nourl',
+				verdict: 'True',
+				confidence: 'high',
+				sources: [],
+			},
+		});
+		const { output: out2 } = await runNode({ operation: 'verify', claim: 'Claim' }, withoutUrl);
+		expect((out2[0].json as IDataObject).url).toBeNull();
 	});
 
 	it('defaults key_finding to "" on claims that pre-date the field', async () => {

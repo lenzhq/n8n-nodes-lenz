@@ -946,6 +946,7 @@ function mapCompletedVerification(result: IDataObject, includeAudit: boolean): I
 		presumed_intent: result.presumed_intent ?? '',
 		citations: mapCitations(sources),
 		verification_id: result.verification_id ?? null,
+		url: result.url ?? null,
 		visibility: result.visibility ?? '',
 		// The depth this verdict was actually PRODUCED with, which is not
 		// always the depth that was requested: a low request served from an
