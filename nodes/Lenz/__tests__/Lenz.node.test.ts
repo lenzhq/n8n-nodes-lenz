@@ -3786,7 +3786,7 @@ describe('Lenz node - Review hardening', () => {
 	it.each([
 		[{ maxVerifications: '' }, /Max Deep Checks/],
 		[{ maxVerifications: 'five' }, /Max Deep Checks/],
-		[{ maxAssessments: 21 }, /Max Quick Checks/],
+		[{ maxAssessments: 51 }, /Max Quick Checks/],
 		[{ maxCitations: 2.5 }, /Max Citations/],
 	])('refuses option %j before anything is charged', async (options, message) => {
 		const ctx = createContext({ operation: 'reviewDraft', draft: 'x', reviewOptions: options }, noCall);
