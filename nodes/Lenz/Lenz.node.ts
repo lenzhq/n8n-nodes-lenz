@@ -1652,7 +1652,7 @@ function reviewPolicy(
 	if (verdicts) policy.verdicts = verdicts;
 	const confidence = list(options.confidence, 'Deep-Check Confidence');
 	if (confidence) policy.confidence = confidence;
-	const maxAssessments = count(options.maxAssessments, 'Max Quick Checks', 0, 20);
+	const maxAssessments = count(options.maxAssessments, 'Max Quick Checks', 0, 50);
 	if (maxAssessments !== undefined) policy.max_assessments = maxAssessments;
 	const maxVerifications = count(options.maxVerifications, 'Max Deep Checks', 0, 20);
 	if (maxVerifications !== undefined) policy.max_verifications = maxVerifications;
@@ -2513,7 +2513,7 @@ export class Lenz implements INodeType {
 						name: 'maxAssessments',
 						type: 'number',
 						default: 20,
-						typeOptions: { minValue: 0, maxValue: 20 },
+						typeOptions: { minValue: 0, maxValue: 50 },
 						description:
 							"How many of the draft's claims, most check-worthy first, get a quick verdict (1 credit each). 0 checks only the citations.",
 					},
