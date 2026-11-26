@@ -1144,6 +1144,22 @@ describe('Lenz node - Submit Verify Batch', () => {
 		expect((output[0].json as IDataObject).partial).toBe(true);
 	});
 
+	it('emits an empty receipt instead of dropping the item when no tasks are spawned', async () => {
+		const { output } = await runNode(
+			{ operation: 'verifyBatch', batchClaims: { claim: [{ text: 'Claim one' }] } },
+			() => ({ batch_id: 'batch_empty', items: [], partial: true }),
+		);
+		expect(output).toHaveLength(1);
+		expect(output[0]).toEqual({
+			json: {
+				batch_id: 'batch_empty',
+				status: 'empty',
+				partial: true,
+			},
+			pairedItem: { item: 0 },
+		});
+	});
+
 	it('rejects a batch larger than the API maximum before making a request', async () => {
 		const entries = Array.from({ length: 21 }, (_, i) => ({ text: `Claim ${i}` }));
 		const { ctx, httpMock } = createContext(
@@ -1209,6 +1225,22 @@ describe('Lenz node - Select Claims', () => {
 		);
 		expect(output).toHaveLength(2);
 		expect((output[0].json as IDataObject).batch_id).toBe('batch_3');
+	});
+
+	it('emits an empty receipt instead of dropping the item when no tasks are spawned', async () => {
+		const { output } = await runNode(
+			{ operation: 'select', taskId: 'task_1', selectedClaims: ['Claim one'] },
+			() => ({ batch_id: 'batch_select_empty', items: [] }),
+		);
+		expect(output).toHaveLength(1);
+		expect(output[0]).toEqual({
+			json: {
+				batch_id: 'batch_select_empty',
+				status: 'empty',
+				partial: false,
+			},
+			pairedItem: { item: 0 },
+		});
 	});
 
 	it('skips when no claim was selected', async () => {

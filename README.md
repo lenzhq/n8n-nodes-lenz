@@ -47,8 +47,8 @@ Operations are grouped under a **Resource** picker. (Nodes added before v0.1.10 
 | Operation | What it does |
 |---|---|
 | **Get Status** | Polls a submitted verification by `task_id`. Pairs with Verify's **Wait for Completion** toggle and with webhook delivery. |
-| **Select Claims** | Resolves a paused verification (see [Multi-claim input](#multi-claim-input)). |
-| **Submit Batch** | Submits up to 20 claims at once without waiting. Returns one item per spawned task. Each claim can override the batch **Depth**, so one batch can mix 5- and 10-credit checks. |
+| **Select Claims** | Resolves a paused verification (see [Multi-claim input](#multi-claim-input)). Returns one `status: "queued"` item per spawned task (or a single `{ batch_id, status: "empty", partial }` receipt if no tasks were spawned). |
+| **Submit Batch** | Submits up to 20 claims at once without waiting. Returns one `status: "queued"` item per spawned task (or a single `{ batch_id, status: "empty", partial }` receipt if no tasks were spawned). Each claim can override the batch **Depth**, so one batch can mix 5- and 10-credit checks. |
 | **Get** | Retrieves a stored verification report by `verification_id`. |
 | **Get Many** | Lists the verifications stored in your Lenz account, with **Return All** / **Limit**. |
 | **List Related** | Public verifications semantically related to a given one — useful for "see also" surfaces. |
