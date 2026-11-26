@@ -89,7 +89,7 @@ describe('Review resource parameter keys (saved in 0.8.0 workflows)', () => {
 	});
 
 	it('every copy of a shared key keeps one type and never shows twice for an operation', () => {
-		for (const key of ['waitForCompletion', 'maxWaitSeconds', 'webhookUrl', 'operation', 'additionalFields']) {
+		for (const key of ['waitForCompletion', 'maxWaitSeconds', 'webhookUrl', 'operation', 'additionalFields', 'language']) {
 			const copies = props.filter((p) => p.name === key);
 			if (key !== 'operation') {
 				expect(new Set(copies.map((c) => c.type)).size).toBe(1);
