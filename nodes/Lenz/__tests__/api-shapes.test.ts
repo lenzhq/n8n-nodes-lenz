@@ -195,6 +195,10 @@ describe('recorded API responses', () => {
 				['hi', 'Error', 'low', false],
 				['hello', 'Error', 'low', false],
 			]);
+			expect(rows.map((r) => [r.error_code, r.identified_claims, typeof r.hint])).toEqual([
+				['no_claim', [], 'string'],
+				['no_claim', [], 'string'],
+			]);
 		});
 
 		it('maps a mixed wave row by row', async () => {
@@ -203,6 +207,10 @@ describe('recorded API responses', () => {
 			const rows = json.claims as IDataObject[];
 			expect(rows.map((r) => r.verdict)).toEqual(['True', 'Error', 'Error', 'Error']);
 			expect(rows.map((r) => r.passed)).toEqual([true, false, false, false]);
+			expect(rows.map((r) => r.error_code)).toEqual([null, 'no_claim', 'upstream_unavailable', 'framing_failed']);
+			expect(rows.map((r) => r.identified_claims)).toEqual([[], [], [], []]);
+			expect(rows[0].hint).toBeNull();
+			expect(rows.slice(1).every((r) => typeof r.hint === 'string' && r.hint.length > 0)).toBe(true);
 		});
 
 		it('maps a single checked claim', async () => {
@@ -213,6 +221,9 @@ describe('recorded API responses', () => {
 				verdict: 'True',
 				confidence: 'high',
 				passed: true,
+				error_code: null,
+				identified_claims: [],
+				hint: null,
 			});
 		});
 	});

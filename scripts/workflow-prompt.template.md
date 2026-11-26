@@ -116,7 +116,7 @@ for Mixed, Mostly False and False, and `null` for the verdict `No Public Record`
 **`assess`** returns **one item containing every claim it found**:
 
 ```
-{ status: "ok", claims: [ { claim, verdict, confidence, passed, language, verification_url, rationale, searched_pages }, ... ] }
+{ status: "ok", claims: [ { claim, verdict, confidence, passed, language, verification_url, rationale, searched_pages, error_code, identified_claims, hint }, ... ] }
 ```
 
 `rationale` is a reviewer's note, not a checked source, and can be `null`. Put

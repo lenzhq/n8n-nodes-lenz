@@ -892,7 +892,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": "https://lenz.io/api/v1/verifications/b452a842",
       "rationale": "The claim is verified.",
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -928,7 +931,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -950,7 +956,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -972,7 +981,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": "no_claim",
+      "identified_claims": [],
+      "hint": "The input is a greeting. Send one factual claim, or run the text through /extract to enumerate its claims."
      },
      {
       "claim": "hello",
@@ -982,7 +994,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": "no_claim",
+      "identified_claims": [],
+      "hint": "The input is a greeting. Send one factual claim, or run the text through /extract to enumerate its claims."
      }
     ]
    }
@@ -1004,7 +1019,13 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [
+       "Second claim.",
+       "Third claim."
+      ],
+      "hint": null
      },
      {
       "claim": "A plain claim.",
@@ -1014,7 +1035,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -1036,7 +1060,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "hello there",
@@ -1046,7 +1073,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": "no_claim",
+      "identified_claims": [],
+      "hint": "The input is a greeting. Send one factual claim, or run the text through /extract to enumerate its claims."
      },
      {
       "claim": "vendor is down",
@@ -1056,7 +1086,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": "upstream_unavailable",
+      "identified_claims": [],
+      "hint": "A model provider was unavailable for this item. Retry it; nothing was charged."
      },
      {
       "claim": "cannot frame",
@@ -1066,7 +1099,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": "internal",
+      "identified_claims": [],
+      "hint": "This item could not be processed; retrying it as-is will not help. Send it rephrased as one factual statement; nothing was charged."
      }
     ]
    }
@@ -1088,7 +1124,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": "The river runs through the city.",
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -1122,7 +1161,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": "The registry lists 4,200 filings for 2024 and has not revised the figure.",
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -1144,7 +1186,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 1 is documented.",
@@ -1154,7 +1199,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 2 is documented.",
@@ -1164,7 +1212,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 3 is documented.",
@@ -1174,7 +1225,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 4 is documented.",
@@ -1184,7 +1238,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 5 is documented.",
@@ -1194,7 +1251,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 6 is documented.",
@@ -1204,7 +1264,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 7 is documented.",
@@ -1214,7 +1277,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 8 is documented.",
@@ -1224,7 +1290,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 9 is documented.",
@@ -1234,7 +1303,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 10 is documented.",
@@ -1244,7 +1316,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 11 is documented.",
@@ -1254,7 +1329,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 12 is documented.",
@@ -1264,7 +1342,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 13 is documented.",
@@ -1274,7 +1355,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 14 is documented.",
@@ -1284,7 +1368,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 15 is documented.",
@@ -1294,7 +1381,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 16 is documented.",
@@ -1304,7 +1394,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 17 is documented.",
@@ -1314,7 +1407,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 18 is documented.",
@@ -1324,7 +1420,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Claim number 19 is documented.",
@@ -1334,7 +1433,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -1356,7 +1458,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "The Moon is made of cheese.",
@@ -1366,7 +1471,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "The Pacific is the deepest ocean.",
@@ -1376,7 +1484,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": null,
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -1398,7 +1509,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": "Mercury, not Venus, is the closest planet to the Sun.",
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "Mercury is the closest planet to the Sun.",
@@ -1408,7 +1522,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": "Mercury is the innermost planet.",
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }
@@ -10215,7 +10332,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
-     "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "language": "en",
     "modified_at": null
    },
@@ -10230,7 +10347,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
-     "url": "https://lenz.io/c/the-earth-is-round-0f67b4fc",
+    "url": "https://lenz.io/c/the-earth-is-round-0f67b4fc",
     "language": "en",
     "modified_at": null
    }
@@ -10251,7 +10368,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
-     "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "language": "en",
     "modified_at": null
    }
@@ -10272,7 +10389,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
-     "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "language": "en",
     "modified_at": null
    }
@@ -10303,7 +10420,7 @@ export const canonicalOutput: Record<
     "suggested_rewrite": null,
     "created_at": "2026-09-01T10:00:00.000000+00:00",
     "completed_at": "2026-09-01T10:00:00.000000+00:00",
-     "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
+    "url": "https://lenz.io/c/the-earth-is-round-0cce5f94",
     "language": "en",
     "modified_at": null
    }
@@ -12638,7 +12755,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": "No source the reviewers found records the vote or the budget.",
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      },
      {
       "claim": "The Danube flows through Vienna.",
@@ -12648,7 +12768,10 @@ export const canonicalOutput: Record<
       "language": "en",
       "verification_url": null,
       "rationale": "The river runs through the city.",
-      "searched_pages": []
+      "searched_pages": [],
+      "error_code": null,
+      "identified_claims": [],
+      "hint": null
      }
     ]
    }

@@ -212,6 +212,70 @@ describe('Lenz node - Assess (Fast)', () => {
 		for (const row of claims) expect('dissent' in row).toBe(false);
 	});
 
+	it('passes through error_code, identified_claims, and hint on Assess rows', async () => {
+		const responder: Responder = () => ({
+			status: 'ok',
+			claims: [
+				{
+					claim: 'Primary claim.',
+					status: 'completed',
+					verdict: 'True',
+					confidence: 'high',
+					more_claims: ['Second claim.', 42, 'Third claim.'],
+					failure: null,
+				},
+				{
+					claim: 'hello',
+					status: 'failed',
+					verdict: null,
+					confidence: null,
+					more_claims: [],
+					failure: {
+						code: 'no_checkable_claim',
+						detail: 'No claim in the input could be checked against public evidence.',
+						hint: 'Send one factual claim.',
+						failure_class: 'invalid_input',
+						retryable: false,
+					},
+				},
+				{
+					claim: 'vendor down',
+					status: 'failed',
+					verdict: null,
+					confidence: null,
+					more_claims: 'not-a-list',
+					failure: {
+						code: 'future_cause',
+						hint: 123,
+					},
+				},
+			],
+		});
+		const { output } = await runNode({ operation: 'assess', text: 'some text' }, responder);
+		const claims = (output[0].json as IDataObject).claims as IDataObject[];
+		expect(claims[0]).toMatchObject({
+			verdict: 'True',
+			error_code: null,
+			identified_claims: ['Second claim.', 'Third claim.'],
+			hint: null,
+		});
+		expect(claims[1]).toMatchObject({
+			verdict: 'Error',
+			confidence: 'low',
+			error_code: 'no_claim',
+			identified_claims: [],
+			hint: 'Send one factual claim.',
+		});
+		expect(claims[2]).toMatchObject({
+			verdict: 'Error',
+			confidence: 'low',
+			error_code: 'future_cause',
+			identified_claims: [],
+			hint: null,
+		});
+		for (const row of claims) expect('candidate_claims' in row).toBe(false);
+	});
+
 	describe('Suggest Rewrite', () => {
 		const rows = {
 			claims: [
