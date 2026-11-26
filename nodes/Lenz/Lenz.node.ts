@@ -3462,7 +3462,19 @@ export class Lenz implements INodeType {
 					});
 					const batchId = (accepted.batch_id as string) ?? '';
 					const partial = accepted.partial === true;
-					for (const spawned of (accepted.items ?? []) as IDataObject[]) {
+					const spawnedItems = Array.isArray(accepted.items) ? (accepted.items as IDataObject[]) : [];
+					if (!spawnedItems.length) {
+						returnData.push({
+							json: {
+								batch_id: batchId,
+								status: 'empty',
+								partial,
+							},
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					for (const spawned of spawnedItems) {
 						returnData.push({
 							json: {
 								batch_id: batchId,
@@ -3504,7 +3516,19 @@ export class Lenz implements INodeType {
 					);
 					const batchId = (accepted.batch_id as string) ?? '';
 					const partial = accepted.partial === true;
-					for (const spawned of (accepted.items ?? []) as IDataObject[]) {
+					const spawnedItems = Array.isArray(accepted.items) ? (accepted.items as IDataObject[]) : [];
+					if (!spawnedItems.length) {
+						returnData.push({
+							json: {
+								batch_id: batchId,
+								status: 'empty',
+								partial,
+							},
+							pairedItem: { item: itemIndex },
+						});
+						continue;
+					}
+					for (const spawned of spawnedItems) {
 						returnData.push({
 							json: {
 								batch_id: batchId,
