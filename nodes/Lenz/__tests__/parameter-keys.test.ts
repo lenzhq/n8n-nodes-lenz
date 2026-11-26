@@ -52,7 +52,7 @@ describe('Review resource parameter keys (saved in 0.8.0 workflows)', () => {
 	const names = (op: string) => forOperation(op).map((p) => p.name);
 
 	it.each([
-		['reviewDraft', ['draft', 'waitForCompletion', 'reviewOptions', 'visibility', 'language', 'inputSource', 'binaryPropertyName']],
+		['reviewDraft', ['draft', 'waitForCompletion', 'reviewOptions', 'visibility', 'language', 'inputSource', 'binaryPropertyName', 'startPage', 'endPage']],
 		['getReview', ['reviewId', 'issuesOnly']],
 		['listReviews', ['returnAll', 'limit']],
 		['exportReview', ['reviewId', 'binaryPropertyName']],

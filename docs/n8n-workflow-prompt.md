@@ -38,7 +38,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 | `operation` | What it does | Parameters |
 |---|---|---|
 | `assess` | Fast 3-model panel verdict (~15s), one entry per claim found in the text | `text`**\***, `suggestRewrite`, `language` |
-| `extract` | Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm), or a public web page, Google Doc, PDF, YouTube video, image, or audio URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `text`**\*** *(when `inputSource: "text"`)*, `focus`, `locate`, `language` |
+| `extract` | Pull verifiable claims out of text, an uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm), or a public web page, Google Doc, PDF, YouTube video, image, or audio URL. Free, capped at 1000 calls per account per day, shared across your API keys (resets 00:00 UTC). | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `startPage` *(when `inputSource: "binary"`)*, `endPage` *(when `inputSource: "binary"`)*, `text`**\*** *(when `inputSource: "text"`)*, `focus`, `locate`, `language` |
 | `verify` | Multi-model pipeline with sourced citations (~90s). Reserve for high-stakes claims. | `claim`**\***, `waitForCompletion`, `maxWaitSeconds`, `includeAudit`, `sourceUrl`, `webhookUrl`, `visibility`, `depth`, `language`, `additionalFields` |
 
 ### `resource: "review"` — Review
@@ -50,7 +50,7 @@ Generated from `n8n-nodes-lenz`. Do not hand-edit.
 | `getCitationCheck` | Retrieve a citation check by its ID | `citecheckId`**\*** |
 | `listReviews` | Retrieve the reviews stored in your Lenz account | `returnAll`, `limit` |
 | `getReview` | Retrieve a review by its ID | `reviewId`**\***, `issuesOnly` |
-| `reviewDraft` | Review a whole draft, URL, or uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm): find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `draft`**\*** *(when `inputSource: "text"`)*, `waitForCompletion`, `reviewOptions`, `visibility`, `language`, `additionalFields` |
+| `reviewDraft` | Review a whole draft, URL, or uploaded file (.docx, .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm): find its claims, quick-check them, deep-check the doubtful ones and optionally check its citations | `inputSource`, `binaryPropertyName`**\*** *(when `inputSource: "binary"`)*, `startPage` *(when `inputSource: "binary"`)*, `endPage` *(when `inputSource: "binary"`)*, `draft`**\*** *(when `inputSource: "text"`)*, `waitForCompletion`, `reviewOptions`, `visibility`, `language`, `additionalFields` |
 
 ### `resource: "verification"` — Verification
 
