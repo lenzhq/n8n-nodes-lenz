@@ -369,7 +369,7 @@ it later. Add an error branch for it only if the user asked for one.
    the language of the text (of the page when the input is a URL), English for a text too short to tell;
    on `reviewDraft` the language of the draft (one language for the whole review), and on `assess` with several claims one
    language is chosen for the whole request, so name a code for a list in mixed
-   languages. Select, Verify Batch and Check Citations need a code, not `auto`.
+   languages. Verify Batch and Check Citations need a code, not `auto`.
 
 ## Before you answer
 

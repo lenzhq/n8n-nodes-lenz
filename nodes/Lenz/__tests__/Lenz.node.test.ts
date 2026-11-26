@@ -1435,14 +1435,29 @@ describe('Lenz node - Language "auto"', () => {
 		['extract', { operation: 'extract', text: 'Berlin ist die Hauptstadt.' }, extractResponder, '/extract'],
 	];
 
-	it('stays a free-text field whose description names auto and the operations that take it', () => {
-		const field = new Lenz().description.properties.find(
+	it('offers the 39 supported languages as options, with auto only on the operations that accept it', () => {
+		const languageProps = new Lenz().description.properties.filter(
 			(p) => p.name === 'language' && p.displayOptions?.show?.operation !== undefined,
 		);
-		expect(field?.type).toBe('string');
-		expect(field?.default).toBe('');
-		expect(field?.description).toContain('`auto`');
-		expect(field?.description).toContain('Assess, Verify, Extract and Review Draft');
+		expect(languageProps).toHaveLength(2);
+		const [withAuto, withoutAuto] = languageProps;
+		expect(withAuto.type).toBe('options');
+		expect(withAuto.default).toBe('');
+		expect(withAuto.displayOptions?.show?.operation).toEqual(['assess', 'extract', 'verify', 'reviewDraft']);
+		expect(withAuto.description).toContain('`auto`');
+		expect(withAuto.description).toContain('Assess, Verify, Extract and Review Draft');
+		expect(withAuto.description).not.toContain('Select,');
+		const withAutoValues = (withAuto.options as Array<{ value: string }>).map((o) => o.value);
+		expect(withAutoValues.slice(0, 2)).toEqual(['', 'auto']);
+		expect(withAutoValues).toHaveLength(41);
+
+		expect(withoutAuto.type).toBe('options');
+		expect(withoutAuto.default).toBe('');
+		expect(withoutAuto.displayOptions?.show?.operation).toEqual(['verifyBatch', 'checkCitations']);
+		const withoutAutoValues = (withoutAuto.options as Array<{ value: string }>).map((o) => o.value);
+		expect(withoutAutoValues[0]).toBe('');
+		expect(withoutAutoValues).not.toContain('auto');
+		expect(withoutAutoValues).toHaveLength(40);
 	});
 
 	it.each(cases)('sends auto unchanged as body.language on %s', async (_op, params, responder, url) => {

@@ -5,6 +5,7 @@ import type {
 	IHttpRequestOptions,
 	INode,
 	INodeExecutionData,
+	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
 	JsonObject,
@@ -592,6 +593,67 @@ function describeApiError(
 }
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MiB
+
+// The 39 ISO 639-1 response languages accepted by the Lenz API
+// (lenz/languages.py SUPPORTED_LANGUAGES), alphabetised by display name for
+// n8n's options lists.
+const SUPPORTED_LANGUAGE_OPTIONS: INodePropertyOptions[] = [
+	{ name: 'Albanian', value: 'sq' },
+	{ name: 'Arabic', value: 'ar' },
+	{ name: 'Basque', value: 'eu' },
+	{ name: 'Belarusian', value: 'be' },
+	{ name: 'Bulgarian', value: 'bg' },
+	{ name: 'Catalan', value: 'ca' },
+	{ name: 'Croatian', value: 'hr' },
+	{ name: 'Czech', value: 'cs' },
+	{ name: 'Danish', value: 'da' },
+	{ name: 'Dutch', value: 'nl' },
+	{ name: 'English', value: 'en' },
+	{ name: 'Estonian', value: 'et' },
+	{ name: 'Finnish', value: 'fi' },
+	{ name: 'French', value: 'fr' },
+	{ name: 'German', value: 'de' },
+	{ name: 'Greek', value: 'el' },
+	{ name: 'Hindi', value: 'hi' },
+	{ name: 'Hungarian', value: 'hu' },
+	{ name: 'Icelandic', value: 'is' },
+	{ name: 'Irish', value: 'ga' },
+	{ name: 'Italian', value: 'it' },
+	{ name: 'Korean', value: 'ko' },
+	{ name: 'Latvian', value: 'lv' },
+	{ name: 'Lithuanian', value: 'lt' },
+	{ name: 'Macedonian', value: 'mk' },
+	{ name: 'Maltese', value: 'mt' },
+	{ name: 'Norwegian', value: 'no' },
+	{ name: 'Polish', value: 'pl' },
+	{ name: 'Portuguese', value: 'pt' },
+	{ name: 'Romanian', value: 'ro' },
+	{ name: 'Russian', value: 'ru' },
+	{ name: 'Serbian', value: 'sr' },
+	{ name: 'Slovak', value: 'sk' },
+	{ name: 'Slovenian', value: 'sl' },
+	{ name: 'Spanish', value: 'es' },
+	{ name: 'Swedish', value: 'sv' },
+	{ name: 'Turkish', value: 'tr' },
+	{ name: 'Ukrainian', value: 'uk' },
+	{ name: 'Welsh', value: 'cy' },
+];
+
+const LANGUAGE_OPTIONS_WITH_AUTO: INodePropertyOptions[] = [
+	{ name: 'Default (English)', value: '' },
+	{ name: 'Auto (Detect From Input)', value: 'auto' },
+	...SUPPORTED_LANGUAGE_OPTIONS,
+];
+
+const LANGUAGE_OPTIONS_NO_AUTO: INodePropertyOptions[] = [
+	{ name: 'Default (English)', value: '' },
+	...SUPPORTED_LANGUAGE_OPTIONS,
+];
+
+const BATCH_ITEM_LANGUAGE_OPTIONS: INodePropertyOptions[] = [
+	{ name: 'Batch Default', value: '' },
+	...SUPPORTED_LANGUAGE_OPTIONS,
+];
 
 function fnv1aBytes(buf: Buffer): string {
 	let hash = 0x811c9dc5;
@@ -2109,9 +2171,9 @@ export class Lenz implements INodeType {
 							{
 								displayName: 'Language',
 								name: 'language',
-								type: 'string',
+								type: 'options',
+								options: BATCH_ITEM_LANGUAGE_OPTIONS,
 								default: '',
-								placeholder: 'Es',
 								description: 'Optional ISO 639-1 response language code for this claim. Falls back to the batch language.',
 							},
 							{
@@ -2679,13 +2741,26 @@ export class Lenz implements INodeType {
 			{
 				displayName: 'Language',
 				name: 'language',
-				type: 'string',
+				type: 'options',
+				options: LANGUAGE_OPTIONS_WITH_AUTO,
 				default: '',
-				placeholder: 'Es',
-				description: 'Optional ISO 639-1 response language code. Defaults to English. Assess, Verify, Extract and Review Draft also accept `auto`, which answers in the language of the submitted text (for Extract, the language of the text, or of the page when the input is a URL, with English for a text too short to tell; for Review Draft, the language of the draft, one language for the whole review). With several claims in one Assess request, Auto picks one language for the whole request, the one most items agree on and otherwise English; enter a language code to avoid that for a list in mixed languages. Select, Verify Batch and Check Citations need a language code, not `auto`.',
+				description: 'Optional ISO 639-1 response language code. Defaults to English. Assess, Verify, Extract and Review Draft also accept `auto`, which answers in the language of the submitted text (for Extract, the language of the text, or of the page when the input is a URL, with English for a text too short to tell; for Review Draft, the language of the draft, one language for the whole review). With several claims in one Assess request, Auto picks one language for the whole request, the one most items agree on and otherwise English; enter a language code to avoid that for a list in mixed languages. Verify Batch and Check Citations need a language code, not `auto`.',
 				displayOptions: {
 					show: {
-						operation: ['assess', 'extract', 'verify', 'verifyBatch', 'reviewDraft', 'checkCitations'],
+						operation: ['assess', 'extract', 'verify', 'reviewDraft'],
+					},
+				},
+			},
+			{
+				displayName: 'Language',
+				name: 'language',
+				type: 'options',
+				options: LANGUAGE_OPTIONS_NO_AUTO,
+				default: '',
+				description: 'Optional ISO 639-1 response language code. Defaults to English. Verify Batch and Check Citations need a language code, not `auto`.',
+				displayOptions: {
+					show: {
+						operation: ['verifyBatch', 'checkCitations'],
 					},
 				},
 			},
