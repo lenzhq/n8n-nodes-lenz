@@ -3563,29 +3563,45 @@ export class Lenz implements INodeType {
 						responseData = {
 							status: 'ok',
 							not_a_claim: noCheckable,
-							claims: claims.map((c) => ({
-								claim: c.claim ?? '',
-								verdict: c.verdict ?? (rowFailed(c) ? 'Error' : null),
-								confidence: c.confidence ?? (rowFailed(c) ? 'low' : null),
-								passed: isPassingVerdict(c.verdict as string | undefined),
-								language: c.language ?? '',
-								verification_url: c.verification_url ?? null,
-								// A reviewer's note, not a checked source. Null on Error rows, and
-								// absent from a response stored before the API added it, which
-								// Lenz replays for 24h on a reused Idempotency-Key.
-								rationale: typeof c.rationale === 'string' ? c.rationale : null,
-								// The pages the reviewers looked at: titles and links, not
-								// checked sources. `[]` on an Error row and on a response from
-								// an API that does not send the key.
-								searched_pages: readSearchedPages(c.searched_pages),
-								// Only with Suggest Rewrite on, so a node without it keeps the
-								// keys it always had. Null when the row has no rewrite (not False
-								// or Mostly False with high confidence, an Error row, or a
-								// response that predates the field).
-								...(suggestRewrite
-									? { suggested_rewrite: typeof c.suggested_rewrite === 'string' ? c.suggested_rewrite : null }
-									: {}),
-							})),
+							claims: claims.map((c) => {
+								const failure = asObject(c.failure);
+								const failed = rowFailed(c);
+								return {
+									claim: c.claim ?? '',
+									verdict: c.verdict ?? (failed ? 'Error' : null),
+									confidence: c.confidence ?? (failed ? 'low' : null),
+									passed: isPassingVerdict(c.verdict as string | undefined),
+									language: c.language ?? '',
+									verification_url: c.verification_url ?? null,
+									// A reviewer's note, not a checked source. Null on Error rows, and
+									// absent from a response stored before the API added it, which
+									// Lenz replays for 24h on a reused Idempotency-Key.
+									rationale: typeof c.rationale === 'string' ? c.rationale : null,
+									// The pages the reviewers looked at: titles and links, not
+									// checked sources. `[]` on an Error row and on a response from
+									// an API that does not send the key.
+									searched_pages: readSearchedPages(c.searched_pages),
+									// Why an Error row has no verdict (`no_claim`,
+									// `upstream_unavailable`, `internal`), null on a verdict row.
+									error_code:
+										failed && typeof failure.code === 'string'
+											? (nodeNoClaimWord(failure.code) as string)
+											: null,
+									// Other claims found in a compound item that were not assessed.
+									identified_claims: Array.isArray(c.more_claims)
+										? c.more_claims.filter((x): x is string => typeof x === 'string')
+										: [],
+									// One-sentence hint on what to send next when a row failed, null otherwise.
+									hint: typeof failure.hint === 'string' ? failure.hint : null,
+									// Only with Suggest Rewrite on, so a node without it keeps the
+									// keys it always had. Null when the row has no rewrite (not False
+									// or Mostly False with high confidence, an Error row, or a
+									// response that predates the field).
+									...(suggestRewrite
+										? { suggested_rewrite: typeof c.suggested_rewrite === 'string' ? c.suggested_rewrite : null }
+										: {}),
+								};
+							}),
 						};
 					}
 				} else if (operation === 'extract') {
