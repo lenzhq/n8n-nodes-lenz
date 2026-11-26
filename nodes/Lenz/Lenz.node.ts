@@ -2039,7 +2039,31 @@ export class Lenz implements INodeType {
 					show: { operation: ['extract', 'reviewDraft'], inputSource: ['binary'] },
 				},
 				description:
-					'The name of the input binary field holding the file to upload (.docx, .pdf up to 100 pages, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, or .webm, up to 10 MB)',
+					'The name of the input binary field holding the file to upload (.docx, .pdf up to 300 pages, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, or .webm, up to 10 MB)',
+			},
+			{
+				displayName: 'Start Page (PDF)',
+				name: 'startPage',
+				type: 'number',
+				typeOptions: { minValue: 1, maxValue: 300 },
+				default: '',
+				displayOptions: {
+					show: { operation: ['extract', 'reviewDraft'], inputSource: ['binary'] },
+				},
+				description:
+					'Optional first PDF page to read (1-indexed, inclusive, 1-300; PDF files only). Leave empty to start at page 1.',
+			},
+			{
+				displayName: 'End Page (PDF)',
+				name: 'endPage',
+				type: 'number',
+				typeOptions: { minValue: 1, maxValue: 300 },
+				default: '',
+				displayOptions: {
+					show: { operation: ['extract', 'reviewDraft'], inputSource: ['binary'] },
+				},
+				description:
+					'Optional last PDF page to read (1-indexed, inclusive, 1-300; PDF files only). Leave empty to read through the last page.',
 			},
 			{
 				displayName: 'Text',
@@ -2889,6 +2913,49 @@ export class Lenz implements INodeType {
 			return { filename, contentType, content: buffer };
 		};
 
+		const readPdfPageRange = (
+			itemIndex: number,
+			file: { filename: string; contentType: string },
+		): { start_page?: string; end_page?: string } => {
+			const parsePage = (paramName: 'startPage' | 'endPage', label: string): number | undefined => {
+				const raw = this.getNodeParameter(paramName, itemIndex, '');
+				if (raw === undefined || raw === null || String(raw).trim() === '') {
+					return undefined;
+				}
+				const n = Number(raw);
+				if (typeof raw === 'boolean' || !Number.isInteger(n) || n < 1 || n > 300) {
+					throw new NodeOperationError(
+						this.getNode(),
+						`${label} must be a whole number from 1 to 300`,
+						{ itemIndex },
+					);
+				}
+				return n;
+			};
+			const startPage = parsePage('startPage', 'Start Page (PDF)');
+			const endPage = parsePage('endPage', 'End Page (PDF)');
+			if (startPage !== undefined && endPage !== undefined && startPage > endPage) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'Start Page (PDF) must be less than or equal to End Page (PDF)',
+					{ itemIndex },
+				);
+			}
+			const isPdf =
+				file.contentType === 'application/pdf' || file.filename.toLowerCase().endsWith('.pdf');
+			if ((startPage !== undefined || endPage !== undefined) && !isPdf) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'Start Page (PDF) and End Page (PDF) are only supported for PDF (.pdf) files',
+					{ itemIndex },
+				);
+			}
+			const out: { start_page?: string; end_page?: string } = {};
+			if (startPage !== undefined) out.start_page = String(startPage);
+			if (endPage !== undefined) out.end_page = String(endPage);
+			return out;
+		};
+
 		// Calls the Lenz REST API with the credential's Bearer auth attached by
 		// n8n. No third-party SDK — this is the required shape for a verified
 		// community node (zero runtime dependencies).
@@ -3629,10 +3696,13 @@ export class Lenz implements INodeType {
 
 					if (inputSource === 'binary') {
 						const file = await readBinaryUpload(itemIndex);
+						const pageRange = readPdfPageRange(itemIndex, file);
 						const fields: Record<string, string> = {};
 						if (language) fields.language = language;
 						if (focus) fields.focus = focus;
 						if (locate) fields.locate = 'true';
+						if (pageRange.start_page) fields.start_page = pageRange.start_page;
+						if (pageRange.end_page) fields.end_page = pageRange.end_page;
 
 						responseData = await lenzRequest('POST', '/extract/file', undefined, {
 							idempotent: { operation, itemIndex },
@@ -3808,12 +3878,15 @@ export class Lenz implements INodeType {
 					let accepted: IDataObject;
 					if (inputSource === 'binary') {
 						const file = await readBinaryUpload(itemIndex);
+						const pageRange = readPdfPageRange(itemIndex, file);
 						const fields: Record<string, string> = {};
 						if (language) fields.language = language;
 						if (visibility) fields.visibility = visibility;
 						if (webhookUrl) fields.webhook_url = webhookUrl;
 						if (policy) fields.escalate = JSON.stringify(policy);
 						if (suppliedSources.length > 0) fields.supplied_sources = JSON.stringify(suppliedSources);
+						if (pageRange.start_page) fields.start_page = pageRange.start_page;
+						if (pageRange.end_page) fields.end_page = pageRange.end_page;
 
 						accepted = await submitJob(
 							'/review/file',

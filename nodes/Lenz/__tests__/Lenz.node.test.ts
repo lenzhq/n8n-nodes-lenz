@@ -5018,5 +5018,89 @@ describe('Lenz node - the collapsed failure codes and a quick No Public Record r
 				),
 			).rejects.toThrow('Lenz returned an empty document export.');
 		});
+
+		it('extract & reviewDraft: sends start_page and end_page on PDF binary uploads and rejects non-PDF or invalid ranges', async () => {
+			const dummyPdf = Buffer.from('%PDF-1.4 fake pdf');
+			const dummyDocx = Buffer.from('PK\x03\x04fake docx');
+			let extractSubmit: IHttpRequestOptions | undefined;
+			let reviewSubmit: IHttpRequestOptions | undefined;
+
+			await runNode(
+				{
+					operation: 'extract',
+					inputSource: 'binary',
+					binaryPropertyName: 'data',
+					startPage: 2,
+					endPage: 6,
+				},
+				(options) => {
+					extractSubmit = options;
+					return { status: 'ready', claims: [], identified_claims: [], language: 'en' };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyPdf, fileName: 'paper.pdf', mimeType: 'application/pdf' } }],
+			);
+			const extractBody = (extractSubmit!.body as Buffer).toString('utf8');
+			expect(extractBody).toContain('name="start_page"\r\n\r\n2');
+			expect(extractBody).toContain('name="end_page"\r\n\r\n6');
+
+			await runNode(
+				{
+					operation: 'reviewDraft',
+					inputSource: 'binary',
+					binaryPropertyName: 'data',
+					waitForCompletion: false,
+					startPage: 3,
+					endPage: 8,
+				},
+				(options) => {
+					reviewSubmit = options;
+					return { review_id: 'rev_pdf_range', status: 'queued' };
+				},
+				false,
+				1,
+				{ typeVersion: 1.3 },
+				[{ data: { buffer: dummyPdf, fileName: 'paper.pdf', mimeType: 'application/pdf' } }],
+			);
+			const reviewBody = (reviewSubmit!.body as Buffer).toString('utf8');
+			expect(reviewBody).toContain('name="start_page"\r\n\r\n3');
+			expect(reviewBody).toContain('name="end_page"\r\n\r\n8');
+
+			await expect(
+				runNode(
+					{
+						operation: 'reviewDraft',
+						inputSource: 'binary',
+						binaryPropertyName: 'data',
+						startPage: 1,
+						endPage: 3,
+					},
+					noCall,
+					false,
+					1,
+					{ typeVersion: 1.3 },
+					[{ data: { buffer: dummyDocx, fileName: 'report.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } }],
+				),
+			).rejects.toThrow('only supported for PDF (.pdf) files');
+
+			await expect(
+				runNode(
+					{
+						operation: 'extract',
+						inputSource: 'binary',
+						binaryPropertyName: 'data',
+						startPage: 10,
+						endPage: 3,
+					},
+					noCall,
+					false,
+					1,
+					{ typeVersion: 1.3 },
+					[{ data: { buffer: dummyPdf, fileName: 'paper.pdf', mimeType: 'application/pdf' } }],
+				),
+			).rejects.toThrow('Start Page (PDF) must be less than or equal to End Page (PDF)');
+		});
 	});
 });
